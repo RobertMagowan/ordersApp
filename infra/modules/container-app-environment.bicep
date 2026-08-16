@@ -18,6 +18,7 @@ module managedEnvironment 'br/avm:res/app/managed-environment:0.8.1' = {
     logsDestination: 'log-analytics'
     name: name
     tags: tags
+    zoneRedundant: false
   }
 }
 
