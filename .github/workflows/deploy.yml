@@ -10,18 +10,45 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: deploy-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
+  validate-promotion-ref:
+    name: Validate promotion ref
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.promotion-ref.outputs.environment }}
+    steps:
+      - name: Reject a non-promotion branch
+        id: promotion-ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF_NAME" in
+            development|test)
+              echo "environment=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+              ;;
+            master)
+              echo "environment=production" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Manual deployments are allowed only from development, test, or master (got $GITHUB_REF_NAME)." >&2
+              exit 1
+              ;;
+          esac
+
   deploy:
     name: Deploy ${{ github.ref_name }}
+    needs: validate-promotion-ref
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
+      name: ${{ needs.validate-promotion-ref.outputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
     env:
       AZURE_DEPLOYMENT_ENABLED: ${{ vars.AZURE_DEPLOYMENT_ENABLED }}
       AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
@@ -33,7 +60,18 @@ jobs:
       DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Publish deferred deployment summary
+        if: env.AZURE_DEPLOYMENT_ENABLED != 'true'
+        run: |
+          {
+            echo "## CloudOrders deployment"
+            echo
+            echo "- Release: \`$GITHUB_SHA\`"
+            echo "- Immutable API image: not published (Azure deployment is disabled)"
+            echo "- API endpoint: not deployed (Azure deployment is disabled)"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Skip until Azure environment is provisioned
         if: env.AZURE_DEPLOYMENT_ENABLED != 'true'
@@ -57,7 +95,7 @@ jobs:
 
       - name: Sign in to Azure with OIDC
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
-        uses: azure/login@v2
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -119,10 +157,18 @@ jobs:
         run: |
           LOGIN_SERVER=$(az acr show --name "$AZURE_ACR_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query loginServer --output tsv)
           az acr login --name "$AZURE_ACR_NAME"
-          IMAGE="$LOGIN_SERVER/cloudorders-api:${GITHUB_SHA}"
-          docker build --file src/CloudOrders.Api/Dockerfile --tag "$IMAGE" .
-          docker push "$IMAGE"
+          IMAGE_TAG="$LOGIN_SERVER/cloudorders-api:${GITHUB_SHA}"
+          docker build --file src/CloudOrders.Api/Dockerfile --tag "$IMAGE_TAG" .
+          docker push "$IMAGE_TAG"
+          DIGEST=$(az acr repository show --name "$AZURE_ACR_NAME" --image "cloudorders-api:${GITHUB_SHA}" --query digest --output tsv)
+          if [[ -z "$DIGEST" ]]; then
+            echo "Could not resolve the pushed image digest." >&2
+            exit 1
+          fi
+          IMAGE="$LOGIN_SERVER/cloudorders-api@$DIGEST"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
       - name: Grant managed identity ACR pull access
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
@@ -172,17 +218,40 @@ jobs:
 
       - name: Smoke test the deployed API
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
+        id: endpoint
         run: |
           FQDN=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.fqdn --output tsv)
-          echo "API endpoint: https://$FQDN"
+          ENDPOINT="https://$FQDN"
+          HEALTHY=false
+          echo "API endpoint: $ENDPOINT"
           for attempt in {1..30}; do
-            STATUS=$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' "https://$FQDN/health/live" || true)
+            STATUS=$(curl --fail --silent --show-error --output /dev/null --write-out '%{http_code}' "$ENDPOINT/health/live" || true)
             if [[ "$STATUS" == "200" ]]; then
               echo "Health check passed on attempt $attempt."
-              exit 0
+              echo "url=$ENDPOINT" >> "$GITHUB_OUTPUT"
+              HEALTHY=true
+              break
             fi
             echo "Health check returned HTTP $STATUS on attempt $attempt; waiting for revision activation."
             sleep 10
           done
-          echo "Health check did not return HTTP 200." >&2
-          exit 1
+          if [[ "$HEALTHY" != true ]]; then
+            echo "Health check did not return HTTP 200." >&2
+            exit 1
+          fi
+
+      - name: Publish deployment summary
+        if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
+        env:
+          ENDPOINT: ${{ steps.endpoint.outputs.url }}
+          IMAGE: ${{ steps.image.outputs.image }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          {
+            echo "## CloudOrders deployment"
+            echo
+            echo "- Release: \`$GITHUB_SHA\`"
+            echo "- Immutable API image: \`$IMAGE\`"
+            echo "- Published image tag: \`$IMAGE_TAG\`"
+            echo "- API endpoint: $ENDPOINT"
+          } >> "$GITHUB_STEP_SUMMARY"
