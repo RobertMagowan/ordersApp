@@ -10,6 +10,43 @@ Repository administrators may explicitly bypass the review requirement for their
 
 The Azure workflow uses OIDC and remains safely disabled until each environment has `AZURE_DEPLOYMENT_ENABLED=true`, the federated identity secrets (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`), and these variables: `AZURE_RESOURCE_GROUP`, `AZURE_LOCATION`, `AZURE_APP_NAME`, `AZURE_ACR_NAME`, `AZURE_MANAGED_ENVIRONMENT_NAME`, and `AZURE_LOG_ANALYTICS_NAME`. It previews changes with `what-if`, deploys the pinned AVM composition in `infra/main.bicep`, builds the API image from `src/CloudOrders.Api/Dockerfile`, pushes it to ACR, and smoke-tests `/health/live`.
 
+Deployment summaries retain the Git release SHA, unique Bicep deployment name, immutable image digest reference, Container App revision, previous image/revision rollback reference, and API endpoint without exposing secrets. Rollback state comes from the latest ready revision's own template rather than from the app's mutable candidate template, and summary steps run even when inspection, preparation, deployment, or smoke testing fails. An existing Container App remains on its current release while the replacement image is built and previewed; the public bootstrap image is used only for a first deployment and is tagged `release=bootstrap`, never as the candidate Git release. Manual deployment is rejected unless started from `development`, `test`, or `master`.
+
+The `development` and `test` GitHub environments each require the repository owner as a required deployment reviewer, permit self-review for this single-developer repository, and disallow administrator bypass. This is an enforceable deployment approval and does not add an independent PR approval requirement. Every job below references the protected environment and waits for its own approval before it can access environment secrets or start.
+
+The workflow uses three ordered jobs as explicit reviewed boundaries:
+
+1. Approve `preview_foundation` so it can authenticate with OIDC. It fails closed on lookup errors other than Azure's explicit `ResourceNotFound`, captures the latest ready rollback revision/image, and runs the mutation-free foundation what-if.
+2. Review that completed job and approve `prepare_release`. It provisions the bootstrap foundation only when required, publishes the digest-backed image, and runs the exact immutable-release what-if without changing the candidate Container App release.
+3. Review the digest what-if and approve `deploy_release`. It deploys the reviewed digest and smoke-tests it.
+
+### Manual test-release inspection and gate
+
+Inspect names and protection state without printing secret values:
+
+```powershell
+gh variable list --env test
+gh secret list --env test
+$repository = gh repo view --json nameWithOwner --jq .nameWithOwner
+gh api "repos/$repository/environments/test/deployment-branch-policies"
+az group show --name ordersapp-test --query '{name:name,location:location,state:properties.provisioningState}'
+az resource list --resource-group ordersapp-test --query '[].{name:name,type:type,location:location}' --output table
+```
+
+The required release gate is ordered and cannot be replaced by a direct protected-branch push or a feature-branch workflow dispatch:
+
+1. Open and review `feature/*` → `development`; required CI, promotion-policy, and conversation-resolution checks must pass.
+2. Merge the PR, approve and review the three deployment jobs in order, and retain the successful `development` deployment summary. A separate smoke-test agent verifies the reported HTTPS endpoint and immutable digest.
+3. Open and review `development` → `test`; the same required checks must pass.
+4. Merge the PR, then approve and review the three deployment jobs in order. The `test` environment branch restriction admits only `test`, and OIDC deploys into `ordersapp-test` without a long-lived Azure credential.
+5. Retain the test deployment summary and run the QA-only matrix before any `test` → `master` promotion.
+
+For a first test deployment, review the foundation job's what-if (Log Analytics, ACR, Container Apps environment, and Container App), then review the preparation job's second what-if against the resolved digest before the downstream deployment job proceeds. Do not treat a local what-if or manually provisioned resource as a substitute for the protected promotion gate.
+
+## Version-1 contract pack
+
+The repository-owned [frontend design contract](docs/contracts/frontend-design.md), [version-1 contracts](docs/contracts/v1-contracts.md), and [traceability map](docs/contracts/traceability.md) are the authoritative implementation contracts. The `test` environment is the staging-equivalent environment used throughout this repository.
+
 ## Current status
 
 Sprint 1 provides a manually runnable local API vertical slice with in-memory order persistence and a deployable Azure Container Apps MVP foundation using pinned AVM Bicep modules. SQL durability is scheduled for a later sprint.

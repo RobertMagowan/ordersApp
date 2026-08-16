@@ -30,7 +30,7 @@ az bicep build-params --file infra/environments/test.bicepparam
 az bicep build-params --file infra/environments/production.bicepparam
 ```
 
-Local infrastructure and deployment commands are added per sprint. Never run migrations from application startup; use the documented deployment migration command. Merges to `development`, `test`, and `master` invoke the matching protected GitHub environment workflow. The MVP workflow previews and provisions Azure Container Apps, Azure Container Registry, and Log Analytics from `infra/main.bicep`, then publishes an immutable API image. AVM module versions are pinned; the registry-scoped `AcrPull` assignment remains a documented native Bicep exception because the Container App AVM role assignments are app-scoped.
+Local infrastructure and deployment commands are added per sprint. Never run migrations from application startup; use the documented deployment migration command. Merges to `development`, `test`, and `master` invoke the matching protected GitHub environment workflow. `development` and `test` require the repository owner as deployment reviewer with self-review allowed and administrator bypass disabled; this gates each what-if transition without adding an independent PR approval. The MVP workflow previews and provisions Azure Container Apps, Azure Container Registry, and Log Analytics from `infra/main.bicep`, then publishes an immutable API image. AVM module versions are pinned; the registry-scoped `AcrPull` assignment remains a documented native Bicep exception because the Container App AVM role assignments are app-scoped.
 
 ## Coding Style and Naming
 
@@ -38,7 +38,7 @@ Target `net10.0` with stable C# 14, nullable reference types, implicit usings, a
 
 ## Testing Guidelines
 
-Write the failing test before production code. Use xUnit for .NET tests, bUnit for components, Playwright for browser journeys/accessibility, and NBomber only for staging load tests. Test names describe behavior in PascalCase. Every sprint must leave a manual test path, automated verification, and a deployable artifact or documented infrastructure gate.
+Write the failing test before production code. Use xUnit for .NET tests, bUnit for components, Playwright for browser journeys/accessibility, and NBomber only for staging load tests. Test names describe behavior in PascalCase. Every sprint must leave a manual test path, automated verification, and a deployable artifact or documented infrastructure gate. Before independent review, a separate high-capability agent performs three working days of thorough developer-style local verification using technology-appropriate tests and direct state inspection (for example SQL data/migration history, outbox/idempotency rows, configuration, workflow artifacts, or authorization mappings), with sanitized evidence. After review and initial deployment to Azure `development`, a dedicated smoke-test agent validates the live release. Once the reviewed release is merged to `test`, a QA-only agent tests the feature to destruction in Azure `test`: successful, boundary, invalid, authorization, failure/recovery, state-integrity, concurrency, and regression paths appropriate to the technology. Store release IDs, commands, outcomes, defects, and re-test evidence in `docs/evidence/sprint-<number>/`; fix defects on a fresh `feature/*` branch and repeat the affected gates before promotion.
 
 ## Commits and Pull Requests
 

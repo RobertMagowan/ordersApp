@@ -6,6 +6,9 @@ param location string = resourceGroup().location
 @description('Stable environment label used in resource tags and names.')
 param environmentName string = 'development'
 
+@description('Immutable source release identifier applied to the Container App.')
+param releaseId string = 'bootstrap'
+
 @description('Globally unique Container App name.')
 param appName string
 
@@ -46,6 +49,10 @@ param tags object = {
   managedBy: 'Bicep'
 }
 
+var containerAppTags = union(tags, {
+  release: releaseId
+})
+
 module observability 'modules/observability.bicep' = {
   name: 'observability'
   params: {
@@ -85,7 +92,7 @@ module containerApp 'modules/container-app.bicep' = {
     minReplicas: minReplicas
     name: appName
     registryLoginServer: registryModule.outputs.loginServer
-    tags: tags
+    tags: containerAppTags
     targetPort: targetPort
     useAcr: useAcr
   }
@@ -110,3 +117,4 @@ output containerAppName string = containerApp.outputs.name
 output containerAppFqdn string = containerApp.outputs.fqdn
 output registryName string = registryModule.outputs.name
 output registryLoginServer string = registryModule.outputs.loginServer
+output releaseId string = releaseId

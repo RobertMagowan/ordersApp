@@ -22,11 +22,13 @@
 - Do not run `Database.Migrate()` from application startup; migrations/security bootstrap run as deployment steps.
 - Never commit secrets, `.env`, `local.settings.json`, generated ARM JSON, auth storage state, or real customer data.
 - Every sprint is a sequence of focused commits; each meaningful red/green/refactor or packaging boundary is committed separately. The sprint ends with a manual test script, a machine-verifiable test command, and a deployable artifact or an explicit infrastructure gate.
+- For each remaining sprint, the developer first completes implementation and focused automated tests; a separate high-capability verification agent then spends three working days testing the deployed `development` release; a separate QA-only agent spends one to two working days testing the promoted Azure `test` release. The test approach is chosen for the technology and risk: domain/API uses unit, integration, contract, concurrency, authorization-negative, and deployed HTTP tests; data/messaging uses Testcontainers/emulators, recovery drills, and Azure service flows; IaC/CI uses lint, build, parameter validation, what-if, RBAC negatives, workflow evidence, and rollback; frontend uses bUnit, accessibility, Playwright, responsive/cross-browser, and user journeys.
+- Retain evidence under `docs/evidence/sprint-<number>/`: run/deployment URLs, immutable artifact or release ID, commands/results, development-verification outcome, QA outcome, defects, and re-test record. QA agents do not edit implementation. Each defect is fixed on a fresh `feature/*` branch, reviewed, and promoted through the same development and test gates; unresolved defects block `test` to `master` promotion.
 - Prompt the user before using values not discoverable locally: GitHub owner/visibility, Azure tenant/subscription/region, production domain, Entra app registrations, alert recipients, or budget owners.
 
 ## Delivery Status and Effort Model
 
-Estimates assume one focused developer and include implementation, automated tests, manual verification, review corrections, Azure development deployment, and evidence capture. They exclude delays waiting for external access, approvals, DNS, quota, or Azure incidents.
+Estimates assume one focused developer. Remaining-sprint estimates explicitly include implementation, focused automated tests, Azure development deployment, three independent development-verification days, and one to two QA days in Azure `test`. Defect remediation, waiting for external access/approvals/DNS/quota, and Azure incidents are excluded and re-estimated when discovered.
 
 | Sprint | Delivery | Status | Estimated effort |
 |---|---|---|---:|
@@ -34,20 +36,22 @@ Estimates assume one focused developer and include implementation, automated tes
 | 0.5 | DevOps promotion foundation | Baseline delivered | 2–3 days |
 | 0.6 | MVP Azure container deployment and AVM hardening | Baseline delivered | 3–5 days |
 | 1 | Domain, contracts, and API vertical slice | Baseline delivered to development | 4–6 days |
-| 2 | SQL schema, API authorization, and durable HTTP idempotency | Next | 8–12 days |
-| 3 | Outbox, inbox, Service Bus, and development Functions | Planned | 7–10 days |
-| 4 | Reproducible local platform | Planned | 3–5 days |
-| 5 | Azure security and network foundation | Planned | 8–12 days |
-| 6 | Production-grade Azure Functions hosting | Planned | 4–6 days |
-| 7 | Web delivery and authentication foundation | Planned | 4–6 days |
-| 8 | Frontend shell and design system | Planned | 4–6 days |
-| 9 | Order workflows | Planned | 5–8 days |
-| 10 | Frontend quality and release integration | Planned | 4–6 days |
-| 11 | TestSupport and observability evidence | Planned | 7–10 days |
-| 12 | CI/CD, promotion, and operations | Planned | 7–10 days |
-| 13 | Production readiness | Planned | 5–8 days |
+| 2 | Workflow, contract, and test-environment assurance | Next | 6–8 days |
+| 3 | SQL schema and durable HTTP idempotency | Planned | 9–12 days |
+| 4 | API authorization and customer history | Planned | 8–11 days |
+| 5 | Outbox, inbox, Service Bus, and development Functions | Planned | 11–15 days |
+| 6 | Reproducible local platform | Planned | 7–10 days |
+| 7 | Azure security and network foundation | Planned | 12–17 days |
+| 8 | Production-grade Azure Functions hosting | Planned | 8–11 days |
+| 9 | Web delivery and authentication foundation | Planned | 7–10 days |
+| 10 | Frontend shell and design system | Planned | 8–11 days |
+| 11 | Order workflows | Planned | 9–13 days |
+| 12 | Frontend quality and release integration | Planned | 8–11 days |
+| 13 | TestSupport and observability evidence | Planned | 11–15 days |
+| 14 | CI/CD, promotion, and operations | Planned | 11–15 days |
+| 15 | Production readiness | Planned | 9–13 days |
 
-The revised roadmap contains 16 sprint phases: three foundation phases plus Sprints 1–13. Total estimated effort is 76–115 working days; after the delivered work through Sprint 1, approximately 66–99 working days remain. Historical checklists remain unchecked as acceptance-audit items; Sprint 2 starts by evidencing each delivered item or carrying a concrete correction into its first commits.
+The revised roadmap contains 18 sprint phases: three foundation phases plus Sprints 1–15. Total estimated effort is 134–188 working days; after the delivered work through Sprint 1, approximately 124–172 working days remain before defect remediation. Historical checklists remain unchecked as acceptance-audit items; Sprint 2 starts by evidencing each delivered item or carrying a concrete correction into its first commits.
 
 ## Repository Map and File Ownership
 
@@ -168,42 +172,75 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Natural commit checkpoints:** failing domain tests; green domain/contracts; application handler tests and implementation; API integration tests and host wiring; publish/manual evidence.
 
-## Sprint 2 — SQL Schema, API Authorization, and Durable HTTP Idempotency
+## Sprint 2 — Workflow, Contract, and Test-Environment Assurance
 
-**Estimated effort:** 8–12 working days.
+**Estimated effort:** 2–3 implementation days + 3 development-verification days + 1–2 QA days = 6–8 working days.
 
-**Outcome:** Repeated or concurrent POSTs cannot create duplicate orders, and the API is deployable against SQL Server.
+**Outcome:** The protected workflow is secure and reviewable, the frontend/API contract pack is repository-owned, and the first `test` Azure environment can receive the same immutable release promoted from `development`.
 
-**Decision gate:** Confirm ownership of the development `CloudOrders-Api-development` Entra registration, delegated scopes, claims/customer-scope source, and non-production API test identity before enabling Azure authorization.
+**Decision gate:** Reuse the approved tenant, subscription, `ukwest` region, and environment resource-group pattern. Confirm the `test` resource-group naming, budget owner, and test deployment identity before provisioning billable Azure resources.
 
-**Files:** EF configurations and `Orders`, `OutboxMessages`, `IdempotencyRecords` models; migrations; API bearer authorization policies; `Idempotency-Key` middleware/handler; customer-history query/cursor contract; SQL integration tests using Testcontainers; initial SQL service in `local/compose.yml`; API client examples; focused Azure SQL/identity Bicep modules; deployment migration step.
+**Tasks:**
 
-**Interfaces:** `IIdempotencyStore.TryGetAsync(subjectId, key)`; `IdempotencyRecord`; `POST` requires a UUID `Idempotency-Key`; responses are 201 first-use, 200 exact replay with `Idempotency-Replayed: true`, 409 payload conflict; `GET /api/v1/customers/{customerReference}/orders` uses stable newest-first cursor pagination.
+- [ ] Audit delivered Sprints 0–1 against Git, CI, and Azure evidence; carry any gap as a named correction.
+- [ ] Upgrade every workflow action to a Node 24-compatible release, pin it to a verified full-length commit SHA with a readable version comment, reject manual dispatch from invalid promotion branches, remove `curl --insecure`, write endpoint/release/immutable artifact details to `$GITHUB_STEP_SUMMARY`, and keep the public bootstrap image as a one-time creation path.
+- [ ] Add `docs/contracts/` containing versioned copies of handoff section 19 and sections 25–35, plus a traceability map from each requirement to its project, tests, and sprint gate.
+- [ ] Provision the smallest protected Azure `test` resource group/environment needed to deploy the existing immutable API artifact; restrict GitHub environments and OIDC identities to the promotion branch, and validate Bicep parameters and what-if before deployment.
+- [ ] Add deterministic workflow evidence and rollback instructions proving a `development` release can be promoted through a reviewed `development` → `test` PR without rebuilding.
+
+**Development verification (3 days):** A separate verifier performs CI/action-pinning inspection, branch-policy negative tests, Bicep build/parameter/what-if checks, deployment and rollback rehearsals, contract-traceability review, and deployed `development` smoke tests; retain results under `docs/evidence/sprint-2/`.
+
+**QA in test (1–2 days):** A QA-only agent validates the approved `development` → `test` promotion, deployed `/health/live` smoke, immutable-release identity, evidence retention, and a defect-return rehearsal in Azure `test`.
+
+**Deploy gate:** The reviewed same artifact deploys to both non-production environments without insecure TLS bypass or long-lived Azure secrets. Commit focused workflow, contract-pack, test-environment, and evidence changes separately.
+
+## Sprint 3 — SQL Schema and Durable HTTP Idempotency
+
+**Estimated effort:** 5–7 implementation days + 3 development-verification days + 1–2 QA days = 9–12 working days.
+
+**Outcome:** Repeated or concurrent POSTs cannot create duplicate orders, and the API is deployable against SQL Server before Entra authorization is enabled.
+
+**Files:** EF configurations and `Orders`, `OutboxMessages`, `IdempotencyRecords` models; migrations; `Idempotency-Key` middleware/handler; SQL integration tests using Testcontainers; initial SQL service in `local/compose.yml`; focused Azure SQL Bicep modules; deployment migration step.
+
+**Interfaces:** `IIdempotencyStore.TryGetAsync(subjectId, key)`; `IdempotencyRecord`; `POST` requires a UUID `Idempotency-Key`; responses are 201 first-use, 200 exact replay with `Idempotency-Replayed: true`, 409 payload conflict.
 
 **Tasks:**
 
 - [ ] Write failing SQL tests for first request, exact replay, same-key/different-payload conflict, and two concurrent requests.
-- [ ] Audit the delivered Sprints 0–1 checklists against git, CI, and Azure evidence; mark evidenced items complete and fix or explicitly carry every gap before accepting new Sprint 2 behavior.
-- [ ] Close the live deployment-workflow findings before adding data: reject manual dispatch from branches other than `development`, `test`, or `master`; remove `curl --insecure`; write the endpoint/release to `$GITHUB_STEP_SUMMARY`; make the public bootstrap image a one-time creation path so routine releases never replace a healthy API with the placeholder image; and replace every current non-local action tag with a verified full-length commit SHA plus a readable version comment.
-- [ ] Add a repository-owned version-1 contract pack under `docs/contracts/` that restates the handoff's frontend authority in section 19 and version-1 contracts in sections 25–35, then maps each requirement to the implementing projects, tests, and sprint gates, removing execution dependence on the machine-local source before Sprint 8 begins.
-- [ ] Add the schema/indexes and one atomic transaction covering Order + IdempotencyRecord + a complete publishable OutboxMessage: stable `EventId`/`Id`, `AggregateId`, `MessageType`, `MessageVersion`, serialized `OrderCreatedIntegrationEventV1` payload, `OccurredAt`/`CreatedAt`, `TraceParent`/`TraceState`, and initial pending state (`ProcessedAt = null`, `AttemptCount = 0`).
-- [ ] Add API Entra bearer validation, `CloudOrders.Orders.Read`/`CloudOrders.Orders.Write` policies, authorized customer-scope derivation, and cross-customer `404` behavior before using the authenticated subject in the idempotency key.
-- [ ] Implement SHA-256 over the UTF-8 bytes of `v1|subjectId|customerReference|productSku|quantity`: serialize the required tenant-scoped Entra `oid` as a lowercase `D` GUID; trim, invariant-uppercase, and ASCII-validate both references (excluding `|`); serialize quantity as invariant unsigned decimal; reject missing/malformed identities and delimiter or Unicode reference inputs. Recheck authorization on replay and test whitespace/casing normalization, delimiters, Unicode, and payload conflicts.
-- [ ] Implement authorized customer-history queries with stable `(CreatedAtUtc, Id)` ordering, opaque cursor state, page size 1–100, and tests for paging, bounds, and cross-customer non-disclosure.
-- [ ] Add migration commands that target an explicit connection string and never run from web startup.
-- [ ] Add request body size, rate-limit, timeout, and unknown-member validation tests.
-- [ ] Add the initial pinned SQL service and health check to `local/compose.yml` so the documented local migration/idempotency flow is executable before Sprint 4 hardens the complete stack.
-- [ ] Provision the development Azure SQL server/database, assign the API managed identity the minimum database role, and run migrations through a deployment identity before updating the API revision. Until the Sprint 5 Azure-native deployment Job is available, any bootstrap firewall rule must have an owner/expiry and be removed in Sprint 5.
+- [ ] Add schema/indexes and one atomic transaction covering Order + IdempotencyRecord + a complete publishable OutboxMessage: stable `EventId`/`Id`, `AggregateId`, message metadata/payload, occurrence timestamps, W3C trace context, and initial pending state.
+- [ ] Implement a durable key plus canonical request hash using a temporary non-production subject abstraction; move Entra `oid` binding and customer authorization to Sprint 4.
+- [ ] Add migrations that target an explicit connection string, a pinned local SQL health check, request limits/timeout/unknown-member validation tests, and an Azure SQL deployment migration step that never runs from application startup.
+- [ ] Provision development Azure SQL and minimum API database access; any temporary bootstrap firewall exception has a named owner/expiry and moves to the Sprint 7 removal register.
 
-**Manual test:** Run replay/conflict/concurrency against local SQL, then exercise Azure positive authorization, cross-customer `404`, two cursor pages, first-use, exact replay, conflict, concurrent submission, and replay after API restart. Verify exactly one Order, one Outbox row, and one IdempotencyRecord for the idempotent operation.
+**Development verification (3 days):** A separate verifier runs Testcontainers concurrency/restart/replay tests, migration upgrade/rollback rehearsal, HTTP negative tests, and deployed Azure SQL first-use/replay/conflict smoke tests.
 
-**Deploy gate:** The protected workflow validates Bicep, applies the reviewed migration, deploys the immutable API image to development, and passes live/readiness, authorization-negative, customer-history pagination, persistence, and idempotency smoke tests in Azure. Commit `feat: add SQL persistence and POST idempotency`.
+**QA in test (1–2 days):** A QA-only agent promotes the immutable release to Azure `test`, validates migration evidence and first-use/exact-replay/conflict behavior, and records all outcomes under `docs/evidence/sprint-3/`.
 
-**Natural commit checkpoints:** failing schema/idempotency tests; migration and persistence implementation; replay/conflict behavior; API verification.
+**Deploy gate:** The protected workflow validates Bicep, applies the reviewed migration, deploys the immutable API image, and proves exactly one Order, Outbox row, and IdempotencyRecord for concurrent idempotent submissions.
 
-## Sprint 3 — Outbox Publisher and Inbox Processor
+## Sprint 4 — API Authorization and Customer History
 
-**Estimated effort:** 7–10 working days.
+**Estimated effort:** 4–6 implementation days + 3 development-verification days + 1–2 QA days = 8–11 working days.
+
+**Outcome:** The API uses Entra bearer authorization and customer-scoped history without cross-customer disclosure.
+
+**Decision gate:** Confirm ownership of `CloudOrders-Api-development`, delegated scopes, claims/customer-scope source, and non-production API test identity before enabling authorization.
+
+**Tasks:**
+
+- [ ] Add Entra bearer validation, `CloudOrders.Orders.Read`/`CloudOrders.Orders.Write` policies, authorized customer-scope derivation, and cross-customer `404` behavior.
+- [ ] Bind idempotency to the tenant-scoped Entra `oid`: lowercase `D` GUID, canonical ASCII customer/product references, invariant quantity, and SHA-256 UTF-8 payload hash; reject malformed identity, Unicode, delimiter, and payload-conflict cases.
+- [ ] Implement `GET /api/v1/customers/{customerReference}/orders` with stable `(CreatedAtUtc, Id)` newest-first ordering, opaque cursor, page sizes 1–100, and authorization/paging tests.
+
+**Development verification (3 days):** A separate verifier executes authorization-positive/negative, cross-customer non-disclosure, malformed-identity, paging, and replay-after-restart tests against the deployed `development` API.
+
+**QA in test (1–2 days):** A QA-only agent validates an authorized test identity, denied identity, two history pages, and cross-customer `404` through the promoted Azure `test` release.
+
+**Deploy gate:** The immutable API release passes authentication, authorization-negative, customer-history pagination, and idempotency smoke tests in both non-production environments.
+
+## Sprint 5 — Outbox Publisher and Inbox Processor
+
+**Estimated effort:** 7–10 implementation days + 3 development-verification days + 1–2 QA days = 11–15 working days.
 
 **Outcome:** An order moves from `Pending` to `Processing` locally and in Azure development through Service Bus with duplicate-safe, failure-aware processing.
 
@@ -218,8 +255,8 @@ docs/                                                   ADRs, sprint evidence, r
 - [ ] Write failing tests for insert-first Inbox claim, duplicate delivery, invalid version/payload, SQL rollback, and settlement failure.
 - [ ] Implement one DI scope/DbContext/transaction per processor message with explicit Complete/Abandon/DeadLetter decisions.
 - [ ] Add structured fields for `MessageId`, `EventId`, `OrderId`, and `DeliveryCount` without payload secrets.
-- [ ] Extend the Sprint 2 Compose file with pinned Service Bus emulator, emulator SQL dependency, and Azurite services sufficient to execute the local publisher/processor flow; Sprint 4 adds full readiness, safe cleanup, and documentation.
-- [ ] Provision the development Service Bus queue and minimum isolated Function hosts with managed identities; deploy immutable packages and run the Azure happy path, duplicate, outage/recovery, and poison-message smoke set. Record any temporary public data-service access with owner/expiry for removal in Sprint 5.
+- [ ] Extend the Sprint 3 Compose file with pinned Service Bus emulator, emulator SQL dependency, and Azurite services sufficient to execute the local publisher/processor flow; Sprint 6 adds full readiness, safe cleanup, and documentation.
+- [ ] Provision the development Service Bus queue and minimum isolated Function hosts with managed identities; deploy immutable packages and run the Azure happy path, duplicate, outage/recovery, and poison-message smoke set. Record any temporary public data-service access with owner/expiry for removal in Sprint 7.
 
 **Manual test:** Run the local emulator flow, then create an order through the development API and observe Azure SQL outbox pending → published, Service Bus delivery, Inbox insertion, and `Pending → Processing`. Exercise one duplicate and one controlled poison message and verify settlement/DLQ behavior.
 
@@ -227,9 +264,9 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Natural commit checkpoints:** failing publisher tests; green publisher; failing processor tests; green processor and settlement; local failure-drill evidence.
 
-## Sprint 4 — Reproducible Local Platform
+## Sprint 6 — Reproducible Local Platform
 
-**Estimated effort:** 3–5 working days.
+**Estimated effort:** 3–5 implementation days + 3 development-verification days + 1–2 QA days = 7–10 working days.
 
 **Outcome:** A clean checkout can start every local dependency and host with one documented/manual sequence.
 
@@ -243,15 +280,15 @@ docs/                                                   ADRs, sprint evidence, r
 - [ ] Add service-level tests for healthy, broker outage/recovery, duplicate, transient processor retry, poison/DLQ, and replay scenarios.
 - [ ] Add safe cleanup that does not delete named volumes unless the operator explicitly asks.
 
-**Manual test:** Follow README from a clean checkout: trust HTTPS certificate, start Compose, wait for health, apply migrations, start the API and both Functions, create/read an order through HTTP, observe `Pending → Processing`, and run the local service-level E2E smoke test. The browser journey is added after the Web project exists in Sprint 7.
+**Manual test:** Follow README from a clean checkout: trust HTTPS certificate, start Compose, wait for health, apply migrations, start the API and both Functions, create/read an order through HTTP, observe `Pending → Processing`, and run the local service-level E2E smoke test. The browser journey is added after the Web project exists in Sprint 9.
 
-**Deploy gate:** Local stack is reproducible without undocumented steps, the same commit is redeployed to development, and the Azure order-processing regression smoke remains green. Evidence is stored under `docs/evidence/sprint-4/`. Commit `test: make local order flow reproducible`.
+**Deploy gate:** Local stack is reproducible without undocumented steps, the same commit is redeployed to development, and the Azure order-processing regression smoke remains green. Evidence is stored under `docs/evidence/sprint-6/`. Commit `test: make local order flow reproducible`.
 
 **Natural commit checkpoints:** Compose health/config; readiness and migration scripts; service-level tests; manual evidence and documentation.
 
-## Sprint 5 — Azure Foundation and Identity Graph
+## Sprint 7 — Azure Foundation and Identity Graph
 
-**Estimated effort:** 8–12 working days.
+**Estimated effort:** 8–12 implementation days + 3 development-verification days + 1–2 QA days = 12–17 working days.
 
 **Outcome:** The working development resources from Sprints 0.6–3 are hardened through reviewed Bicep with private data-service connectivity, explicit identities, and least-privilege RBAC.
 
@@ -269,6 +306,7 @@ docs/                                                   ADRs, sprint evidence, r
 - [ ] Give the deployment Job identity only the private data-plane and SQL-bootstrap permissions its command requires. Let the GitHub-hosted workflow retain reviewed Azure control-plane deployment authority; the Job must not receive subscription-wide deployment rights.
 - [ ] Define an ACR Task that builds from the exact public-repository commit using a system-assigned identity, scans the resulting image, and records its immutable digest. Configure the registry through stable `Microsoft.ContainerRegistry/registries@2025-11-01` (or a newer stable version reverified at implementation) with `publicNetworkAccess: Disabled`, `networkRuleSet.defaultAction: Deny`, `networkRuleBypassOptions: AzureServices`, and `networkRuleBypassAllowedForTasks: true`; use a documented native-Bicep exception if the pinned AVM version does not expose the task-bypass property. Treat `AzureServices` as one registry firewall-bypass contract and inventory its intended consumers: the system-assigned ACR Task, Defender scanning when enabled, and server-side ACR import during promotion. Do not deploy or authorize Container Instances or Machine Learning against the registry. Prove the task succeeds, disabling task bypass produces the expected `403`, and unauthorized identities and direct public clients remain denied. Monitor task invocations and prevent managed-identity tokens from entering logs. Never attempt Docker/privileged builds inside Container Apps.
 - [ ] Record an ADR for the public-repository/private-deployment design: prohibit self-hosted GitHub runners, explain the Azure-native Job and managed ACR Task split, define `AzureServices` as the registry's single trusted-services firewall-bypass contract, enumerate the intended ACR Task, optional Defender, and server-side import consumers, document authorization/monitoring/removal conditions, and revisit it when a stable private task agent pool becomes available in `ukwest`.
+- [ ] When a `ukwest` fallback needs regional `AzureContainerRegistry` service-tag prefixes in an ACR firewall rule, resolve them from the official service-tag feed during every infrastructure deployment, run a scheduled drift check, review additions/removals, remove obsolete prefixes, and fail closed if current prefixes cannot be resolved. Record that temporary private-endpoint deviation in the ADR.
 - [ ] Transfer immutable Function/migration artifacts by having the Job obtain a short-lived, read-only GitHub App installation token from a Key Vault-held bootstrap key, download the exact workflow-run artifacts, verify their recorded SHA-256 values, and write them to private deployment storage. Do not store a personal access token or long-lived artifact URL.
 - [ ] Seed the ACR Task/deployment Job images through an explicitly approved time-bounded bootstrap path, remove that path, and prove restricted ACR build/push/pull plus private Function package/migration execution before closing the sprint.
 
@@ -281,18 +319,18 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Natural commit checkpoints:** Bicep module groups; environment parameters; identity/RBAC; SQL bootstrap; what-if and private-connectivity evidence.
 
-## Sprint 6 — Azure Functions Hosting
+## Sprint 8 — Azure Functions Hosting
 
-**Estimated effort:** 4–6 working days.
+**Estimated effort:** 4–6 implementation days + 3 development-verification days + 1–2 QA days = 8–11 working days.
 
-**Outcome:** The minimum development Function hosts introduced in Sprint 3 are hardened into two production-shaped .NET 10 isolated Linux Flex Consumption apps with private connectivity, managed-identity access, telemetry, scaling limits, and rollbackable packages.
+**Outcome:** The minimum development Function hosts introduced in Sprint 5 are hardened into two production-shaped .NET 10 isolated Linux Flex Consumption apps with private connectivity, managed-identity access, telemetry, scaling limits, and rollbackable packages.
 
 **Files:** Function host Bicep modules, `host.json`, `Program.cs`, app settings templates, package manifest scripts, telemetry configuration, and `.github/workflows/deploy-functions.yml`.
 
 **Tasks:**
 
 - [ ] Recheck current Flex/.NET 10/runtime/VNet support for the approved region.
-- [ ] Replace any Sprint 3 bootstrap networking/settings with separate private storage accounts, identity-based host storage, Service Bus sender/receiver roles, SQL roles, Application Insights, timer schedule, batch/lock/timeout settings, and no public inbound product endpoint.
+- [ ] Replace any Sprint 5 bootstrap networking/settings with separate private storage accounts, identity-based host storage, Service Bus sender/receiver roles, SQL roles, Application Insights, timer schedule, batch/lock/timeout settings, and no public inbound product endpoint.
 - [ ] Produce deterministic zip packages and SHA-256 manifests; deploy an immutable package and record the manifest.
 - [ ] Add smoke commands for timer invocation, Service Bus processing, telemetry, and rollback to the previous package.
 
@@ -302,13 +340,13 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Natural commit checkpoints:** host/runtime settings; publisher deployment; processor deployment; identity/telemetry; rollback evidence.
 
-## Sprint 7 — Web Delivery and Authentication Foundation
+## Sprint 9 — Web Delivery and Authentication Foundation
 
-**Estimated effort:** 4–6 working days.
+**Estimated effort:** 3–5 implementation days + 3 development-verification days + 1–2 QA days = 7–10 working days.
 
 **Outcome:** An authenticated user can load the deployed standalone WASM shell and make an authorized same-origin API request through the linked Static Web Apps `/api` path.
 
-**Decision gate:** Reuse the Sprint 2 API registration and prompt for the Entra frontend public-client registration, exact redirect URIs, non-production test users, and approved production domain. Reuse the existing GitHub environments unless the user changes them.
+**Decision gate:** Reuse the Sprint 4 API registration and prompt for the Entra frontend public-client registration, exact redirect URIs, non-production test users, and approved production domain. Reuse the existing GitHub environments unless the user changes them.
 
 **Files:** API Dockerfile/`.dockerignore`; Container App Bicep; `src/CloudOrders.Web/{Auth,Services,wwwroot}`; `src/CloudOrders.Api.Client`; Static Web Apps Bicep/workflow and `staticwebapp.config.json`; focused client/auth tests; Playwright authentication setup.
 
@@ -328,13 +366,13 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Natural commit checkpoints:** API image/OpenAPI evidence; typed client and handler tests; Entra auth boundary; Static Web Apps IaC; deployed browser smoke.
 
-## Sprint 8 — Frontend Shell and Design System
+## Sprint 10 — Frontend Shell and Design System
 
-**Estimated effort:** 4–6 working days.
+**Estimated effort:** 4–6 implementation days + 3 development-verification days + 1–2 QA days = 8–11 working days.
 
 **Outcome:** The deployed site has a distinctive, responsive, accessible dispatch-control shell and reusable UI primitives, without yet pretending unfinished order workflows are complete.
 
-**Files:** `src/CloudOrders.Web/{Layout,Components/Forms,Components/Feedback,Components/Orders,Pages/DesignSystem,wwwroot/css,wwwroot/fonts}`; `tests/CloudOrders.Web.Tests`; `docs/evidence/sprint-8/`.
+**Files:** `src/CloudOrders.Web/{Layout,Components/Forms,Components/Feedback,Components/Orders,Pages/DesignSystem,wwwroot/css,wwwroot/fonts}`; `tests/CloudOrders.Web.Tests`; `docs/evidence/sprint-10/`.
 
 **Interfaces:** design tokens from handoff section 19; `MainLayout`; `PageTitle`; `ValidationSummary`; `LoadingState`; `EmptyState`; `ErrorState`; `OrderRoute`; accessible navigation and live-status region.
 
@@ -353,9 +391,9 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Natural commit checkpoints:** tokens/fonts; responsive shell/navigation; feedback/form primitives; order route; bUnit/accessibility and deployed evidence.
 
-## Sprint 9 — Order Workflows
+## Sprint 11 — Order Workflows
 
-**Estimated effort:** 5–8 working days.
+**Estimated effort:** 5–8 implementation days + 3 development-verification days + 1–2 QA days = 9–13 working days.
 
 **Outcome:** An authenticated operator can create, find, refresh, and track orders through complete business workflows against the real development API.
 
@@ -377,13 +415,13 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Natural commit checkpoints:** client contract tests; create flow; details/status flow; lookup/history flow; error/idempotency handling; Playwright and deployed evidence.
 
-## Sprint 10 — Frontend Quality and Release Integration
+## Sprint 12 — Frontend Quality and Release Integration
 
-**Estimated effort:** 4–6 working days.
+**Estimated effort:** 4–6 implementation days + 3 development-verification days + 1–2 QA days = 8–11 working days.
 
 **Outcome:** The complete business UI is resilient, accessible, observable, version-compatible, and rollbackable across supported desktop and mobile browser profiles.
 
-**Files:** authentication/error pages; browser telemetry adapter; Playwright configuration/projects; accessibility checks; bundle-budget script; Static Web Apps release/rollback workflow; `docs/evidence/sprint-10/`.
+**Files:** authentication/error pages; browser telemetry adapter; Playwright configuration/projects; accessibility checks; bundle-budget script; Static Web Apps release/rollback workflow; `docs/evidence/sprint-12/`.
 
 **Interfaces:** access-denied/session-expiry return flow; W3C browser trace context; redacted browser telemetry; versioned OpenAPI/client compatibility; immutable WASM artifact hash in the release manifest.
 
@@ -401,9 +439,9 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Natural commit checkpoints:** auth/resilience states; telemetry/redaction; accessibility fixes/evidence; browser matrix; performance/compatibility; deployment rollback evidence.
 
-## Sprint 11 — TestSupport and Observability Evidence
+## Sprint 13 — TestSupport and Observability Evidence
 
-**Estimated effort:** 7–10 working days.
+**Estimated effort:** 7–10 implementation days + 3 development-verification days + 1–2 QA days = 11–15 working days.
 
 **Outcome:** Non-production reliability scenarios are safely controllable and produce correlated UI, SQL, broker, and Azure Monitor evidence.
 
@@ -425,9 +463,9 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Natural commit checkpoints:** TestSupport lease/safety controls; fault policies; Observability Lab; telemetry propagation/KQL; Playwright scenarios; production exclusion tests.
 
-## Sprint 12 — CI/CD, Promotion, and Operations
+## Sprint 14 — CI/CD, Promotion, and Operations
 
-**Estimated effort:** 7–10 working days.
+**Estimated effort:** 7–10 implementation days + 3 development-verification days + 1–2 QA days = 11–15 working days.
 
 **Outcome:** Pull requests produce trusted evidence; protected promotion deploys the same immutable artifacts through environments.
 
@@ -449,9 +487,9 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Natural commit checkpoints:** CI/security checks; infrastructure OIDC workflow; application artifact workflow; release manifest/promotion; runbooks/alerts; test-environment load evidence.
 
-## Sprint 13 — Production Readiness
+## Sprint 15 — Production Readiness
 
-**Estimated effort:** 5–8 working days.
+**Estimated effort:** 5–8 implementation days + 3 development-verification days + 1–2 QA days = 9–13 working days.
 
 **Outcome:** The system is supportable, secure, cost-controlled, and ready for a reviewed production promotion.
 
@@ -460,7 +498,7 @@ docs/                                                   ADRs, sprint evidence, r
 - [ ] Run the complete Release, SQL migration-upgrade, contract, unit, integration, bUnit, Playwright, accessibility, security, load, restore, and rollback matrix from a clean checkout.
 - [ ] Verify private networking, TLS, API edge/linking, CORS, rate limits, request limits, identity negative tests, backup/retention, budgets, quotas, tags, and region support.
 - [ ] Remove bootstrap firewall rules, credentials, unused resources, development fault hooks, TestSupport production paths, and obsolete documentation.
-- [ ] Have an independent operator execute the runbooks and record evidence under `docs/evidence/sprint-13/`; if unavailable, record the solo rehearsal and explicitly accept the residual operational risk before production.
+- [ ] Have an independent operator execute the runbooks and record evidence under `docs/evidence/sprint-15/`; if unavailable, record the solo rehearsal and explicitly accept the residual operational risk before production.
 - [ ] Prompt for final production approval and domain/owner confirmation; do not create or update production resources without it.
 
 **Manual test:** After explicit production approval, promote the exact test release through a test → master PR; verify the custom HTTPS domain, sign-in, create/find/status journey, correlated telemetry, alerts, backup state, and rollback reference without using development identities or TestSupport.
@@ -490,11 +528,12 @@ PowerShell execution policy may block `npm.ps1`; use `npm.cmd` for Playwright co
 
 ## Plan Self-Review
 
-- **Spec coverage:** repository/promotion foundations (S0–0.6), application contracts and durability (S1–2), outbox/inbox and Azure messaging (S3), local reproducibility (S4), Azure network/RBAC hardening (S5), Flex hosting (S6), web edge/authentication (S7), frontend foundation (S8), order workflows (S9), frontend quality (S10), TestSupport/observability (S11), CI/CD/operations (S12), and production readiness (S13) are each assigned.
-- **Frontend scope correction:** the former single web sprint is split into four independently reviewable increments. S7 proves hosting/auth/API connectivity, S8 proves the accessible design system, S9 proves business workflows, and S10 proves cross-browser quality and rollback. The Observability Lab remains in S11 with its safety API.
-- **Azure deployability correction:** every delivered feature sprint now ends with an Azure development deployment or regression deployment. S2 introduces the minimum Azure SQL dependency, S3 introduces minimum Service Bus/Function hosting, and S5 hardens those already-working resources rather than postponing all cloud testing.
+- **Spec coverage:** repository/promotion foundations (S0–0.6), delivered domain/API baseline (S1), workflow/contract/test-environment assurance (S2), SQL durability (S3), authorization/history (S4), outbox/inbox and Azure messaging (S5), local reproducibility (S6), Azure network/RBAC hardening (S7), Flex hosting (S8), web edge/authentication (S9), frontend foundation (S10), order workflows (S11), frontend quality (S12), TestSupport/observability (S13), CI/CD/operations (S14), and production readiness (S15) are each assigned.
+- **Assurance coverage:** every remaining sprint has focused implementation commits, three independent development-verification days selected by technology/risk, one to two QA days in Azure `test`, evidence retention, and a fresh-feature-branch defect loop. QA-only agents do not edit implementation.
+- **Frontend scope correction:** the former single web sprint is split into four independently reviewable increments. S9 proves hosting/auth/API connectivity, S10 proves the accessible design system, S11 proves business workflows, and S12 proves cross-browser quality and rollback. The Observability Lab remains in S13 with its safety API.
+- **Azure deployability correction:** every delivered feature sprint now ends with an Azure development deployment or regression deployment. S2 creates the minimal protected test-environment gate, S3 introduces Azure SQL, S5 introduces minimum Service Bus/Function hosting, and S7 hardens those already-working resources rather than postponing all cloud testing.
 - **Sequence check:** each frontend sprint consumes stable API/auth contracts from earlier sprints; TestSupport follows the business UI; release automation follows all deployable artifacts. No later sprint is required to make an earlier sprint's stated manual journey possible.
 - **Placeholder scan:** no unowned placeholder implementation steps remain. Tenant/app IDs, test users, production domain, budgets, alert owners, and production approval are explicit user decision gates because they cannot be safely inferred.
 - **Type/interface consistency:** `OrderCreatedIntegrationEventV1`, `OutboxDispatcher.DrainAsync(CancellationToken)`, `OrderProcessor.ProcessAsync(ServiceBusReceivedMessage, CancellationToken)`, `IIdempotencyStore`, and `/api/v1` retain their semantics. The UI explicitly maps API `pending` to the user-facing `Received` label.
-- **Security and operations:** browser secrets, automatic non-idempotent POST retry, self-hosted GitHub runners for this public repository, development identities in production, unrestricted public data services after Sprint 5, mutable artifacts, and production TestSupport are prohibited and have negative-test gates. Any temporary or managed-service network exception is explicit, least scoped, monitored, and regression tested.
-- **Effort review:** 76–115 working days is a planning range for one developer, not elapsed calendar time. Re-estimate at each sprint boundary using measured throughput and newly discovered Azure constraints.
+- **Security and operations:** browser secrets, automatic non-idempotent POST retry, self-hosted GitHub runners for this public repository, development identities in production, unrestricted public data services after Sprint 7, mutable artifacts, and production TestSupport are prohibited and have negative-test gates. Any temporary or managed-service network exception is explicit, least scoped, monitored, regression tested, and has a service-tag drift/removal path where applicable.
+- **Effort review:** 124–172 remaining working days (134–188 including delivered historical work) is a planning range for one developer, not elapsed calendar time; it includes the new independent assurance gates but excludes defect remediation and external delays. Re-estimate at each sprint boundary using measured throughput and newly discovered Azure constraints.
