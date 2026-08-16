@@ -30,6 +30,9 @@ param minReplicas int = 1
 @description('Maximum number of replicas for the MVP.')
 param maxReplicas int = 2
 
+@description('HTTP target port exposed by the current container image.')
+param targetPort int = 8080
+
 @description('Resource tags applied to every resource.')
 param tags object = {
   application: 'CloudOrders'
@@ -93,7 +96,7 @@ resource containerApp 'Microsoft.App/containerApps@2025-01-01' = {
       activeRevisionsMode: 'Single'
       ingress: {
         external: true
-        targetPort: 8080
+        targetPort: targetPort
         transport: 'auto'
         allowInsecure: false
       }
@@ -118,7 +121,7 @@ resource containerApp 'Microsoft.App/containerApps@2025-01-01' = {
               type: 'Liveness'
               httpGet: {
                 path: '/health/live'
-                port: 8080
+                port: targetPort
               }
               initialDelaySeconds: 10
               periodSeconds: 10
