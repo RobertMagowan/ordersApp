@@ -96,7 +96,26 @@ jobs:
           docker push "$IMAGE"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy immutable image with managed identity pull
+      - name: Grant managed identity ACR pull access
+        if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters \
+              location="$AZURE_LOCATION" \
+              environmentName="${{ github.ref_name }}" \
+              appName="$AZURE_APP_NAME" \
+              acrName="$AZURE_ACR_NAME" \
+              managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" \
+              logAnalyticsName="$AZURE_LOG_ANALYTICS_NAME" \
+              useAcr=true \
+              containerImage='mcr.microsoft.com/k8se/quickstart:latest' \
+            --mode Incremental
+
+      - name: Deploy immutable image after ACR access is ready
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
         env:
           IMAGE: ${{ steps.image.outputs.image }}
