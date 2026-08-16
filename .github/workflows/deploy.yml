@@ -1,0 +1,67 @@
+name: Deploy promoted artifact
+
+on:
+  push:
+    branches:
+      - development
+      - test
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Validate Azure deployment configuration
+        env:
+          ENABLED: ${{ vars.AZURE_DEPLOYMENT_ENABLED }}
+          CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          CONTAINER_APP_NAME: ${{ vars.AZURE_CONTAINER_APP_NAME }}
+          CONTAINER_IMAGE: ${{ vars.CONTAINER_IMAGE }}
+        run: |
+          if [[ "$ENABLED" != "true" ]]; then
+            echo "Azure deployment is intentionally disabled for this environment."
+            echo "Set AZURE_DEPLOYMENT_ENABLED=true after the Azure foundation is provisioned."
+            exit 0
+          fi
+          for value in CLIENT_ID TENANT_ID SUBSCRIPTION_ID RESOURCE_GROUP CONTAINER_APP_NAME CONTAINER_IMAGE; do
+            if [[ -z "${!value}" ]]; then
+              echo "Missing required Azure deployment setting: $value" >&2
+              exit 1
+            fi
+          done
+
+      - name: Sign in to Azure with OIDC
+        if: vars.AZURE_DEPLOYMENT_ENABLED == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy immutable container image
+        if: vars.AZURE_DEPLOYMENT_ENABLED == 'true'
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            az containerapp update \
+              --name "${{ vars.AZURE_CONTAINER_APP_NAME }}" \
+              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+              --image "${{ vars.CONTAINER_IMAGE }}"
