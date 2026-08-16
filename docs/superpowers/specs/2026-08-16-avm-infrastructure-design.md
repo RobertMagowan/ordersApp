@@ -12,13 +12,16 @@ Refactor the Azure infrastructure into focused Bicep modules that use pinned Azu
   - Azure Container Registry.
   - Container Apps managed environment.
   - Container App workload, identity, ingress, probes, scaling, and ACR access.
-- Centralize AVM module versions in `infra/avm-versions.bicep`.
+- Record the approved AVM module references and pinned versions in `infra/avm-versions.md`; keep literal versions in each module declaration because Bicep module source references are not safely parameterized.
 - Add `infra/bicepconfig.json` with a public AVM registry alias and linter configuration.
 - Preserve all existing parameters and outputs consumed by `.github/workflows/deploy.yml` and the environment parameter files.
+- Add a pull-request Bicep validation workflow that runs formatting/lint/build checks without Azure credentials.
 
 ## Deployment Design
 
 The existing two-phase deployment remains intentional. The first pass creates the registry, managed environment, and Container App using the public bootstrap image. The workflow then grants the Container App managed identity `AcrPull`, pushes the application image, and performs a second deployment using the private ACR image. The AVM Container App module will receive the same identity, registry, ingress, probe, and scaling settings in both phases.
+
+The ACR `AcrPull` assignment is scoped to the registry, not the Container App. It will therefore remain a separate resource-scoped module/declaration and will not be incorrectly placed in the Container App module's app-scoped role assignments. The implementation will use an AVM authorization module only if a suitable available module supports this scope; otherwise the small native role-assignment declaration remains the documented exception.
 
 Native Bicep declarations may remain only where AVM does not expose a required sequencing or compatibility feature. Any such exception must be documented next to the declaration.
 
@@ -26,7 +29,9 @@ Native Bicep declarations may remain only where AVM does not expose a required s
 
 - Pin every AVM module reference to an explicit tested version.
 - Build the composition root with `az bicep build`.
-- Run an Azure resource-group `what-if` for each environment parameter set where credentials and resource groups are available.
+- Add explicit test and production parameter overlays, or document generated CLI parameter sets if those environments intentionally remain workflow-driven; each must be suitable for a resource-group `what-if`.
+- Run an Azure resource-group `what-if` for development, test, and production parameter sets where credentials and resource groups are available.
+- Run the pull-request Bicep validation workflow on every infrastructure change.
 - Run the existing .NET build and tests to ensure the infrastructure-only change does not affect application packaging.
 - Keep deployment outputs (`containerAppName`, `containerAppFqdn`, `registryName`, and `registryLoginServer`) unchanged.
 
