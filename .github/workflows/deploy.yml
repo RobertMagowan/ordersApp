@@ -82,6 +82,7 @@ jobs:
               managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" \
               logAnalyticsName="$AZURE_LOG_ANALYTICS_NAME" \
               targetPort=80 \
+              enableLivenessProbe=false \
               useAcr=false \
               containerImage='mcr.microsoft.com/k8se/quickstart:latest' \
             --mode Incremental
@@ -136,6 +137,7 @@ jobs:
               managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" \
               logAnalyticsName="$AZURE_LOG_ANALYTICS_NAME" \
               targetPort=8080 \
+              enableLivenessProbe=true \
               useAcr=true \
               containerImage="$IMAGE" \
             --mode Incremental
