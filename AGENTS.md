@@ -12,6 +12,7 @@
 - `src/CloudOrders.OutboxPublisher` and `src/CloudOrders.OrderProcessor` will be isolated Azure Functions.
 - `tests/` contains unit, integration, end-to-end, bUnit, Playwright, and NBomber tests.
 - `infra/`, `local/`, `ops/`, and `.github/workflows/` contain Bicep, local emulators, operations, and CI/CD.
+- Git promotion is `feature/*` or `agent/*` → `development` → `test` → `master`; protected-branch changes require a pull request and exactly one approval.
 
 ## Build, Test, and Development Commands
 
@@ -24,7 +25,7 @@ dotnet build --configuration Release
 dotnet test --configuration Release
 ```
 
-Local infrastructure and deployment commands are added per sprint. Never run migrations from application startup; use the documented deployment migration command.
+Local infrastructure and deployment commands are added per sprint. Never run migrations from application startup; use the documented deployment migration command. Merges to `development`, `test`, and `master` invoke the matching protected GitHub environment workflow.
 
 ## Coding Style and Naming
 
@@ -36,7 +37,7 @@ Write the failing test before production code. Use xUnit for .NET tests, bUnit f
 
 ## Commits and Pull Requests
 
-Use imperative Conventional Commit-style subjects, for example `feat: add transactional outbox`. A sprint should contain several focused commits where natural boundaries exist (tests, implementation, integration, packaging, and evidence); do not squash away useful review history during development. Pull requests must describe the sprint gate, link the relevant issue/plan, list test commands and manual evidence, call out migrations or Azure changes, and include screenshots for UI changes. Infrastructure PRs must include Bicep validation/what-if output.
+Use imperative Conventional Commit-style subjects, for example `feat: add transactional outbox`. A sprint should contain several focused commits where natural boundaries exist (tests, implementation, integration, packaging, and evidence); do not squash away useful review history during development. Pull requests must describe the sprint gate, link the relevant issue/plan, list test commands and manual evidence, call out migrations or Azure changes, and include screenshots for UI changes. Infrastructure PRs must include Bicep validation/what-if output. The promotion path is enforced by `.github/workflows/branch-policy.yml`; do not bypass it with direct pushes.
 
 ## Security and Decision Gates
 
