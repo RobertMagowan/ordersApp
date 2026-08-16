@@ -62,6 +62,7 @@ jobs:
       AZURE_MANAGED_ENVIRONMENT_NAME: ${{ vars.AZURE_MANAGED_ENVIRONMENT_NAME }}
       AZURE_LOG_ANALYTICS_NAME: ${{ vars.AZURE_LOG_ANALYTICS_NAME }}
       DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
+      DEPLOYMENT_NAME: cloudorders-${{ github.ref_name == 'master' && 'production' || github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -112,8 +113,34 @@ jobs:
           az bicep lint --file infra/main.bicep
           az bicep build --file infra/main.bicep
 
-      - name: Preview infrastructure changes
+      - name: Inspect existing release
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
+        id: existing_release
+        run: |
+          if az containerapp show \
+            --name "$AZURE_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --only-show-errors >/dev/null 2>&1; then
+            PREVIOUS_IMAGE=$(az containerapp show \
+              --name "$AZURE_APP_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query properties.template.containers[0].image --output tsv)
+            PREVIOUS_REVISION=$(az containerapp show \
+              --name "$AZURE_APP_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query properties.latestReadyRevisionName --output tsv)
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            PREVIOUS_IMAGE='none (first deployment)'
+            PREVIOUS_REVISION='none (first deployment)'
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "previous_image=$PREVIOUS_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "previous_revision=$PREVIOUS_REVISION" >> "$GITHUB_OUTPUT"
+
+      - name: Preview first-deployment foundation
+        if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
+          && steps.existing_release.outputs.exists != 'true'
         run: |
           PARAM_FILE="infra/environments/$DEPLOYMENT_ENVIRONMENT.bicepparam"
           az deployment group what-if \
@@ -122,6 +149,7 @@ jobs:
             --parameters "$PARAM_FILE" \
               location="$AZURE_LOCATION" \
               environmentName="$DEPLOYMENT_ENVIRONMENT" \
+              releaseId="$GITHUB_SHA" \
               appName="$AZURE_APP_NAME" \
               acrName="$AZURE_ACR_NAME" \
               managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" \
@@ -136,14 +164,17 @@ jobs:
 
       - name: Provision MVP foundation with public bootstrap image
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
+          && steps.existing_release.outputs.exists != 'true'
         run: |
           az deployment group create \
             --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$DEPLOYMENT_NAME-bootstrap" \
             --template-file infra/main.bicep \
             --parameters \
               "infra/environments/$DEPLOYMENT_ENVIRONMENT.bicepparam" \
               location="$AZURE_LOCATION" \
               environmentName="$DEPLOYMENT_ENVIRONMENT" \
+              releaseId="$GITHUB_SHA" \
               appName="$AZURE_APP_NAME" \
               acrName="$AZURE_ACR_NAME" \
               managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" \
@@ -197,6 +228,31 @@ jobs:
               --scope "$REGISTRY_ID"
           fi
 
+      - name: Preview immutable release
+        if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          PARAM_FILE="infra/environments/$DEPLOYMENT_ENVIRONMENT.bicepparam"
+          az deployment group what-if \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters "$PARAM_FILE" \
+              location="$AZURE_LOCATION" \
+              environmentName="$DEPLOYMENT_ENVIRONMENT" \
+              releaseId="$GITHUB_SHA" \
+              appName="$AZURE_APP_NAME" \
+              acrName="$AZURE_ACR_NAME" \
+              managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" \
+              logAnalyticsName="$AZURE_LOG_ANALYTICS_NAME" \
+              targetPort=8080 \
+              enableLivenessProbe=true \
+              useAcr=true \
+              createAcrPullRole=false \
+              containerImage="$IMAGE" \
+            --mode Incremental \
+            --result-format FullResourcePayloads
+
       - name: Deploy immutable image after ACR access is ready
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
         env:
@@ -204,11 +260,13 @@ jobs:
         run: |
           az deployment group create \
             --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$DEPLOYMENT_NAME" \
             --template-file infra/main.bicep \
             --parameters \
               "infra/environments/$DEPLOYMENT_ENVIRONMENT.bicepparam" \
               location="$AZURE_LOCATION" \
               environmentName="$DEPLOYMENT_ENVIRONMENT" \
+              releaseId="$GITHUB_SHA" \
               appName="$AZURE_APP_NAME" \
               acrName="$AZURE_ACR_NAME" \
               managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" \
@@ -232,7 +290,9 @@ jobs:
             STATUS=$(curl --fail --silent --show-error --output /dev/null --write-out '%{http_code}' "$ENDPOINT/health/live" || true)
             if [[ "$STATUS" == "200" ]]; then
               echo "Health check passed on attempt $attempt."
+              REVISION=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.latestReadyRevisionName --output tsv)
               echo "url=$ENDPOINT" >> "$GITHUB_OUTPUT"
+              echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
               HEALTHY=true
               break
             fi
@@ -250,12 +310,19 @@ jobs:
           ENDPOINT: ${{ steps.endpoint.outputs.url }}
           IMAGE: ${{ steps.image.outputs.image }}
           IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          PREVIOUS_IMAGE: ${{ steps.existing_release.outputs.previous_image }}
+          PREVIOUS_REVISION: ${{ steps.existing_release.outputs.previous_revision }}
+          REVISION: ${{ steps.endpoint.outputs.revision }}
         run: |
           {
             echo "## CloudOrders deployment"
             echo
             echo "- Release: \`$GITHUB_SHA\`"
+            echo "- Bicep deployment: \`$DEPLOYMENT_NAME\`"
             echo "- Immutable API image: \`$IMAGE\`"
             echo "- Published image tag: \`$IMAGE_TAG\`"
+            echo "- Container App revision: \`$REVISION\`"
+            echo "- Rollback image: \`$PREVIOUS_IMAGE\`"
+            echo "- Previous revision: \`$PREVIOUS_REVISION\`"
             echo "- API endpoint: $ENDPOINT"
           } >> "$GITHUB_STEP_SUMMARY"

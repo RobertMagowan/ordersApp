@@ -30,6 +30,37 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.All(actionUsages, actionUsage => Assert.Matches(@"^uses:\s+[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[a-f0-9]{40}\s+# v[0-9].*$", actionUsage));
     }
 
+    [Fact]
+    public void DeploymentWorkflowPreservesReleaseAndRollbackState()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var workflowPath = Path.Combine(repositoryRoot, ".github", "workflows", "deploy.yml");
+        var mainBicepPath = Path.Combine(repositoryRoot, "infra", "main.bicep");
+        var testParametersPath = Path.Combine(repositoryRoot, "infra", "environments", "test.bicepparam");
+
+        var workflow = File.ReadAllText(workflowPath);
+        var mainBicep = File.ReadAllText(mainBicepPath);
+        var testParameters = File.ReadAllText(testParametersPath);
+
+        Assert.Contains("name: Inspect existing release", workflow, StringComparison.Ordinal);
+        Assert.Contains("steps.existing_release.outputs.exists != 'true'", workflow, StringComparison.Ordinal);
+        Assert.Contains("name: Preview immutable release", workflow, StringComparison.Ordinal);
+        Assert.Contains("releaseId=\"$GITHUB_SHA\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("--name \"$DEPLOYMENT_NAME\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("Rollback image", workflow, StringComparison.Ordinal);
+        Assert.Contains("Container App revision", workflow, StringComparison.Ordinal);
+
+        var buildImageIndex = workflow.IndexOf("name: Build and publish immutable API image", StringComparison.Ordinal);
+        var previewReleaseIndex = workflow.IndexOf("name: Preview immutable release", StringComparison.Ordinal);
+        Assert.True(buildImageIndex >= 0 && previewReleaseIndex > buildImageIndex,
+            "The reviewed what-if must use the resolved immutable image after it is published.");
+
+        Assert.Contains("param releaseId string = 'bootstrap'", mainBicep, StringComparison.Ordinal);
+        Assert.Contains("release: releaseId", mainBicep, StringComparison.Ordinal);
+        Assert.Contains("output releaseId string = releaseId", mainBicep, StringComparison.Ordinal);
+        Assert.Contains("param releaseId = 'bootstrap'", testParameters, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
