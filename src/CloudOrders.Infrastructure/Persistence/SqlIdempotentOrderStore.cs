@@ -8,7 +8,8 @@ using Microsoft.EntityFrameworkCore;
 namespace CloudOrders.Infrastructure.Persistence;
 
 public sealed class SqlIdempotentOrderStore(
-    IDbContextFactory<CloudOrdersDbContext> contextFactory) : IIdempotentOrderStore
+    IDbContextFactory<CloudOrdersDbContext> contextFactory,
+    TimeProvider timeProvider) : IIdempotentOrderStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan IdempotencyRetention = TimeSpan.FromDays(7);
@@ -18,13 +19,22 @@ public sealed class SqlIdempotentOrderStore(
         CancellationToken cancellationToken)
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var now = timeProvider.GetUtcNow();
         var existing = await FindExistingAsync(context, request, cancellationToken);
-        if (existing is not null)
+        if (existing is not null && existing.ExpiresAt > now)
         {
             return Classify(existing, request.RequestHash);
         }
 
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        if (existing is not null)
+        {
+            await context.IdempotencyRecords
+                .Where(record => record.SubjectId == request.SubjectId
+                    && record.IdempotencyKey == request.IdempotencyKey
+                    && record.ExpiresAt <= now)
+                .ExecuteDeleteAsync(cancellationToken);
+        }
         context.Orders.Add(OrderPersistenceMapper.ToEntity(request.Order));
         context.OutboxMessages.Add(ToOutboxEntity(request));
         context.IdempotencyRecords.Add(ToIdempotencyEntity(request));

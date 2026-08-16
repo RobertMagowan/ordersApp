@@ -11,10 +11,22 @@ public sealed class SqlReadinessHealthCheck(
         HealthCheckContext context,
         CancellationToken cancellationToken = default)
     {
-        await using var database = await contextFactory.CreateDbContextAsync(cancellationToken);
-        var canConnect = await database.Database.CanConnectAsync(cancellationToken);
-        return canConnect
-            ? HealthCheckResult.Healthy()
-            : HealthCheckResult.Unhealthy("SQL Server is not ready.");
+        try
+        {
+            await using var database = await contextFactory.CreateDbContextAsync(cancellationToken);
+            if (!await database.Database.CanConnectAsync(cancellationToken))
+            {
+                return HealthCheckResult.Unhealthy("SQL Server is not ready.");
+            }
+
+            var pendingMigrations = await database.Database.GetPendingMigrationsAsync(cancellationToken);
+            return pendingMigrations.Any()
+                ? HealthCheckResult.Unhealthy("SQL Server migrations are pending.")
+                : HealthCheckResult.Healthy();
+        }
+        catch (Exception exception)
+        {
+            return HealthCheckResult.Unhealthy("SQL Server readiness check failed.", exception);
+        }
     }
 }

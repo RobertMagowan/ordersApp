@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CloudOrders.Api.Health;
@@ -124,12 +125,12 @@ app.MapPost("/api/v1/orders", async (
                 extensions: ProblemExtensions(httpContext, "invalid_idempotency_key"));
         }
 
-        var traceParent = httpContext.Request.Headers["traceparent"].ToString();
+        var traceParent = Activity.Current?.Id;
 
         var result = await handler.Handle(
             new CreateOrderCommand(request.CustomerReference!, request.ProductSku!, request.Quantity),
             idempotencyKey,
-            string.IsNullOrWhiteSpace(traceParent) ? null : traceParent,
+            traceParent,
             cancellationToken);
 
         if (result.Kind is CreateOrderResultKind.ValidationError)

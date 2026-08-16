@@ -14,20 +14,36 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
     public async Task<TestDatabase> CreateDatabaseAsync()
     {
-        var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(container.GetConnectionString())
-        {
-            InitialCatalog = $"CloudOrders_{Guid.NewGuid():N}"
-        };
-
-        var connectionString = builder.ConnectionString;
+        var database = await CreateEmptyDatabaseAsync();
         var options = new DbContextOptionsBuilder<CloudOrdersDbContext>()
-            .UseSqlServer(connectionString)
+            .UseSqlServer(database.ConnectionString)
             .Options;
 
         await using var context = new CloudOrdersDbContext(options);
         await context.Database.MigrateAsync();
 
-        return new TestDatabase(connectionString);
+        return database;
+    }
+
+    public async Task<TestDatabase> CreateEmptyDatabaseAsync()
+    {
+        var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(container.GetConnectionString())
+        {
+            InitialCatalog = $"CloudOrders_{Guid.NewGuid():N}"
+        };
+
+        var databaseName = builder.InitialCatalog;
+        var masterConnectionString = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(container.GetConnectionString())
+        {
+            InitialCatalog = "master"
+        }.ConnectionString;
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(masterConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"CREATE DATABASE [{databaseName}]";
+        await command.ExecuteNonQueryAsync();
+
+        return new TestDatabase(builder.ConnectionString);
     }
 }
 
