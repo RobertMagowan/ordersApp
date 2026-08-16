@@ -56,7 +56,7 @@ module observability 'modules/observability.bicep' = {
 }
 
 module registryModule 'modules/container-registry.bicep' = {
-  name: 'containerRegistry'
+  name: 'containerRegistry-${uniqueString(resourceGroup().id)}'
   params: {
     location: location
     name: acrName
