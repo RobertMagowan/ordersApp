@@ -4,7 +4,7 @@ CloudOrders is a .NET 10/Azure order-processing system. The repository is being 
 
 ## Current status
 
-Sprint 0 bootstraps the solution, repository policy, and architecture tests. The application is not yet deployed to Azure.
+Sprint 1 provides a manually runnable local API vertical slice with in-memory order persistence. SQL durability and Azure deployment are scheduled for later sprints.
 
 ## Prerequisites
 
