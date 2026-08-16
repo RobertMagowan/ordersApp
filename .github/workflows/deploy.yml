@@ -30,6 +30,7 @@ jobs:
       AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
       AZURE_MANAGED_ENVIRONMENT_NAME: ${{ vars.AZURE_MANAGED_ENVIRONMENT_NAME }}
       AZURE_LOG_ANALYTICS_NAME: ${{ vars.AZURE_LOG_ANALYTICS_NAME }}
+      DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -66,7 +67,30 @@ jobs:
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
         run: |
           az bicep install
+          az bicep lint --file infra/main.bicep
           az bicep build --file infra/main.bicep
+
+      - name: Preview infrastructure changes
+        if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
+        run: |
+          PARAM_FILE="infra/environments/$DEPLOYMENT_ENVIRONMENT.bicepparam"
+          az deployment group what-if \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters "$PARAM_FILE" \
+              location="$AZURE_LOCATION" \
+              environmentName="$DEPLOYMENT_ENVIRONMENT" \
+              appName="$AZURE_APP_NAME" \
+              acrName="$AZURE_ACR_NAME" \
+              managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" \
+              logAnalyticsName="$AZURE_LOG_ANALYTICS_NAME" \
+              targetPort=80 \
+              enableLivenessProbe=false \
+              useAcr=false \
+              createAcrPullRole=false \
+              containerImage='mcr.microsoft.com/k8se/quickstart:latest' \
+            --mode Incremental \
+            --result-format ResourceIdOnly
 
       - name: Provision MVP foundation with public bootstrap image
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
@@ -75,8 +99,9 @@ jobs:
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --template-file infra/main.bicep \
             --parameters \
+              "infra/environments/$DEPLOYMENT_ENVIRONMENT.bicepparam" \
               location="$AZURE_LOCATION" \
-              environmentName="${{ github.ref_name }}" \
+              environmentName="$DEPLOYMENT_ENVIRONMENT" \
               appName="$AZURE_APP_NAME" \
               acrName="$AZURE_ACR_NAME" \
               managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" \
@@ -84,6 +109,7 @@ jobs:
               targetPort=80 \
               enableLivenessProbe=false \
               useAcr=false \
+              createAcrPullRole=false \
               containerImage='mcr.microsoft.com/k8se/quickstart:latest' \
             --mode Incremental
 
@@ -130,8 +156,9 @@ jobs:
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --template-file infra/main.bicep \
             --parameters \
+              "infra/environments/$DEPLOYMENT_ENVIRONMENT.bicepparam" \
               location="$AZURE_LOCATION" \
-              environmentName="${{ github.ref_name }}" \
+              environmentName="$DEPLOYMENT_ENVIRONMENT" \
               appName="$AZURE_APP_NAME" \
               acrName="$AZURE_ACR_NAME" \
               managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" \
@@ -139,6 +166,7 @@ jobs:
               targetPort=8080 \
               enableLivenessProbe=true \
               useAcr=true \
+              createAcrPullRole=false \
               containerImage="$IMAGE" \
             --mode Incremental
 
