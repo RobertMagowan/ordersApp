@@ -24,6 +24,9 @@ param containerImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
 @description('Use the Container App managed identity to pull the image from this template-created registry.')
 param useAcr bool = false
 
+@description('Create the AcrPull role assignment from Bicep. The GitHub workflow bootstraps it idempotently with Azure CLI.')
+param createAcrPullRole bool = false
+
 @description('Minimum number of always-on replicas for the MVP.')
 param minReplicas int = 1
 
@@ -138,7 +141,7 @@ resource containerApp 'Microsoft.App/containerApps@2025-01-01' = {
   }
 }
 
-resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (useAcr) {
+resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (useAcr && createAcrPullRole) {
   name: guid(registry.id, containerApp.id, 'AcrPull')
   scope: registry
   properties: {
