@@ -6,7 +6,9 @@ CloudOrders is a .NET 10/Azure order-processing system. The repository is being 
 
 Work in `feature/*` or `agent/*` branches. Open a pull request into `development`, then promote only through approved pull requests to `test` and finally `master`. Each protected branch requires exactly one approval and the CI plus promotion-policy checks. Merges start the matching GitHub environment workflow (`development`, `test`, or `production`).
 
-The Azure workflow uses OIDC and remains safely disabled until each environment has `AZURE_DEPLOYMENT_ENABLED=true`, the Azure federated identity secrets (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`), and the environment variables `AZURE_RESOURCE_GROUP`, `AZURE_CONTAINER_APP_NAME`, and `CONTAINER_IMAGE`.
+Repository administrators may explicitly bypass the review requirement for their own PR; CI, promotion-policy, and conversation checks remain required because this repository has a single developer.
+
+The Azure workflow uses OIDC and remains safely disabled until each environment has `AZURE_DEPLOYMENT_ENABLED=true`, the federated identity secrets (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`), and these variables: `AZURE_RESOURCE_GROUP`, `AZURE_LOCATION`, `AZURE_APP_NAME`, `AZURE_ACR_NAME`, `AZURE_MANAGED_ENVIRONMENT_NAME`, and `AZURE_LOG_ANALYTICS_NAME`. It deploys `infra/main.bicep`, builds the API image from `src/CloudOrders.Api/Dockerfile`, pushes it to ACR, and smoke-tests `/health/live`.
 
 ## Current status
 

@@ -12,7 +12,7 @@
 - `src/CloudOrders.OutboxPublisher` and `src/CloudOrders.OrderProcessor` will be isolated Azure Functions.
 - `tests/` contains unit, integration, end-to-end, bUnit, Playwright, and NBomber tests.
 - `infra/`, `local/`, `ops/`, and `.github/workflows/` contain Bicep, local emulators, operations, and CI/CD.
-- Git promotion is `feature/*` or `agent/*` → `development` → `test` → `master`; protected-branch changes require a pull request and exactly one approval.
+- Git promotion is `feature/*` or `agent/*` → `development` → `test` → `master`; protected-branch changes require a pull request and exactly one approval. Repository administrators may explicitly bypass the review requirement for their own PR; required checks still apply.
 
 ## Build, Test, and Development Commands
 
@@ -23,9 +23,10 @@ dotnet restore
 dotnet format --verify-no-changes
 dotnet build --configuration Release
 dotnet test --configuration Release
+az bicep build --file infra/main.bicep
 ```
 
-Local infrastructure and deployment commands are added per sprint. Never run migrations from application startup; use the documented deployment migration command. Merges to `development`, `test`, and `master` invoke the matching protected GitHub environment workflow.
+Local infrastructure and deployment commands are added per sprint. Never run migrations from application startup; use the documented deployment migration command. Merges to `development`, `test`, and `master` invoke the matching protected GitHub environment workflow. The MVP workflow provisions Azure Container Apps, Azure Container Registry, and Log Analytics from `infra/main.bicep`, then publishes an immutable API image.
 
 ## Coding Style and Naming
 
@@ -41,4 +42,4 @@ Use imperative Conventional Commit-style subjects, for example `feat: add transa
 
 ## Security and Decision Gates
 
-Never commit secrets, `.env`, `local.settings.json`, auth storage state, generated ARM JSON, or real customer data. Use managed identities and least-privilege roles in Azure. Prompt the user before choosing GitHub ownership/visibility, Azure tenant/subscription/region, Entra registrations, production domains, alert owners, budgets, or production deployment approval.
+Never commit secrets, `.env`, `local.settings.json`, auth storage state, generated ARM JSON, or real customer data. Use managed identities and least-privilege roles in Azure. The deployment workflow authenticates with GitHub OIDC; configure Azure values as GitHub environment variables/secrets, never in Bicep parameter files. Prompt the user before choosing GitHub ownership/visibility, Azure tenant/subscription/region, Entra registrations, production domains, alert owners, budgets, or production deployment approval.

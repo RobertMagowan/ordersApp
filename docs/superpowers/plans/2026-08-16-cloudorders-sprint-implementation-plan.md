@@ -14,6 +14,7 @@
 - Use .NET 10 and stable C# 14; pin the installed stable SDK in `global.json` and do not enable preview language features.
 - Product/namespace names are `CloudOrders`; the intended GitHub repository name is `ordersApp`.
 - Git branches are `feature/*`/`agent/*` → `development` → `test` → `master`. Each protected-branch PR requires exactly one approving review; merges deploy to the matching GitHub environment.
+- Because this is a single-developer repository, repository administrators may bypass the review requirement for their own PR. Required CI, source-branch, and conversation-resolution checks remain enforced.
 - Sections 25–35 of `CLOUDORDERS_HANDOFF.md` are the authoritative version-1 contracts.
 - Keep `CloudOrders.Api` free of direct Service Bus publishing; API writes Order + Outbox + Idempotency in one transaction.
 - Preserve at-least-once messaging, stable `EventId`, insert-first Inbox idempotency, and explicit broker settlement.
@@ -90,6 +91,26 @@ docs/                                                   ADRs, sprint evidence, r
 **Deploy gate:** GitHub branch protections, environments, and deployment workflow are configured. Azure deployment becomes active when the approved subscription, tenant, region, resource group, and OIDC identity are supplied.
 
 **Natural commit checkpoints:** branch rename; repository policy/workflows; branch/environment protection; verification and evidence.
+
+## Sprint 0.6 — MVP Azure Container Deployment
+
+**Outcome:** The current API vertical slice can be built as a non-root .NET 10 container and deployed to Azure Container Apps through the protected environment workflow.
+
+**Files:** `infra/main.bicep`, `infra/environments/development.bicepparam`, `src/CloudOrders.Api/Dockerfile`, `.dockerignore`, and `.github/workflows/deploy.yml`.
+
+**Tasks:**
+
+- [ ] Provision Log Analytics, Basic ACR, Container Apps managed environment, and an externally reachable API Container App with HTTPS and liveness probing.
+- [ ] Use a system-assigned Container App identity with `AcrPull`; keep ACR admin credentials disabled.
+- [ ] Deploy a public bootstrap image on the first pass, then build/push the commit-SHA API image and redeploy it through the same Bicep workflow.
+- [ ] Authenticate GitHub Actions to Azure with OIDC and environment-scoped values; keep the workflow disabled until federated credentials and resource-group values are configured.
+- [ ] Smoke-test `/health/live` after deployment and retain the deployment URL in the workflow summary.
+
+**Manual test:** Enable the development environment, merge a verified PR into `development`, confirm the workflow provisions the resources, publishes the image, and returns HTTP 200 from `/health/live`.
+
+**Deploy gate:** `az bicep build`, Docker build/run, and the GitHub deployment workflow are green. Azure what-if and production resource creation remain decision gates until subscription, tenant, region, and budget ownership are confirmed.
+
+**Natural commit checkpoints:** Bicep foundation; container packaging; OIDC deployment workflow; smoke-test/documentation evidence.
 
 ## Sprint 1 — Domain, Contracts, and API Vertical Slice
 
