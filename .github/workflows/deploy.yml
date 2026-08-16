@@ -98,22 +98,26 @@ jobs:
 
       - name: Grant managed identity ACR pull access
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
-        env:
-          IMAGE: ${{ steps.image.outputs.image }}
         run: |
-          az deployment group create \
+          PRINCIPAL_ID=$(az containerapp show \
+            --name "$AZURE_APP_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --template-file infra/main.bicep \
-            --parameters \
-              location="$AZURE_LOCATION" \
-              environmentName="${{ github.ref_name }}" \
-              appName="$AZURE_APP_NAME" \
-              acrName="$AZURE_ACR_NAME" \
-              managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" \
-              logAnalyticsName="$AZURE_LOG_ANALYTICS_NAME" \
-              useAcr=true \
-              containerImage='mcr.microsoft.com/k8se/quickstart:latest' \
-            --mode Incremental
+            --query identity.principalId --output tsv)
+          REGISTRY_ID=$(az acr show \
+            --name "$AZURE_ACR_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query id --output tsv)
+          EXISTING=$(az role assignment list \
+            --assignee-object-id "$PRINCIPAL_ID" \
+            --scope "$REGISTRY_ID" \
+            --query "[?roleDefinitionName=='AcrPull'].id | [0]" --output tsv)
+          if [[ -z "$EXISTING" ]]; then
+            az role assignment create \
+              --assignee-object-id "$PRINCIPAL_ID" \
+              --assignee-principal-type ServicePrincipal \
+              --role AcrPull \
+              --scope "$REGISTRY_ID"
+          fi
 
       - name: Deploy immutable image after ACR access is ready
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
