@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace CloudOrders.IntegrationTests;
@@ -17,6 +18,17 @@ public sealed class ApiTests(WebApplicationFactory<Program> factory)
         using var response = await client.GetAsync("/health/live");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public void ProductionStartupFailsClearlyWithoutSqlConnection()
+    {
+        using var productionFactory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.UseEnvironment("Production"));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => productionFactory.CreateClient());
+
+        Assert.Contains("ConnectionStrings:CloudOrders", exception.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

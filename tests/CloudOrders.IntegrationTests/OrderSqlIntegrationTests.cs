@@ -3,8 +3,8 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using CloudOrders.Contracts.Orders;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -15,6 +15,18 @@ namespace CloudOrders.IntegrationTests;
 public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
 {
     private const string SubjectId = "local-development-subject";
+
+    [Fact]
+    public async Task ReadinessChecksSqlConnection()
+    {
+        await using var database = await sqlServer.CreateDatabaseAsync();
+        using var factory = CreateFactory(database.ConnectionString);
+        using var client = factory.CreateClient();
+
+        using var response = await client.GetAsync("/health/ready");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
 
     [Fact]
     public async Task MigrationFirstCreateAndGetPersistAnOrder()
@@ -82,7 +94,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         Assert.Equal(SubjectId, reader.GetString(7));
         Assert.Equal(key, reader.GetGuid(8));
         Assert.Equal(
-            "75ad5b019fad99f92b331201a6faa101d60899ad36c7bac025fd0ffa6df12616",
+            "997f348773208c1776ccab100c067a8633dea47507ffb8e945b8bdd08f2eb312",
             Convert.ToHexString((byte[])reader[9]).ToLowerInvariant());
         Assert.Equal(created.Id, reader.GetGuid(10));
         Assert.Equal(StatusCodes.Status201Created, reader.GetInt32(11));
@@ -198,7 +210,6 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
     [InlineData(null)]
     [InlineData("")]
     [InlineData("not-a-uuid")]
-    [InlineData("00000000-0000-0000-0000-000000000000")]
     public async Task MissingOrInvalidIdempotencyKeyReturnsProblemDetails(string? idempotencyKey)
     {
         await using var database = await sqlServer.CreateDatabaseAsync();

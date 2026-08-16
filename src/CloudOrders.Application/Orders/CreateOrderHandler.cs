@@ -5,12 +5,14 @@ using CloudOrders.Domain.Orders;
 namespace CloudOrders.Application.Orders;
 
 public sealed class CreateOrderHandler(
-    IOrderRepository orderRepository,
-    IOutboxWriter outboxWriter,
+    IIdempotentOrderStore idempotentOrderStore,
+    ISubjectIdProvider subjectIdProvider,
     TimeProvider timeProvider)
 {
-    public async Task<ApplicationResult<OrderResponse>> Handle(
+    public async Task<CreateOrderResult> Handle(
         CreateOrderCommand command,
+        Guid idempotencyKey,
+        string? traceParent,
         CancellationToken cancellationToken)
     {
         try
@@ -23,22 +25,28 @@ public sealed class CreateOrderHandler(
                 command.Quantity,
                 createdAt);
 
-            await orderRepository.AddAsync(order, cancellationToken);
-            await outboxWriter.AddAsync(
-                new OrderCreatedIntegrationEventV1(
-                    Guid.NewGuid(),
-                    order.Id,
-                    order.CustomerReference,
-                    order.ProductSku,
-                    order.Quantity,
-                    order.CreatedAt),
-                cancellationToken);
+            var response = OrderResponseMapper.ToResponse(order);
+            var integrationEvent = new OrderCreatedIntegrationEventV1(
+                Guid.NewGuid(),
+                order.Id,
+                order.CustomerReference,
+                order.ProductSku,
+                order.Quantity,
+                order.CreatedAt);
+            var request = new IdempotentOrderRequest(
+                subjectIdProvider.SubjectId,
+                idempotencyKey,
+                IdempotencyRequestHasher.Compute(subjectIdProvider.SubjectId, order),
+                order,
+                integrationEvent,
+                response,
+                traceParent);
 
-            return new ApplicationResult<OrderResponse>(true, OrderResponseMapper.ToResponse(order), null, null);
+            return await idempotentOrderStore.CreateAsync(request, cancellationToken);
         }
         catch (DomainValidationException exception)
         {
-            return new ApplicationResult<OrderResponse>(false, null, "validation_error", exception.Message);
+            return CreateOrderResult.ValidationError(exception.Message);
         }
     }
 
