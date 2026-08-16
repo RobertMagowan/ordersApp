@@ -12,7 +12,7 @@
 - `src/CloudOrders.OutboxPublisher` and `src/CloudOrders.OrderProcessor` will be isolated Azure Functions.
 - `tests/` contains unit, integration, end-to-end, bUnit, Playwright, and NBomber tests.
 - `infra/`, `local/`, `ops/`, and `.github/workflows/` contain Bicep, local emulators, operations, and CI/CD.
-- Git promotion is `feature/*` or `agent/*` → `development` → `test` → `master`; protected-branch changes require a pull request and exactly one approval. Repository administrators may explicitly bypass the review requirement for their own PR; required checks still apply.
+- Git promotion is `feature/*` → `development` → `test` → `master`; all new feature branches must use the `feature/` prefix. Protected-branch changes require a pull request and exactly one approval. Repository administrators may explicitly bypass the review requirement for their own PR; required checks still apply.
 
 ## Build, Test, and Development Commands
 
