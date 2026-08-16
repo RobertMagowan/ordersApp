@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+.git/
+.github/
+artifacts/
+tests/
+docs/
+infra/
+local/
+ops/
