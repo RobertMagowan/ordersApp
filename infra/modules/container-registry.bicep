@@ -16,6 +16,7 @@ module registry 'br/avm:res/container-registry/registry:0.6.0' = {
     name: name
     publicNetworkAccess: 'Enabled'
     tags: tags
+    zoneRedundancy: 'Disabled'
   }
 }
 
