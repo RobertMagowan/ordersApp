@@ -46,115 +46,67 @@ param tags object = {
   managedBy: 'Bicep'
 }
 
-resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
-  name: logAnalyticsName
-  location: location
-  tags: tags
-  properties: {
-    sku: {
-      name: 'PerGB2018'
-    }
-    retentionInDays: 30
-    features: {
-      enableLogAccessUsingOnlyResourcePermissions: true
-    }
+module observability 'modules/observability.bicep' = {
+  name: 'observability'
+  params: {
+    location: location
+    name: logAnalyticsName
+    tags: tags
   }
 }
 
-resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
+module registryModule 'modules/container-registry.bicep' = {
+  name: 'containerRegistry'
+  params: {
+    location: location
+    name: acrName
+    tags: tags
+  }
+}
+
+module managedEnvironment 'modules/container-app-environment.bicep' = {
+  name: 'managedEnvironment'
+  params: {
+    location: location
+    logAnalyticsWorkspaceResourceId: observability.outputs.resourceId
+    name: managedEnvironmentName
+    tags: tags
+  }
+}
+
+module containerApp 'modules/container-app.bicep' = {
+  name: 'containerApp'
+  params: {
+    containerImage: containerImage
+    enableLivenessProbe: enableLivenessProbe
+    environmentResourceId: managedEnvironment.outputs.resourceId
+    location: location
+    maxReplicas: maxReplicas
+    minReplicas: minReplicas
+    name: appName
+    registryLoginServer: registryModule.outputs.loginServer
+    tags: tags
+    targetPort: targetPort
+    useAcr: useAcr
+  }
+}
+
+// The AVM Container App roleAssignments input is scoped to the app. AcrPull must be scoped to the registry.
+resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
   name: acrName
-  location: location
-  tags: tags
-  sku: {
-    name: 'Basic'
-  }
-  properties: {
-    adminUserEnabled: false
-    publicNetworkAccess: 'Enabled'
-  }
-}
-
-resource managedEnvironment 'Microsoft.App/managedEnvironments@2025-01-01' = {
-  name: managedEnvironmentName
-  location: location
-  tags: tags
-  properties: {
-    appLogsConfiguration: {
-      destination: 'log-analytics'
-      logAnalyticsConfiguration: {
-        customerId: logAnalytics.properties.customerId
-        sharedKey: logAnalytics.listKeys().primarySharedKey
-      }
-    }
-  }
-}
-
-resource containerApp 'Microsoft.App/containerApps@2025-01-01' = {
-  name: appName
-  location: location
-  tags: tags
-  identity: {
-    type: 'SystemAssigned'
-  }
-  properties: {
-    managedEnvironmentId: managedEnvironment.id
-    configuration: {
-      activeRevisionsMode: 'Single'
-      ingress: {
-        external: true
-        targetPort: targetPort
-        transport: 'auto'
-        allowInsecure: false
-      }
-      registries: useAcr ? [
-        {
-          server: registry.properties.loginServer
-          identity: 'system'
-        }
-      ] : []
-    }
-    template: {
-      containers: [
-        {
-          name: 'api'
-          image: containerImage
-          resources: {
-            cpu: json('0.25')
-            memory: '0.5Gi'
-          }
-          probes: enableLivenessProbe ? [
-            {
-              type: 'Liveness'
-              httpGet: {
-                path: '/health/live'
-                port: targetPort
-              }
-              initialDelaySeconds: 10
-              periodSeconds: 10
-              failureThreshold: 3
-            }
-          ] : []
-        }
-      ]
-      scale: {
-        minReplicas: minReplicas
-        maxReplicas: maxReplicas
-      }
-    }
-  }
 }
 
 resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (useAcr && createAcrPullRole) {
-  name: guid(registry.id, containerApp.id, 'AcrPull')
+  name: guid(registry.id, appName, 'AcrPull')
   scope: registry
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
-    principalId: containerApp.identity.principalId
+    principalId: containerApp.outputs.principalId
     principalType: 'ServicePrincipal'
   }
 }
 
-output containerAppName string = containerApp.name
-output containerAppFqdn string = containerApp.properties.configuration.ingress.fqdn
-output registryName string = registry.name
-output registryLoginServer string = registry.properties.loginServer
+output containerAppName string = containerApp.outputs.name
+output containerAppFqdn string = containerApp.outputs.fqdn
+output registryName string = registryModule.outputs.name
+output registryLoginServer string = registryModule.outputs.loginServer

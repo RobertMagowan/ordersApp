@@ -20,4 +20,5 @@ module registry 'br/avm:res/container-registry/registry:0.6.0' = {
 }
 
 output resourceId string = registry.outputs.resourceId
+output name string = name
 output loginServer string = registry.outputs.loginServer
