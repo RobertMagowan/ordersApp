@@ -10,6 +10,12 @@ Repository administrators may explicitly bypass the review requirement for their
 
 The Azure workflow uses OIDC and remains safely disabled until each environment has `AZURE_DEPLOYMENT_ENABLED=true`, the federated identity secrets (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`), and these variables: `AZURE_RESOURCE_GROUP`, `AZURE_LOCATION`, `AZURE_APP_NAME`, `AZURE_ACR_NAME`, `AZURE_MANAGED_ENVIRONMENT_NAME`, and `AZURE_LOG_ANALYTICS_NAME`. It previews changes with `what-if`, deploys the pinned AVM composition in `infra/main.bicep`, builds the API image from `src/CloudOrders.Api/Dockerfile`, pushes it to ACR, and smoke-tests `/health/live`.
 
+Deployment summaries retain the Git release SHA, immutable image digest reference, and API endpoint without exposing secrets. Manual deployment is rejected unless started from `development`, `test`, or `master`.
+
+## Version-1 contract pack
+
+The repository-owned [frontend design contract](docs/contracts/frontend-design.md), [version-1 contracts](docs/contracts/v1-contracts.md), and [traceability map](docs/contracts/traceability.md) are the authoritative implementation contracts. The `test` environment is the staging-equivalent environment used throughout this repository.
+
 ## Current status
 
 Sprint 1 provides a manually runnable local API vertical slice with in-memory order persistence and a deployable Azure Container Apps MVP foundation using pinned AVM Bicep modules. SQL durability is scheduled for a later sprint.
