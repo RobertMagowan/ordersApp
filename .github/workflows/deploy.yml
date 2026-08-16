@@ -421,8 +421,73 @@ jobs:
               containerImage="$IMAGE" \
             --mode Incremental
 
+      - name: Wait for candidate revision
+        id: candidate
+        env:
+          IMAGE: ${{ needs.prepare_release.outputs.image }}
+        run: |
+          EXPECTED_IMAGE="$IMAGE"
+          CANDIDATE_READY=false
+          for attempt in {1..30}; do
+            APP_DETAILS=$(az containerapp show \
+              --name "$AZURE_APP_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query '{latestRevision:properties.latestRevisionName,latestReadyRevision:properties.latestReadyRevisionName,release:tags.release}' \
+              --output json)
+            CANDIDATE_REVISION=$(printf '%s' "$APP_DETAILS" | jq --raw-output '.latestRevision // empty')
+            LATEST_READY_REVISION=$(printf '%s' "$APP_DETAILS" | jq --raw-output '.latestReadyRevision // empty')
+            APP_RELEASE=$(printf '%s' "$APP_DETAILS" | jq --raw-output '.release // empty')
+
+            if [[ -z "$CANDIDATE_REVISION" ]]; then
+              echo "No candidate revision is reported on attempt $attempt; waiting."
+              sleep 10
+              continue
+            fi
+
+            if ! REVISION_DETAILS=$(az containerapp revision show \
+              --name "$AZURE_APP_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --revision "$CANDIDATE_REVISION" \
+              --query '{provisioningState:properties.provisioningState,runningState:properties.runningState,healthState:properties.healthState,trafficWeight:properties.trafficWeight,image:properties.template.containers[0].image}' \
+              --output json); then
+              echo "Candidate revision $CANDIDATE_REVISION is not queryable on attempt $attempt; waiting."
+              sleep 10
+              continue
+            fi
+
+            CANDIDATE_IMAGE=$(printf '%s' "$REVISION_DETAILS" | jq --raw-output '.image // empty')
+            CANDIDATE_PROVISIONING_STATE=$(printf '%s' "$REVISION_DETAILS" | jq --raw-output '.provisioningState // empty')
+            CANDIDATE_RUNNING_STATE=$(printf '%s' "$REVISION_DETAILS" | jq --raw-output '.runningState // empty')
+            CANDIDATE_HEALTH_STATE=$(printf '%s' "$REVISION_DETAILS" | jq --raw-output '.healthState // empty')
+            CANDIDATE_TRAFFIC_WEIGHT=$(printf '%s' "$REVISION_DETAILS" | jq --raw-output '.trafficWeight // empty')
+
+            if [[ "$CANDIDATE_IMAGE" == "$EXPECTED_IMAGE" && \
+              "$CANDIDATE_PROVISIONING_STATE" == "Provisioned" && \
+              "$CANDIDATE_RUNNING_STATE" == "Running" && \
+              "$CANDIDATE_HEALTH_STATE" == "Healthy" && \
+              "$CANDIDATE_TRAFFIC_WEIGHT" == "100" && \
+              "$LATEST_READY_REVISION" == "$CANDIDATE_REVISION" && \
+              "$APP_RELEASE" == "$GITHUB_SHA" ]]; then
+              echo "Candidate revision $CANDIDATE_REVISION is the ready release for $EXPECTED_IMAGE."
+              echo "revision=$CANDIDATE_REVISION" >> "$GITHUB_OUTPUT"
+              echo "image=$CANDIDATE_IMAGE" >> "$GITHUB_OUTPUT"
+              CANDIDATE_READY=true
+              break
+            fi
+
+            echo "Candidate $CANDIDATE_REVISION on attempt $attempt: image=$CANDIDATE_IMAGE provisioning=$CANDIDATE_PROVISIONING_STATE running=$CANDIDATE_RUNNING_STATE health=$CANDIDATE_HEALTH_STATE traffic=$CANDIDATE_TRAFFIC_WEIGHT latestReady=$LATEST_READY_REVISION release=$APP_RELEASE; waiting."
+            sleep 10
+          done
+          if [[ "$CANDIDATE_READY" != true ]]; then
+            echo "Candidate revision did not become the ready 100% traffic release for $EXPECTED_IMAGE." >&2
+            exit 1
+          fi
+
       - name: Smoke test the deployed API
         id: endpoint
+        env:
+          CANDIDATE_REVISION: ${{ steps.candidate.outputs.revision }}
+          CANDIDATE_IMAGE: ${{ steps.candidate.outputs.image }}
         run: |
           FQDN=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.fqdn --output tsv)
           ENDPOINT="https://$FQDN"
@@ -431,10 +496,9 @@ jobs:
           for attempt in {1..30}; do
             STATUS=$(curl --fail --silent --show-error --output /dev/null --write-out '%{http_code}' "$ENDPOINT/health/live" || true)
             if [[ "$STATUS" == "200" ]]; then
-              echo "Health check passed on attempt $attempt."
-              REVISION=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.latestReadyRevisionName --output tsv)
+              echo "Candidate revision $CANDIDATE_REVISION ($CANDIDATE_IMAGE) passed ingress smoke on attempt $attempt."
               echo "url=$ENDPOINT" >> "$GITHUB_OUTPUT"
-              echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
+              echo "revision=$CANDIDATE_REVISION" >> "$GITHUB_OUTPUT"
               HEALTHY=true
               break
             fi
@@ -454,7 +518,7 @@ jobs:
           IMAGE_TAG: ${{ needs.prepare_release.outputs.image_tag }}
           PREVIOUS_IMAGE: ${{ needs.prepare_release.outputs.previous_image }}
           PREVIOUS_REVISION: ${{ needs.prepare_release.outputs.previous_revision }}
-          REVISION: ${{ steps.endpoint.outputs.revision }}
+          REVISION: ${{ steps.candidate.outputs.revision }}
         run: |
           ENDPOINT="${ENDPOINT:-unavailable (deployment or smoke test failed)}"
           IMAGE="${IMAGE:-unavailable (preparation failed)}"

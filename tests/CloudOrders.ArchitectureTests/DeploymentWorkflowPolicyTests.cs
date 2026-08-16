@@ -97,6 +97,43 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("param releaseId = 'bootstrap'", testParameters, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void DeploymentSmokeWaitsForTheCandidateRevisionBeforeProbingIngress()
+    {
+        var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
+        var workflow = File.ReadAllText(workflowPath);
+
+        var candidateStart = workflow.IndexOf("name: Wait for candidate revision", StringComparison.Ordinal);
+        var smokeStart = workflow.IndexOf("name: Smoke test the deployed API", StringComparison.Ordinal);
+        var summaryStart = workflow.IndexOf("name: Publish deployment summary", StringComparison.Ordinal);
+
+        Assert.True(candidateStart >= 0, "Expected a candidate-revision readiness gate.");
+        Assert.True(smokeStart > candidateStart, "Ingress smoke must run after candidate readiness is verified.");
+        Assert.True(summaryStart > smokeStart, "The summary must be published after candidate smoke.");
+
+        var candidateStep = workflow[candidateStart..smokeStart];
+        var smokeStep = workflow[smokeStart..summaryStart];
+        var summaryStep = workflow[summaryStart..];
+
+        Assert.Contains("properties.latestRevisionName", candidateStep, StringComparison.Ordinal);
+        Assert.Contains("az containerapp revision show", candidateStep, StringComparison.Ordinal);
+        Assert.Contains("CANDIDATE_IMAGE", candidateStep, StringComparison.Ordinal);
+        Assert.Contains("CANDIDATE_PROVISIONING_STATE", candidateStep, StringComparison.Ordinal);
+        Assert.Contains("CANDIDATE_RUNNING_STATE", candidateStep, StringComparison.Ordinal);
+        Assert.Contains("CANDIDATE_HEALTH_STATE", candidateStep, StringComparison.Ordinal);
+        Assert.Contains("CANDIDATE_TRAFFIC_WEIGHT", candidateStep, StringComparison.Ordinal);
+        Assert.Contains("LATEST_READY_REVISION", candidateStep, StringComparison.Ordinal);
+        Assert.Contains("APP_RELEASE", candidateStep, StringComparison.Ordinal);
+        Assert.Contains("$EXPECTED_IMAGE", candidateStep, StringComparison.Ordinal);
+        Assert.Contains("$GITHUB_SHA", candidateStep, StringComparison.Ordinal);
+        Assert.Contains("revision=$CANDIDATE_REVISION", candidateStep, StringComparison.Ordinal);
+
+        Assert.Contains("CANDIDATE_REVISION: ${{ steps.candidate.outputs.revision }}", smokeStep, StringComparison.Ordinal);
+        Assert.Contains("echo \"revision=$CANDIDATE_REVISION\"", smokeStep, StringComparison.Ordinal);
+        Assert.DoesNotContain("properties.latestReadyRevisionName", smokeStep, StringComparison.Ordinal);
+        Assert.Contains("REVISION: ${{ steps.candidate.outputs.revision }}", summaryStep, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
