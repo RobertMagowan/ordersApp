@@ -36,7 +36,7 @@ Write the failing test before production code. Use xUnit for .NET tests, bUnit f
 
 ## Commits and Pull Requests
 
-Use imperative Conventional Commit-style subjects, for example `feat: add transactional outbox`. Keep commits focused and sprint-sized. Pull requests must describe the sprint gate, link the relevant issue/plan, list test commands and manual evidence, call out migrations or Azure changes, and include screenshots for UI changes. Infrastructure PRs must include Bicep validation/what-if output.
+Use imperative Conventional Commit-style subjects, for example `feat: add transactional outbox`. A sprint should contain several focused commits where natural boundaries exist (tests, implementation, integration, packaging, and evidence); do not squash away useful review history during development. Pull requests must describe the sprint gate, link the relevant issue/plan, list test commands and manual evidence, call out migrations or Azure changes, and include screenshots for UI changes. Infrastructure PRs must include Bicep validation/what-if output.
 
 ## Security and Decision Gates
 
