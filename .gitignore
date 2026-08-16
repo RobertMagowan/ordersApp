@@ -3,10 +3,13 @@
 **/obj/
 **/TestResults/
 artifacts/
+.superpowers/sdd/task-*-brief.md
+.superpowers/sdd/task-*-report.md
 
 ## IDE and local tooling
 .vs/
 .vscode/
+.worktrees/
 *.user
 *.suo
 *.userosscache

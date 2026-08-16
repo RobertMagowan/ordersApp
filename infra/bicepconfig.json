@@ -1,0 +1,27 @@
+{
+  "moduleAliases": {
+    "br": {
+      "avm": {
+        "registry": "mcr.microsoft.com",
+        "modulePath": "bicep/avm"
+      }
+    }
+  },
+  "analyzers": {
+    "core": {
+      "enabled": true,
+      "verbose": true,
+      "rules": {
+        "no-unused-params": {
+          "level": "warning"
+        },
+        "no-unused-vars": {
+          "level": "warning"
+        },
+        "use-resource-symbol-reference": {
+          "level": "warning"
+        }
+      }
+    }
+  }
+}

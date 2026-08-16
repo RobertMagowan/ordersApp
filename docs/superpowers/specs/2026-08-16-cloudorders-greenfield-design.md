@@ -32,7 +32,7 @@ src/
   CloudOrders.Web/
   CloudOrders.OutboxPublisher/
   CloudOrders.OrderProcessor/
-  CloudOrders.TestSupport.Api/       # local/dev/staging only
+  CloudOrders.TestSupport.Api/       # local/development/test only
 tests/
   CloudOrders.UnitTests/
   CloudOrders.IntegrationTests/
@@ -61,30 +61,35 @@ At-least-once delivery is intentional. `EventId` remains the stable business occ
 
 ## Azure platform and security
 
-Azure Static Web Apps Standard hosts standalone Blazor WebAssembly and proxies same-origin `/api` traffic to the linked API Container App. Azure SQL, Service Bus, Function storage, Key Vault, and ACR use private endpoints after bootstrap. Runtime access uses managed identities and least-privilege data-plane/SQL roles; no runtime identity receives `db_owner`.
+Azure Static Web Apps Standard hosts standalone Blazor WebAssembly and proxies same-origin `/api` traffic to the linked API Container App. Azure SQL, Service Bus, Function storage, Key Vault, and runtime ACR pulls use private endpoints after bootstrap. ACR public access remains disabled; its single firewall exception is the `AzureServices` trusted-services bypass contract for the system-assigned ACR Task, Defender scanning when enabled, and server-side ACR import during promotion. Container Instances and Machine Learning are neither deployed nor authorized against the registry. Runtime access uses managed identities and least-privilege data-plane/SQL roles; no runtime identity receives `db_owner`.
 
-Bicep is the infrastructure source of truth, split into foundation, application, and observability entry points with environment parameter files. Stable API versions and regional support are rechecked immediately before pinning. GitHub Actions uses OIDC, protected environments, immutable artifacts, explicit concurrency, and promotion of identical artifacts through development, staging, and production. Secrets, `.env`, `local.settings.json`, generated ARM JSON, tokens, and browser auth state are never committed.
+Bicep is the infrastructure source of truth, split into foundation, application, and observability entry points with environment parameter files. Stable API versions and regional support are rechecked immediately before pinning. GitHub Actions uses OIDC, protected environments, immutable artifacts, explicit concurrency, and promotion of identical artifacts through development, test, and production; `test` is the staging-equivalent environment. Secrets, `.env`, `local.settings.json`, generated ARM JSON, tokens, and browser auth state are never committed.
 
 ## Local development and quality strategy
 
 Docker Compose provides application SQL Server, the Service Bus emulator and its separate SQL dependency, and Azurite. Application processes run on the host with trusted development HTTPS. Checked-in scripts perform readiness checks, migrations, startup guidance, and safe cleanup without embedding secrets.
 
-Tests are layered: fast domain/application unit tests; SQL Server/Testcontainers integration and concurrency tests; .NET end-to-end service tests; bUnit component tests; Playwright cross-browser, accessibility, authentication, resilience, and observability journeys; and NBomber staging load tests. Test names describe behavior, and every phase has a focused verification gate before broader suites run.
+Tests are layered: fast domain/application unit tests; SQL Server/Testcontainers integration and concurrency tests; .NET end-to-end service tests; bUnit component tests; Playwright cross-browser, accessibility, authentication, resilience, and observability journeys; and NBomber test-environment load tests. Test names describe behavior, and every phase has a focused verification gate before broader suites run.
 
 ## Delivery sequence
 
 1. Bootstrap the repository, solution policy, contributor guide, documentation, and unprivileged CI.
 2. Freeze executable API, event, telemetry, and schema contracts.
-3. Implement domain, persistence, API idempotency, health, auth boundaries, and tests.
-4. Implement outbox publication, Inbox processing, settlement, and failure-window tests.
-5. Make the local Docker/emulator stack and happy/failure paths reproducible.
-6. Build Azure foundation Bicep, private networking, identities, RBAC, and SQL bootstrap.
-7. Implement and deploy the two Flex Consumption Function Apps.
-8. Containerize/deploy the API and build/deploy the Blazor WASM frontend.
-9. Add non-production TestSupport, Observability Lab, KQL, workbooks, alerts, and full E2E evidence.
-10. Complete artifact promotion, security/supply-chain checks, load tests, runbooks, restore, rollback, and production-readiness gates.
+3. Establish workflow safeguards, repository-owned contracts, and the protected Azure `test` environment before material data features.
+4. Implement SQL persistence and durable HTTP idempotency, then separately add Entra authorization and customer history.
+5. Implement outbox publication, Inbox processing, settlement, and failure-window tests.
+6. Make the local Docker/emulator stack and happy/failure paths reproducible.
+7. Build Azure foundation Bicep, private networking, identities, RBAC, and SQL bootstrap.
+8. Implement and deploy the two Flex Consumption Function Apps.
+9. Containerize/deploy the API and establish the Blazor WASM hosting, typed-client, and authentication boundary.
+10. Build the responsive frontend shell, dispatch-control design system, shared components, and accessibility baseline.
+11. Implement the order lookup, creation, details, history, and status-tracking workflows against the deployed API.
+12. Complete frontend resilience, cross-browser/accessibility evidence, browser telemetry, performance budgets, deployment, and rollback verification.
+13. Add non-production TestSupport, Observability Lab, KQL, workbooks, alerts, and full E2E evidence.
+14. Complete artifact promotion, security/supply-chain checks, load tests, and operational runbooks.
+15. Complete restore, rollback, and production-readiness gates.
 
-Each phase must leave the repository buildable and include objective acceptance commands. Database changes use expand/migrate/contract; deployment never calls `Database.Migrate()` from application startup.
+Each remaining phase must leave the repository buildable and include objective acceptance commands. It then receives three working days of independent development-environment verification selected for the technology/risk and one to two working days of QA-only testing in Azure `test`; evidence, defects, and re-test records are retained. Defects are fixed only from a fresh `feature/*` branch and re-promoted. Database changes use expand/migrate/contract; deployment never calls `Database.Migrate()` from application startup.
 
 ## Deferred execution inputs
 

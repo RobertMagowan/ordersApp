@@ -8,6 +8,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/CloudOrders.ArchitectureTests/CloudOrders.ArchitectureTests.csproj" />
+    <Project Path="tests/CloudOrders.IntegrationTests/CloudOrders.IntegrationTests.csproj" />
     <Project Path="tests/CloudOrders.UnitTests/CloudOrders.UnitTests.csproj" />
   </Folder>
 </Solution>

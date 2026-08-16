@@ -1,0 +1,43 @@
+name: Validate Bicep Infrastructure
+
+on:
+  pull_request:
+    paths:
+      - 'infra/**/*.bicep'
+      - 'infra/**/*.bicepparam'
+      - 'infra/bicepconfig.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Build and lint Bicep
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Bicep
+        run: az bicep install
+
+      - name: Lint composition root
+        run: az bicep lint --file infra/main.bicep
+
+      - name: Build composition root
+        run: az bicep build --file infra/main.bicep
+
+      - name: Build environment parameter files
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in infra/environments/development.bicepparam infra/environments/test.bicepparam infra/environments/production.bicepparam; do
+            az bicep build-params --file "$file"
+          done
+
+      - name: Remove generated build output
+        if: always()
+        shell: bash
+        run: |
+          find infra -type f \( -name '*.json' -o -name '*.jsonc' \) -not -name 'bicepconfig.json' -delete
