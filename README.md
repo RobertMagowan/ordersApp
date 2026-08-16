@@ -12,11 +12,13 @@ The Azure workflow uses OIDC and remains safely disabled until each environment 
 
 Deployment summaries retain the Git release SHA, unique Bicep deployment name, immutable image digest reference, Container App revision, previous image/revision rollback reference, and API endpoint without exposing secrets. Rollback state comes from the latest ready revision's own template rather than from the app's mutable candidate template, and summary steps run even when inspection, preparation, deployment, or smoke testing fails. An existing Container App remains on its current release while the replacement image is built and previewed; the public bootstrap image is used only for a first deployment and is tagged `release=bootstrap`, never as the candidate Git release. Manual deployment is rejected unless started from `development`, `test`, or `master`.
 
-The workflow uses three ordered jobs as explicit review boundaries:
+The `development` and `test` GitHub environments each require the repository owner as a required deployment reviewer, permit self-review for this single-developer repository, and disallow administrator bypass. This is an enforceable deployment approval and does not add an independent PR approval requirement. Every job below references the protected environment and waits for its own approval before it can access environment secrets or start.
 
-1. `preview_foundation` authenticates with OIDC, fails closed on lookup errors other than Azure's explicit `ResourceNotFound`, captures the latest ready rollback revision/image, and runs the mutation-free foundation what-if.
-2. `prepare_release` begins only after that job succeeds. It provisions the bootstrap foundation only when required, publishes the digest-backed image, and runs the exact immutable-release what-if without changing the candidate Container App release.
-3. `deploy_release` is a separate downstream environment job. It cannot start before the digest preview completes, applies the environment's deployment protection again, deploys the reviewed digest, and smoke-tests it.
+The workflow uses three ordered jobs as explicit reviewed boundaries:
+
+1. Approve `preview_foundation` so it can authenticate with OIDC. It fails closed on lookup errors other than Azure's explicit `ResourceNotFound`, captures the latest ready rollback revision/image, and runs the mutation-free foundation what-if.
+2. Review that completed job and approve `prepare_release`. It provisions the bootstrap foundation only when required, publishes the digest-backed image, and runs the exact immutable-release what-if without changing the candidate Container App release.
+3. Review the digest what-if and approve `deploy_release`. It deploys the reviewed digest and smoke-tests it.
 
 ### Manual test-release inspection and gate
 
@@ -34,9 +36,9 @@ az resource list --resource-group ordersapp-test --query '[].{name:name,type:typ
 The required release gate is ordered and cannot be replaced by a direct protected-branch push or a feature-branch workflow dispatch:
 
 1. Open and review `feature/*` → `development`; required CI, promotion-policy, and conversation-resolution checks must pass.
-2. Merge the PR and retain the successful `development` deployment summary. A separate smoke-test agent verifies the reported HTTPS endpoint and immutable digest.
+2. Merge the PR, approve and review the three deployment jobs in order, and retain the successful `development` deployment summary. A separate smoke-test agent verifies the reported HTTPS endpoint and immutable digest.
 3. Open and review `development` → `test`; the same required checks must pass.
-4. Merge the PR. The `test` environment branch restriction admits only `test`, and OIDC deploys into `ordersapp-test` without a long-lived Azure credential.
+4. Merge the PR, then approve and review the three deployment jobs in order. The `test` environment branch restriction admits only `test`, and OIDC deploys into `ordersapp-test` without a long-lived Azure credential.
 5. Retain the test deployment summary and run the QA-only matrix before any `test` → `master` promotion.
 
 For a first test deployment, review the foundation job's what-if (Log Analytics, ACR, Container Apps environment, and Container App), then review the preparation job's second what-if against the resolved digest before the downstream deployment job proceeds. Do not treat a local what-if or manually provisioned resource as a substitute for the protected promotion gate.

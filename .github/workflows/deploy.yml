@@ -78,7 +78,7 @@ jobs:
           {
             echo "## CloudOrders deployment"
             echo
-            echo "- Release: `$GITHUB_SHA`"
+            printf -- '- Release: `%s`\n' "$GITHUB_SHA"
             echo "- Immutable API image: not published (Azure deployment is disabled)"
             echo "- API endpoint: not deployed (Azure deployment is disabled)"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -203,10 +203,10 @@ jobs:
           {
             echo "## CloudOrders foundation preview"
             echo
-            echo "- Release: `$GITHUB_SHA`"
-            echo "- Existing Container App: `$EXISTS`"
-            echo "- Rollback image: `$PREVIOUS_IMAGE`"
-            echo "- Previous ready revision: `$PREVIOUS_REVISION`"
+            printf -- '- Release: `%s`\n' "$GITHUB_SHA"
+            printf -- '- Existing Container App: `%s`\n' "$EXISTS"
+            printf -- '- Rollback image: `%s`\n' "$PREVIOUS_IMAGE"
+            printf -- '- Previous ready revision: `%s`\n' "$PREVIOUS_REVISION"
             echo "- Mutation: none; foundation provisioning is in the downstream preparation job"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -358,10 +358,10 @@ jobs:
           {
             echo "## CloudOrders immutable release preview"
             echo
-            echo "- Release: `$GITHUB_SHA`"
-            echo "- Candidate image: `$IMAGE`"
-            echo "- Rollback image: `$PREVIOUS_IMAGE`"
-            echo "- Previous ready revision: `$PREVIOUS_REVISION`"
+            printf -- '- Release: `%s`\n' "$GITHUB_SHA"
+            printf -- '- Candidate image: `%s`\n' "$IMAGE"
+            printf -- '- Rollback image: `%s`\n' "$PREVIOUS_IMAGE"
+            printf -- '- Previous ready revision: `%s`\n' "$PREVIOUS_REVISION"
             echo "- Release mutation: none; deployment is in the downstream environment job"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -465,12 +465,12 @@ jobs:
           {
             echo "## CloudOrders deployment"
             echo
-            echo "- Release: `$GITHUB_SHA`"
-            echo "- Bicep deployment: `$DEPLOYMENT_NAME`"
-            echo "- Immutable API image: `$IMAGE`"
-            echo "- Published image tag: `$IMAGE_TAG`"
-            echo "- Container App revision: `$REVISION`"
-            echo "- Rollback image: `$PREVIOUS_IMAGE`"
-            echo "- Previous ready revision: `$PREVIOUS_REVISION`"
+            printf -- '- Release: `%s`\n' "$GITHUB_SHA"
+            printf -- '- Bicep deployment: `%s`\n' "$DEPLOYMENT_NAME"
+            printf -- '- Immutable API image: `%s`\n' "$IMAGE"
+            printf -- '- Published image tag: `%s`\n' "$IMAGE_TAG"
+            printf -- '- Container App revision: `%s`\n' "$REVISION"
+            printf -- '- Rollback image: `%s`\n' "$PREVIOUS_IMAGE"
+            printf -- '- Previous ready revision: `%s`\n' "$PREVIOUS_REVISION"
             echo "- API endpoint: $ENDPOINT"
           } >> "$GITHUB_STEP_SUMMARY"

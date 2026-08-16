@@ -18,7 +18,7 @@ The three-day-equivalent developer-style verification matrix passed for the loca
 - Direct workflow inspection confirmed full-SHA-pinned checkout/login actions, job-scoped OIDC permission, promotion-ref validation, TLS-verifying curl, digest deployment, and no long-lived Azure credentials.
 - Direct state-transition inspection confirmed that an existing Container App skips the public bootstrap deployment, only explicit `ResourceNotFound` permits bootstrapping, and all other lookup failures stop the run.
 - Rollback inspection resolves `latestReadyRevisionName` and queries that revision's own template for the image. Preview, preparation, and deployment summaries use `always()` so the retained rollback state survives downstream failures.
-- Separate ordered jobs put foundation provisioning after the foundation what-if and candidate deployment after the resolved-digest what-if.
+- Separate ordered jobs put foundation provisioning after the foundation what-if and candidate deployment after the resolved-digest what-if. The `development` and `test` environments require the repository owner to approve each job, allow self-review for the single-developer repository, and disallow administrator bypass; completed preview output is therefore available before the next approval.
 - `npx.cmd --yes prettier@3.6.2 .github/workflows/deploy.yml --parser yaml` parsed the workflow successfully.
 
 ## Day-equivalent 2 — Bicep and deployment plan
@@ -55,6 +55,16 @@ Sanitized direct inspection established:
 - Its service principal has Contributor and Role Based Access Control Administrator scoped to `ordersapp-test`; no long-lived credential was added.
 - `ordersapp-test` exists, is tagged for CloudOrders/test/Bicep, and contains no resources or deployment history before promotion.
 - Prior live development baseline run `31963067907` succeeded at release `30ae0a033978f92f3fa0aa0e6bd53909701251fb`; it provisioned four resources, published an image, and returned HTTP 200 from `/health/live`. That run predates the Task 1/2 candidate and is not evidence that this candidate deployed.
+
+### Enforced deployment-review gate
+
+On 2026-08-16, the GitHub environment API was updated for `development` and `test` with reviewer user `RobertMagowan`, `prevent_self_review=false`, and `can_admins_bypass=false`. Read-back inspection confirmed both environments retain `custom_branch_policies=true`; their branch-policy endpoints still admit only `development` and `test` respectively. Branch protection and PR approval counts were not changed.
+
+GitHub documents that every workflow job referencing an environment with required reviewers waits for approval before it starts or receives environment secrets. Because the dependent jobs do not become pending concurrently, the owner approves `preview_foundation`, reviews its completed what-if, then separately approves `prepare_release`; after reviewing the completed digest what-if, the owner separately approves `deploy_release`. Self-review is deliberately allowed because this is a single-developer repository; this is not an independent PR approval.
+
+- Deployment/environment behavior: <https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments>
+- Reviewing deployments: <https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments>
+- Environment REST API: <https://docs.github.com/en/rest/deployments/environments>
 
 ## Limitations and gate
 

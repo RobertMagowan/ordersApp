@@ -37,10 +37,12 @@ public sealed class DeploymentWorkflowPolicyTests
         var workflowPath = Path.Combine(repositoryRoot, ".github", "workflows", "deploy.yml");
         var mainBicepPath = Path.Combine(repositoryRoot, "infra", "main.bicep");
         var testParametersPath = Path.Combine(repositoryRoot, "infra", "environments", "test.bicepparam");
+        var readmePath = Path.Combine(repositoryRoot, "README.md");
 
         var workflow = File.ReadAllText(workflowPath);
         var mainBicep = File.ReadAllText(mainBicepPath);
         var testParameters = File.ReadAllText(testParametersPath);
+        var readme = File.ReadAllText(readmePath);
 
         Assert.Contains("name: Inspect existing release", workflow, StringComparison.Ordinal);
         Assert.Contains("LOOKUP_STATUS=$?", workflow, StringComparison.Ordinal);
@@ -60,6 +62,14 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("Rollback image", workflow, StringComparison.Ordinal);
         Assert.Contains("Container App revision", workflow, StringComparison.Ordinal);
         Assert.Contains("if: always()", workflow, StringComparison.Ordinal);
+        Assert.Contains("required deployment reviewer", readme, StringComparison.OrdinalIgnoreCase);
+
+        var unsafeMarkdownCommands = workflow.Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => line.StartsWith("echo ", StringComparison.Ordinal) && line.Contains('`'))
+            .ToArray();
+        Assert.Empty(unsafeMarkdownCommands);
+        Assert.Contains("printf -- '- Release: `%s`", workflow, StringComparison.Ordinal);
 
         var previewFoundationIndex = workflow.IndexOf("preview_foundation:", StringComparison.Ordinal);
         var prepareReleaseIndex = workflow.IndexOf("prepare_release:", StringComparison.Ordinal);

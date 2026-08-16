@@ -30,7 +30,7 @@ az bicep build-params --file infra/environments/test.bicepparam
 az bicep build-params --file infra/environments/production.bicepparam
 ```
 
-Local infrastructure and deployment commands are added per sprint. Never run migrations from application startup; use the documented deployment migration command. Merges to `development`, `test`, and `master` invoke the matching protected GitHub environment workflow. The MVP workflow previews and provisions Azure Container Apps, Azure Container Registry, and Log Analytics from `infra/main.bicep`, then publishes an immutable API image. AVM module versions are pinned; the registry-scoped `AcrPull` assignment remains a documented native Bicep exception because the Container App AVM role assignments are app-scoped.
+Local infrastructure and deployment commands are added per sprint. Never run migrations from application startup; use the documented deployment migration command. Merges to `development`, `test`, and `master` invoke the matching protected GitHub environment workflow. `development` and `test` require the repository owner as deployment reviewer with self-review allowed and administrator bypass disabled; this gates each what-if transition without adding an independent PR approval. The MVP workflow previews and provisions Azure Container Apps, Azure Container Registry, and Log Analytics from `infra/main.bicep`, then publishes an immutable API image. AVM module versions are pinned; the registry-scoped `AcrPull` assignment remains a documented native Bicep exception because the Container App AVM role assignments are app-scoped.
 
 ## Coding Style and Naming
 
