@@ -8,11 +8,11 @@ Work in `feature/*` branches. Open a pull request into `development`, then promo
 
 Repository administrators may explicitly bypass the review requirement for their own PR; CI, promotion-policy, and conversation checks remain required because this repository has a single developer.
 
-The Azure workflow uses OIDC and remains safely disabled until each environment has `AZURE_DEPLOYMENT_ENABLED=true`, the federated identity secrets (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`), and these variables: `AZURE_RESOURCE_GROUP`, `AZURE_LOCATION`, `AZURE_APP_NAME`, `AZURE_ACR_NAME`, `AZURE_MANAGED_ENVIRONMENT_NAME`, and `AZURE_LOG_ANALYTICS_NAME`. It deploys `infra/main.bicep`, builds the API image from `src/CloudOrders.Api/Dockerfile`, pushes it to ACR, and smoke-tests `/health/live`.
+The Azure workflow uses OIDC and remains safely disabled until each environment has `AZURE_DEPLOYMENT_ENABLED=true`, the federated identity secrets (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`), and these variables: `AZURE_RESOURCE_GROUP`, `AZURE_LOCATION`, `AZURE_APP_NAME`, `AZURE_ACR_NAME`, `AZURE_MANAGED_ENVIRONMENT_NAME`, and `AZURE_LOG_ANALYTICS_NAME`. It previews changes with `what-if`, deploys the pinned AVM composition in `infra/main.bicep`, builds the API image from `src/CloudOrders.Api/Dockerfile`, pushes it to ACR, and smoke-tests `/health/live`.
 
 ## Current status
 
-Sprint 1 provides a manually runnable local API vertical slice with in-memory order persistence. SQL durability and Azure deployment are scheduled for later sprints.
+Sprint 1 provides a manually runnable local API vertical slice with in-memory order persistence and a deployable Azure Container Apps MVP foundation using pinned AVM Bicep modules. SQL durability is scheduled for a later sprint.
 
 ## Prerequisites
 
@@ -30,6 +30,11 @@ dotnet restore
 dotnet format --verify-no-changes
 dotnet build --configuration Release
 dotnet test --configuration Release
+az bicep lint --file infra/main.bicep
+az bicep build --file infra/main.bicep
+az bicep build-params --file infra/environments/development.bicepparam
+az bicep build-params --file infra/environments/test.bicepparam
+az bicep build-params --file infra/environments/production.bicepparam
 ```
 
 Do not commit secrets or generated build output. Cloud resource values and deployment identities are supplied at the sprint decision gates documented in `AGENTS.md`.
