@@ -32,7 +32,7 @@ src/
   CloudOrders.Web/
   CloudOrders.OutboxPublisher/
   CloudOrders.OrderProcessor/
-  CloudOrders.TestSupport.Api/       # local/dev/staging only
+  CloudOrders.TestSupport.Api/       # local/development/test only
 tests/
   CloudOrders.UnitTests/
   CloudOrders.IntegrationTests/
@@ -63,13 +63,13 @@ At-least-once delivery is intentional. `EventId` remains the stable business occ
 
 Azure Static Web Apps Standard hosts standalone Blazor WebAssembly and proxies same-origin `/api` traffic to the linked API Container App. Azure SQL, Service Bus, Function storage, Key Vault, and ACR use private endpoints after bootstrap. Runtime access uses managed identities and least-privilege data-plane/SQL roles; no runtime identity receives `db_owner`.
 
-Bicep is the infrastructure source of truth, split into foundation, application, and observability entry points with environment parameter files. Stable API versions and regional support are rechecked immediately before pinning. GitHub Actions uses OIDC, protected environments, immutable artifacts, explicit concurrency, and promotion of identical artifacts through development, staging, and production. Secrets, `.env`, `local.settings.json`, generated ARM JSON, tokens, and browser auth state are never committed.
+Bicep is the infrastructure source of truth, split into foundation, application, and observability entry points with environment parameter files. Stable API versions and regional support are rechecked immediately before pinning. GitHub Actions uses OIDC, protected environments, immutable artifacts, explicit concurrency, and promotion of identical artifacts through development, test, and production; `test` is the staging-equivalent environment. Secrets, `.env`, `local.settings.json`, generated ARM JSON, tokens, and browser auth state are never committed.
 
 ## Local development and quality strategy
 
 Docker Compose provides application SQL Server, the Service Bus emulator and its separate SQL dependency, and Azurite. Application processes run on the host with trusted development HTTPS. Checked-in scripts perform readiness checks, migrations, startup guidance, and safe cleanup without embedding secrets.
 
-Tests are layered: fast domain/application unit tests; SQL Server/Testcontainers integration and concurrency tests; .NET end-to-end service tests; bUnit component tests; Playwright cross-browser, accessibility, authentication, resilience, and observability journeys; and NBomber staging load tests. Test names describe behavior, and every phase has a focused verification gate before broader suites run.
+Tests are layered: fast domain/application unit tests; SQL Server/Testcontainers integration and concurrency tests; .NET end-to-end service tests; bUnit component tests; Playwright cross-browser, accessibility, authentication, resilience, and observability journeys; and NBomber test-environment load tests. Test names describe behavior, and every phase has a focused verification gate before broader suites run.
 
 ## Delivery sequence
 

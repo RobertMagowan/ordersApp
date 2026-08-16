@@ -21,8 +21,8 @@ The non-production Observability Lab remains with TestSupport in Sprint 11 becau
 
 ## Constraints and Verification
 
-Section 19 of `CLOUDORDERS_HANDOFF.md` remains the frontend design authority. The browser contains no client secret, API authorization remains authoritative, POST retries preserve the same durable idempotency key, and infrastructure states remain hidden from ordinary users. Each sprint ends with Release builds, focused automated tests, a manual browser journey, an Azure development deployment, and retained evidence.
+Section 19 of the source handoff at `C:\Users\admin\Documents\Codex\2026-08-16\referenced-chatgpt-conversation-this-is-an\outputs\CLOUDORDERS_HANDOFF.md` remains the frontend design authority until its contract index is versioned in the repository. The browser contains no client secret, API authorization remains authoritative, POST retries preserve the same durable idempotency key, and infrastructure states remain hidden from ordinary users. Each sprint ends with Release builds, focused automated tests, a manual browser journey, an Azure development deployment, and retained evidence.
 
 ## Effort Model
 
-For one focused developer, the three new frontend sprints add approximately 13–20 working days. The complete roadmap is approximately 59–91 working days, excluding external approval, tenant-access, and unexpected Azure service delays.
+For one focused developer, the three new frontend sprints add approximately 13–20 working days. After correcting the earlier cloud-deployment gates so every feature sprint is also testable in Azure development, including an Azure-native deployment Job, a `ukwest`-compatible managed ACR Tasks build path, required private-endpoint SKUs, and full observability/release evidence, the complete roadmap is approximately 76–115 working days, excluding external approval, tenant-access, and unexpected Azure service delays.
