@@ -24,7 +24,7 @@ The existing two-phase deployment remains intentional. The first pass creates th
 
 The ACR `AcrPull` assignment is scoped to the registry, not the Container App. The published AVM authorization role-assignment modules do not target an individual resource scope, so the implementation will retain the small native `Microsoft.Authorization/roleAssignments` declaration scoped to the registry. It will not be incorrectly placed in the Container App module's app-scoped role assignments.
 
-Native Bicep declarations may remain only where AVM does not expose a required sequencing or compatibility feature. Any such exception must be documented next to the declaration.
+Native Bicep declarations may remain only where AVM lacks the required resource scope, sequencing, or compatibility support. Each exception must be documented next to the declaration.
 
 ## Validation and Compatibility
 
