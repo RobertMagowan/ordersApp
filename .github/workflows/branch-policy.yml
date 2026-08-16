@@ -22,8 +22,8 @@ jobs:
         run: |
           case "$BASE" in
             development)
-              [[ "$HEAD" == feature/* || "$HEAD" == agent/* ]] || {
-                echo "PRs into development must come from feature/* or agent/* (got $HEAD)." >&2
+              [[ "$HEAD" == feature/* ]] || {
+                echo "PRs into development must come from feature/* (got $HEAD)." >&2
                 exit 1
               }
               ;;

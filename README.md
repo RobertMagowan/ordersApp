@@ -4,7 +4,7 @@ CloudOrders is a .NET 10/Azure order-processing system. The repository is being 
 
 ## Branch promotion and deployment
 
-Work in `feature/*` or `agent/*` branches. Open a pull request into `development`, then promote only through approved pull requests to `test` and finally `master`. Each protected branch requires exactly one approval and the CI plus promotion-policy checks. Merges start the matching GitHub environment workflow (`development`, `test`, or `production`).
+Work in `feature/*` branches. Open a pull request into `development`, then promote only through approved pull requests to `test` and finally `master`. Each protected branch requires exactly one approval and the CI plus promotion-policy checks. Merges start the matching GitHub environment workflow (`development`, `test`, or `production`).
 
 Repository administrators may explicitly bypass the review requirement for their own PR; CI, promotion-policy, and conversation checks remain required because this repository has a single developer.
 
