@@ -36,6 +36,9 @@ param maxReplicas int = 2
 @description('HTTP target port exposed by the current container image.')
 param targetPort int = 8080
 
+@description('Enable the API liveness probe. Disable only for the public bootstrap image.')
+param enableLivenessProbe bool = true
+
 @description('Resource tags applied to every resource.')
 param tags object = {
   application: 'CloudOrders'
@@ -119,7 +122,7 @@ resource containerApp 'Microsoft.App/containerApps@2025-01-01' = {
             cpu: json('0.25')
             memory: '0.5Gi'
           }
-          probes: [
+          probes: enableLivenessProbe ? [
             {
               type: 'Liveness'
               httpGet: {
@@ -130,7 +133,7 @@ resource containerApp 'Microsoft.App/containerApps@2025-01-01' = {
               periodSeconds: 10
               failureThreshold: 3
             }
-          ]
+          ] : []
         }
       ]
       scale: {
