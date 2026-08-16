@@ -43,17 +43,43 @@ public sealed class DeploymentWorkflowPolicyTests
         var testParameters = File.ReadAllText(testParametersPath);
 
         Assert.Contains("name: Inspect existing release", workflow, StringComparison.Ordinal);
-        Assert.Contains("steps.existing_release.outputs.exists != 'true'", workflow, StringComparison.Ordinal);
+        Assert.Contains("LOOKUP_STATUS=$?", workflow, StringComparison.Ordinal);
+        Assert.Contains("ResourceNotFound", workflow, StringComparison.Ordinal);
+        Assert.Contains("exit \"$LOOKUP_STATUS\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("az containerapp revision show", workflow, StringComparison.Ordinal);
+        Assert.Contains("properties.latestReadyRevisionName", workflow, StringComparison.Ordinal);
+        Assert.Contains("preview_foundation:", workflow, StringComparison.Ordinal);
+        Assert.Contains("prepare_release:", workflow, StringComparison.Ordinal);
+        Assert.Contains("deploy_release:", workflow, StringComparison.Ordinal);
+        Assert.Contains("needs: preview_foundation", workflow, StringComparison.Ordinal);
+        Assert.Contains("needs: prepare_release", workflow, StringComparison.Ordinal);
         Assert.Contains("name: Preview immutable release", workflow, StringComparison.Ordinal);
         Assert.Contains("releaseId=\"$GITHUB_SHA\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("releaseId=bootstrap", workflow, StringComparison.Ordinal);
         Assert.Contains("--name \"$DEPLOYMENT_NAME\"", workflow, StringComparison.Ordinal);
         Assert.Contains("Rollback image", workflow, StringComparison.Ordinal);
         Assert.Contains("Container App revision", workflow, StringComparison.Ordinal);
+        Assert.Contains("if: always()", workflow, StringComparison.Ordinal);
 
-        var buildImageIndex = workflow.IndexOf("name: Build and publish immutable API image", StringComparison.Ordinal);
+        var previewFoundationIndex = workflow.IndexOf("preview_foundation:", StringComparison.Ordinal);
+        var prepareReleaseIndex = workflow.IndexOf("prepare_release:", StringComparison.Ordinal);
         var previewReleaseIndex = workflow.IndexOf("name: Preview immutable release", StringComparison.Ordinal);
-        Assert.True(buildImageIndex >= 0 && previewReleaseIndex > buildImageIndex,
-            "The reviewed what-if must use the resolved immutable image after it is published.");
+        var deployReleaseIndex = workflow.IndexOf("deploy_release:", StringComparison.Ordinal);
+        Assert.True(previewFoundationIndex >= 0 && prepareReleaseIndex > previewFoundationIndex,
+            "Foundation mutation must be in a downstream job after foundation preview.");
+        Assert.True(previewReleaseIndex >= 0 && deployReleaseIndex > previewReleaseIndex,
+            "Release mutation must be in a downstream job after the digest what-if.");
+
+        var bootstrapStart = workflow.IndexOf("name: Provision MVP foundation with public bootstrap image", StringComparison.Ordinal);
+        var buildImageIndex = workflow.IndexOf("name: Build and publish immutable API image", StringComparison.Ordinal);
+        Assert.True(bootstrapStart >= 0 && buildImageIndex > bootstrapStart, "Expected bootstrap before image publication.");
+        var bootstrapStep = workflow[bootstrapStart..buildImageIndex];
+        Assert.Contains("releaseId=bootstrap", bootstrapStep, StringComparison.Ordinal);
+        Assert.DoesNotContain("releaseId=\"$GITHUB_SHA\"", bootstrapStep, StringComparison.Ordinal);
+
+        var summaryStart = workflow.IndexOf("name: Publish deployment summary", StringComparison.Ordinal);
+        Assert.True(summaryStart >= 0, "Expected an always-running deployment summary.");
+        Assert.Contains("if: always()", workflow[summaryStart..], StringComparison.Ordinal);
 
         Assert.Contains("param releaseId string = 'bootstrap'", mainBicep, StringComparison.Ordinal);
         Assert.Contains("release: releaseId", mainBicep, StringComparison.Ordinal);

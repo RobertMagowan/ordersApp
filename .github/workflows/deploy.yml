@@ -16,14 +16,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  validate-promotion-ref:
+  validate_promotion_ref:
     name: Validate promotion ref
     runs-on: ubuntu-latest
     outputs:
-      environment: ${{ steps.promotion-ref.outputs.environment }}
+      environment: ${{ steps.promotion_ref.outputs.environment }}
     steps:
       - name: Reject a non-promotion branch
-        id: promotion-ref
+        id: promotion_ref
         shell: bash
         run: |
           set -euo pipefail
@@ -44,15 +44,20 @@ jobs:
               ;;
           esac
 
-  deploy:
-    name: Deploy ${{ github.ref_name }}
-    needs: validate-promotion-ref
+  preview_foundation:
+    name: Preview ${{ github.ref_name }} foundation
+    needs: validate_promotion_ref
     runs-on: ubuntu-latest
     environment:
-      name: ${{ needs.validate-promotion-ref.outputs.environment }}
+      name: ${{ needs.validate_promotion_ref.outputs.environment }}
     permissions:
       contents: read
       id-token: write
+    outputs:
+      enabled: ${{ steps.deployment_state.outputs.enabled }}
+      exists: ${{ steps.existing_release.outputs.exists }}
+      previous_image: ${{ steps.existing_release.outputs.previous_image }}
+      previous_revision: ${{ steps.existing_release.outputs.previous_revision }}
     env:
       AZURE_DEPLOYMENT_ENABLED: ${{ vars.AZURE_DEPLOYMENT_ENABLED }}
       AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
@@ -62,10 +67,10 @@ jobs:
       AZURE_MANAGED_ENVIRONMENT_NAME: ${{ vars.AZURE_MANAGED_ENVIRONMENT_NAME }}
       AZURE_LOG_ANALYTICS_NAME: ${{ vars.AZURE_LOG_ANALYTICS_NAME }}
       DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
-      DEPLOYMENT_NAME: cloudorders-${{ github.ref_name == 'master' && 'production' || github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - name: Check out source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Read deployment state
+        id: deployment_state
+        run: echo "enabled=$AZURE_DEPLOYMENT_ENABLED" >> "$GITHUB_OUTPUT"
 
       - name: Publish deferred deployment summary
         if: env.AZURE_DEPLOYMENT_ENABLED != 'true'
@@ -73,7 +78,7 @@ jobs:
           {
             echo "## CloudOrders deployment"
             echo
-            echo "- Release: \`$GITHUB_SHA\`"
+            echo "- Release: `$GITHUB_SHA`"
             echo "- Immutable API image: not published (Azure deployment is disabled)"
             echo "- API endpoint: not deployed (Azure deployment is disabled)"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -98,6 +103,10 @@ jobs:
             fi
           done
 
+      - name: Check out source
+        if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
       - name: Sign in to Azure with OIDC
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
         uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
@@ -116,25 +125,44 @@ jobs:
       - name: Inspect existing release
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
         id: existing_release
+        shell: bash
         run: |
-          if az containerapp show \
+          set +e
+          LOOKUP_ERROR=$(az containerapp show \
             --name "$AZURE_APP_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --only-show-errors >/dev/null 2>&1; then
-            PREVIOUS_IMAGE=$(az containerapp show \
-              --name "$AZURE_APP_NAME" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --query properties.template.containers[0].image --output tsv)
+            --only-show-errors --output none 2>&1)
+          LOOKUP_STATUS=$?
+          set -e
+
+          if [[ "$LOOKUP_STATUS" -eq 0 ]]; then
             PREVIOUS_REVISION=$(az containerapp show \
               --name "$AZURE_APP_NAME" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --query properties.latestReadyRevisionName --output tsv)
+            if [[ -z "$PREVIOUS_REVISION" ]]; then
+              echo "The existing Container App has no ready revision to retain for rollback." >&2
+              exit 1
+            fi
+            PREVIOUS_IMAGE=$(az containerapp revision show \
+              --name "$AZURE_APP_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --revision "$PREVIOUS_REVISION" \
+              --query properties.template.containers[0].image --output tsv)
+            if [[ -z "$PREVIOUS_IMAGE" ]]; then
+              echo "The ready revision does not expose a rollback image." >&2
+              exit 1
+            fi
             echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
+          elif [[ "$LOOKUP_ERROR" == *"ResourceNotFound"* ]]; then
             PREVIOUS_IMAGE='none (first deployment)'
             PREVIOUS_REVISION='none (first deployment)'
             echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$LOOKUP_ERROR" >&2
+            exit "$LOOKUP_STATUS"
           fi
+
           echo "previous_image=$PREVIOUS_IMAGE" >> "$GITHUB_OUTPUT"
           echo "previous_revision=$PREVIOUS_REVISION" >> "$GITHUB_OUTPUT"
 
@@ -149,7 +177,7 @@ jobs:
             --parameters "$PARAM_FILE" \
               location="$AZURE_LOCATION" \
               environmentName="$DEPLOYMENT_ENVIRONMENT" \
-              releaseId="$GITHUB_SHA" \
+              releaseId=bootstrap \
               appName="$AZURE_APP_NAME" \
               acrName="$AZURE_ACR_NAME" \
               managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" \
@@ -160,11 +188,78 @@ jobs:
               createAcrPullRole=false \
               containerImage='mcr.microsoft.com/k8se/quickstart:latest' \
             --mode Incremental \
-            --result-format ResourceIdOnly
+            --result-format FullResourcePayloads
+
+      - name: Publish foundation preview summary
+        if: always() && env.AZURE_DEPLOYMENT_ENABLED == 'true'
+        env:
+          EXISTS: ${{ steps.existing_release.outputs.exists }}
+          PREVIOUS_IMAGE: ${{ steps.existing_release.outputs.previous_image }}
+          PREVIOUS_REVISION: ${{ steps.existing_release.outputs.previous_revision }}
+        run: |
+          EXISTS="${EXISTS:-unavailable (inspection failed)}"
+          PREVIOUS_IMAGE="${PREVIOUS_IMAGE:-unavailable (inspection failed)}"
+          PREVIOUS_REVISION="${PREVIOUS_REVISION:-unavailable (inspection failed)}"
+          {
+            echo "## CloudOrders foundation preview"
+            echo
+            echo "- Release: `$GITHUB_SHA`"
+            echo "- Existing Container App: `$EXISTS`"
+            echo "- Rollback image: `$PREVIOUS_IMAGE`"
+            echo "- Previous ready revision: `$PREVIOUS_REVISION`"
+            echo "- Mutation: none; foundation provisioning is in the downstream preparation job"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  prepare_release:
+    name: Prepare and preview ${{ github.ref_name }} release
+    needs: preview_foundation
+    if: needs.preview_foundation.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+      image_tag: ${{ steps.image.outputs.tag }}
+      digest: ${{ steps.image.outputs.digest }}
+      previous_image: ${{ steps.rollback_context.outputs.previous_image }}
+      previous_revision: ${{ steps.rollback_context.outputs.previous_revision }}
+    env:
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+      AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
+      AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+      AZURE_MANAGED_ENVIRONMENT_NAME: ${{ vars.AZURE_MANAGED_ENVIRONMENT_NAME }}
+      AZURE_LOG_ANALYTICS_NAME: ${{ vars.AZURE_LOG_ANALYTICS_NAME }}
+      DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
+      DEPLOYMENT_NAME: cloudorders-${{ github.ref_name == 'master' && 'production' || github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Retain rollback context
+        id: rollback_context
+        env:
+          PREVIOUS_IMAGE: ${{ needs.preview_foundation.outputs.previous_image }}
+          PREVIOUS_REVISION: ${{ needs.preview_foundation.outputs.previous_revision }}
+        run: |
+          echo "previous_image=$PREVIOUS_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "previous_revision=$PREVIOUS_REVISION" >> "$GITHUB_OUTPUT"
+
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Bicep
+        run: az bicep install
 
       - name: Provision MVP foundation with public bootstrap image
-        if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
-          && steps.existing_release.outputs.exists != 'true'
+        if: needs.preview_foundation.outputs.exists != 'true'
         run: |
           az deployment group create \
             --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -174,7 +269,7 @@ jobs:
               "infra/environments/$DEPLOYMENT_ENVIRONMENT.bicepparam" \
               location="$AZURE_LOCATION" \
               environmentName="$DEPLOYMENT_ENVIRONMENT" \
-              releaseId="$GITHUB_SHA" \
+              releaseId=bootstrap \
               appName="$AZURE_APP_NAME" \
               acrName="$AZURE_ACR_NAME" \
               managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" \
@@ -187,7 +282,6 @@ jobs:
             --mode Incremental
 
       - name: Build and publish immutable API image
-        if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
         id: image
         run: |
           LOGIN_SERVER=$(az acr show --name "$AZURE_ACR_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query loginServer --output tsv)
@@ -206,7 +300,6 @@ jobs:
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
       - name: Grant managed identity ACR pull access
-        if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
         run: |
           PRINCIPAL_ID=$(az containerapp show \
             --name "$AZURE_APP_NAME" \
@@ -229,7 +322,6 @@ jobs:
           fi
 
       - name: Preview immutable release
-        if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
         env:
           IMAGE: ${{ steps.image.outputs.image }}
         run: |
@@ -253,10 +345,61 @@ jobs:
             --mode Incremental \
             --result-format FullResourcePayloads
 
-      - name: Deploy immutable image after ACR access is ready
-        if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
+      - name: Publish immutable release preview summary
+        if: always()
         env:
           IMAGE: ${{ steps.image.outputs.image }}
+          PREVIOUS_IMAGE: ${{ needs.preview_foundation.outputs.previous_image }}
+          PREVIOUS_REVISION: ${{ needs.preview_foundation.outputs.previous_revision }}
+        run: |
+          IMAGE="${IMAGE:-unavailable (preparation failed)}"
+          PREVIOUS_IMAGE="${PREVIOUS_IMAGE:-unavailable (inspection failed)}"
+          PREVIOUS_REVISION="${PREVIOUS_REVISION:-unavailable (inspection failed)}"
+          {
+            echo "## CloudOrders immutable release preview"
+            echo
+            echo "- Release: `$GITHUB_SHA`"
+            echo "- Candidate image: `$IMAGE`"
+            echo "- Rollback image: `$PREVIOUS_IMAGE`"
+            echo "- Previous ready revision: `$PREVIOUS_REVISION`"
+            echo "- Release mutation: none; deployment is in the downstream environment job"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy_release:
+    name: Deploy ${{ github.ref_name }} after preview
+    needs: prepare_release
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+      AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
+      AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+      AZURE_MANAGED_ENVIRONMENT_NAME: ${{ vars.AZURE_MANAGED_ENVIRONMENT_NAME }}
+      AZURE_LOG_ANALYTICS_NAME: ${{ vars.AZURE_LOG_ANALYTICS_NAME }}
+      DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
+      DEPLOYMENT_NAME: cloudorders-${{ github.ref_name == 'master' && 'production' || github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Bicep
+        run: az bicep install
+
+      - name: Deploy immutable image after preview
+        env:
+          IMAGE: ${{ needs.prepare_release.outputs.image }}
         run: |
           az deployment group create \
             --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -279,7 +422,6 @@ jobs:
             --mode Incremental
 
       - name: Smoke test the deployed API
-        if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
         id: endpoint
         run: |
           FQDN=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.fqdn --output tsv)
@@ -305,24 +447,30 @@ jobs:
           fi
 
       - name: Publish deployment summary
-        if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
+        if: always()
         env:
           ENDPOINT: ${{ steps.endpoint.outputs.url }}
-          IMAGE: ${{ steps.image.outputs.image }}
-          IMAGE_TAG: ${{ steps.image.outputs.tag }}
-          PREVIOUS_IMAGE: ${{ steps.existing_release.outputs.previous_image }}
-          PREVIOUS_REVISION: ${{ steps.existing_release.outputs.previous_revision }}
+          IMAGE: ${{ needs.prepare_release.outputs.image }}
+          IMAGE_TAG: ${{ needs.prepare_release.outputs.image_tag }}
+          PREVIOUS_IMAGE: ${{ needs.prepare_release.outputs.previous_image }}
+          PREVIOUS_REVISION: ${{ needs.prepare_release.outputs.previous_revision }}
           REVISION: ${{ steps.endpoint.outputs.revision }}
         run: |
+          ENDPOINT="${ENDPOINT:-unavailable (deployment or smoke test failed)}"
+          IMAGE="${IMAGE:-unavailable (preparation failed)}"
+          IMAGE_TAG="${IMAGE_TAG:-unavailable (preparation failed)}"
+          PREVIOUS_IMAGE="${PREVIOUS_IMAGE:-unavailable (inspection failed)}"
+          PREVIOUS_REVISION="${PREVIOUS_REVISION:-unavailable (inspection failed)}"
+          REVISION="${REVISION:-unavailable (deployment or smoke test failed)}"
           {
             echo "## CloudOrders deployment"
             echo
-            echo "- Release: \`$GITHUB_SHA\`"
-            echo "- Bicep deployment: \`$DEPLOYMENT_NAME\`"
-            echo "- Immutable API image: \`$IMAGE\`"
-            echo "- Published image tag: \`$IMAGE_TAG\`"
-            echo "- Container App revision: \`$REVISION\`"
-            echo "- Rollback image: \`$PREVIOUS_IMAGE\`"
-            echo "- Previous revision: \`$PREVIOUS_REVISION\`"
+            echo "- Release: `$GITHUB_SHA`"
+            echo "- Bicep deployment: `$DEPLOYMENT_NAME`"
+            echo "- Immutable API image: `$IMAGE`"
+            echo "- Published image tag: `$IMAGE_TAG`"
+            echo "- Container App revision: `$REVISION`"
+            echo "- Rollback image: `$PREVIOUS_IMAGE`"
+            echo "- Previous ready revision: `$PREVIOUS_REVISION`"
             echo "- API endpoint: $ENDPOINT"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -6,9 +6,9 @@ Recorded: 2026-08-16T19:01:17Z
 
 ## Retained rollback state
 
-Before changing an existing Container App, `deploy.yml` records its image and latest ready revision. The successful summary records those values alongside the new Git SHA, unique Bicep deployment name, digest-backed image, new revision, and endpoint. First deployment records `none (first deployment)` because no prior test release exists.
+Before changing an existing Container App, `deploy.yml` resolves `latestReadyRevisionName` and reads the image from that ready revision's own template. It never substitutes the app's mutable candidate template. Preview, preparation, and deployment summaries run with `always()` and retain those values alongside the new Git SHA, unique Bicep deployment name, digest-backed image, new revision, endpoint, or an explicit unavailable/failure marker. First deployment records `none (first deployment)` because no prior test release exists.
 
-The workflow deploys `cloudorders-api@sha256:...`, not the mutable commit tag. It tags the Container App with the Git release ID and uses a unique deployment-history name. An existing release is never replaced by the public bootstrap image while its successor is built.
+The workflow deploys `cloudorders-api@sha256:...`, not the mutable commit tag. It tags the candidate Container App with the Git release ID and uses a unique deployment-history name. A first-deployment public image is tagged only as `bootstrap`; an existing release is never replaced by that public image while its successor is built.
 
 ## Operator rollback sequence
 

@@ -16,7 +16,9 @@ The three-day-equivalent developer-style verification matrix passed for the loca
 - TDD red: the focused release-state policy test failed because the workflow had no existing-release inspection.
 - TDD green: `DeploymentWorkflowPreservesReleaseAndRollbackState` passed after the minimal implementation.
 - Direct workflow inspection confirmed full-SHA-pinned checkout/login actions, job-scoped OIDC permission, promotion-ref validation, TLS-verifying curl, digest deployment, and no long-lived Azure credentials.
-- Direct state-transition inspection confirmed that an existing Container App skips the public bootstrap deployment, its current image/revision are captured first, and the final what-if occurs after the digest is resolved.
+- Direct state-transition inspection confirmed that an existing Container App skips the public bootstrap deployment, only explicit `ResourceNotFound` permits bootstrapping, and all other lookup failures stop the run.
+- Rollback inspection resolves `latestReadyRevisionName` and queries that revision's own template for the image. Preview, preparation, and deployment summaries use `always()` so the retained rollback state survives downstream failures.
+- Separate ordered jobs put foundation provisioning after the foundation what-if and candidate deployment after the resolved-digest what-if.
 - `npx.cmd --yes prettier@3.6.2 .github/workflows/deploy.yml --parser yaml` parsed the workflow successfully.
 
 ## Day-equivalent 2 — Bicep and deployment plan
@@ -40,7 +42,7 @@ The authorized read-only test what-if completed with exit code 0 against `orders
 - `Microsoft.App/managedEnvironments/cloudorders-test-env`
 - `Microsoft.App/containerApps/cloudorders-test-api`
 
-The final digest-backed what-if cannot exist until the protected workflow publishes the image; the workflow now runs and logs that exact what-if immediately before deployment.
+The final digest-backed what-if cannot exist until the protected workflow publishes the image. The preparation job logs that exact what-if, then only a separate downstream environment job can deploy it.
 
 ## Day-equivalent 3 — GitHub, OIDC, RBAC, and artifact state
 
