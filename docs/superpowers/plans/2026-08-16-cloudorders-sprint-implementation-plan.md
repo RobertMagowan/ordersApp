@@ -13,7 +13,7 @@
 - Work from `C:\repos\OrderApp`; this directory is the repository root and default working directory.
 - Use .NET 10 and stable C# 14; pin the installed stable SDK in `global.json` and do not enable preview language features.
 - Product/namespace names are `CloudOrders`; the intended GitHub repository name is `ordersApp`.
-- Git branches are `feature/*` → `development` → `test` → `master`; all new feature branches use the `feature/` prefix. Each protected-branch PR requires exactly one approving review; merges deploy to the matching GitHub environment.
+- Git branches are `feature/*` → `development` → `test` → `master`; all new feature branches use the `feature/` prefix. Protected-branch PRs require the configured checks and conversation resolution; this single-developer repository requires zero independent approvals. Merges deploy to the matching GitHub environment.
 - Because this is a single-developer repository, repository administrators may bypass the review requirement for their own PR. Required CI, source-branch, and conversation-resolution checks remain enforced.
 - Sections 25–35 of `CLOUDORDERS_HANDOFF.md` are the authoritative version-1 contracts.
 - Keep `CloudOrders.Api` free of direct Service Bus publishing; API writes Order + Outbox + Idempotency in one transaction.
@@ -80,13 +80,13 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Tasks:**
 
-- [ ] Protect `development`, `test`, and `master` with pull requests, exactly one approval, required CI and promotion-policy checks, conversation resolution, and no force-push/deletion.
+- [ ] Protect `development`, `test`, and `master` with pull requests, zero required approvals, required CI and promotion-policy checks, conversation resolution, and no force-push/deletion.
 - [ ] Enforce source branches: feature/agent branches to `development`, `development` to `test`, and `test` to `master`.
-- [ ] Configure environment branch restrictions and deployment concurrency; keep environment reviewers empty so the single PR approval remains the only approval gate.
+- [ ] Configure environment branch restrictions and deployment concurrency; keep environment reviewers empty because this single-developer repository has no independent PR approval gate.
 - [ ] Add Azure OIDC workflow scaffolding and document the required environment variables/secrets. Keep deployment disabled until Azure resources and federated credentials exist.
 - [ ] Add CODEOWNERS, pull request template, and rename the default branch from `main` to `master`.
 
-**Manual test:** Open a PR with an invalid source branch and verify the promotion-policy check fails; open valid promotion PRs and verify exactly one approval is required. Confirm a merge starts the matching environment workflow.
+**Manual test:** Open a PR with an invalid source branch and verify the promotion-policy check fails; open valid promotion PRs and verify the required checks and conversation resolution gate the merge without requiring an independent approval. Confirm a merge starts the matching environment workflow.
 
 **Deploy gate:** GitHub branch protections, environments, and deployment workflow are configured. Azure deployment becomes active when the approved subscription, tenant, region, resource group, and OIDC identity are supplied.
 
