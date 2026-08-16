@@ -14,6 +14,9 @@
 - Do not call `Database.Migrate()` from application startup, publish directly to Service Bus, commit secrets, or weaken TLS validation.
 - The existing `ordersapp-test` resource group in `ukwest` is authorized for non-production spend; the logged-in tenant/subscription are the approved targets.
 - Map Entra group object IDs to customer references through validated configuration. Return `404` for unauthorized customer resources.
+- Before independent review, a separate high-capability agent performs three working days of thorough developer-style local verification using technology-appropriate tests and direct inspection of affected state: SQL rows/migration history, outbox and idempotency records, local configuration, workflow artifacts, and authorization mappings as applicable. Record the commands and sanitized results with sprint evidence.
+- After review and initial deployment to Azure `development`, a dedicated smoke-test agent must validate the live release and record its result.
+- Once the reviewed release merges to `test`, a QA-only agent performs adversarial feature testing in Azure `test`: successful, boundary, invalid, authorization, failure/recovery, state-integrity, concurrency, and regression paths appropriate to the technology. A defect blocks onward promotion and follows the fresh-branch remediation loop.
 - Every task follows TDD, has a focused review, and is committed. QA defects use a new `feature/*` branch.
 
 ---
