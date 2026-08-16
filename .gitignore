@@ -7,6 +7,7 @@ artifacts/
 ## IDE and local tooling
 .vs/
 .vscode/
+.worktrees/
 *.user
 *.suo
 *.userosscache
