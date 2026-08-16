@@ -18,7 +18,7 @@
 - Preserve at-least-once messaging, stable `EventId`, insert-first Inbox idempotency, and explicit broker settlement.
 - Do not run `Database.Migrate()` from application startup; migrations/security bootstrap run as deployment steps.
 - Never commit secrets, `.env`, `local.settings.json`, generated ARM JSON, auth storage state, or real customer data.
-- Every sprint ends with a commit, a manual test script, a machine-verifiable test command, and a deployable artifact or an explicit infrastructure gate.
+- Every sprint is a sequence of focused commits; each meaningful red/green/refactor or packaging boundary is committed separately. The sprint ends with a manual test script, a machine-verifiable test command, and a deployable artifact or an explicit infrastructure gate.
 - Prompt the user before using values not discoverable locally: GitHub owner/visibility, Azure tenant/subscription/region, production domain, Entra app registrations, alert recipients, or budget owners.
 
 ## Repository Map and File Ownership
@@ -70,6 +70,8 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Sprint gate:** The solution builds, tests run, CI validates the same commands, and `AGENTS.md` is present. Commit `chore: bootstrap CloudOrders repository`.
 
+**Natural commit checkpoints:** repository policy/scaffolding; failing architecture test; green policy tests and CI workflow.
+
 ## Sprint 1 — Domain, Contracts, and API Vertical Slice
 
 **Outcome:** A developer can create and read an order locally through a documented API, with no broker dependency.
@@ -89,6 +91,8 @@ docs/                                                   ADRs, sprint evidence, r
 **Manual test:** Run the API locally, call `POST /api/v1/orders` with a valid JSON body, then `GET` the returned ID; verify status `pending`, UTC timestamps, OpenAPI output, `/health/live` 200, and `/health/ready` behavior.
 
 **Deploy gate:** Produce a versioned API container image locally with `dotnet publish`/Docker; deploy only to the local Compose SQL environment until Sprint 4 creates Azure resources. Commit `feat: add order API vertical slice`.
+
+**Natural commit checkpoints:** failing domain tests; green domain/contracts; application handler tests and implementation; API integration tests and host wiring; publish/manual evidence.
 
 ## Sprint 2 — SQL Schema and Durable HTTP Idempotency
 
@@ -110,6 +114,8 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Deploy gate:** Build the API image and run it against the local SQL container with no Service Bus setting. Commit `feat: add SQL persistence and POST idempotency`.
 
+**Natural commit checkpoints:** failing schema/idempotency tests; migration and persistence implementation; replay/conflict behavior; API verification.
+
 ## Sprint 3 — Outbox Publisher and Inbox Processor
 
 **Outcome:** A local order moves from `Pending` to `Processing` through Service Bus with duplicate-safe, failure-aware processing.
@@ -130,6 +136,8 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Deploy gate:** Package both isolated Functions locally with `dotnet publish`; local emulator happy path and failure drills pass. Commit `feat: add transactional outbox and inbox processing`.
 
+**Natural commit checkpoints:** failing publisher tests; green publisher; failing processor tests; green processor and settlement; local failure-drill evidence.
+
 ## Sprint 4 — Reproducible Local Platform
 
 **Outcome:** A clean checkout can start every local dependency and host with one documented/manual sequence.
@@ -147,6 +155,8 @@ docs/                                                   ADRs, sprint evidence, r
 **Manual test:** Follow README from a clean checkout: trust HTTPS certificate, start Compose, wait for health, apply migrations, start API/Functions/Web, create an order, and run the local E2E smoke test.
 
 **Deploy gate:** Local stack is reproducible without undocumented steps; evidence is stored under `docs/evidence/sprint-4/`. Commit `test: make local order flow reproducible`.
+
+**Natural commit checkpoints:** Compose health/config; readiness and migration scripts; service-level tests; manual evidence and documentation.
 
 ## Sprint 5 — Azure Foundation and Identity Graph
 
@@ -168,6 +178,8 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Deploy gate:** Development foundation is deployed with clean what-if and least-privilege evidence. Commit `infra: add development Azure foundation`.
 
+**Natural commit checkpoints:** Bicep module groups; environment parameters; identity/RBAC; SQL bootstrap; what-if and private-connectivity evidence.
+
 ## Sprint 6 — Azure Functions Hosting
 
 **Outcome:** Publisher and processor run in two .NET 10 isolated Linux Flex Consumption apps with managed-identity access and rollbackable packages.
@@ -184,6 +196,8 @@ docs/                                                   ADRs, sprint evidence, r
 **Manual test:** Create an order through the local/dev API, verify both Functions process it with managed identity, inspect structured telemetry, and redeploy the previous package to prove rollback.
 
 **Deploy gate:** Functions process a test order in Azure without secrets or SQL passwords. Commit `feat: deploy isolated Functions on Flex Consumption`.
+
+**Natural commit checkpoints:** host/runtime settings; publisher deployment; processor deployment; identity/telemetry; rollback evidence.
 
 ## Sprint 7 — API Container App and Blazor WebAssembly
 
@@ -205,6 +219,8 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Deploy gate:** API Container App and Static Web Apps deploy from immutable artifacts; browser smoke and bUnit pass. Commit `feat: add authenticated web experience`.
 
+**Natural commit checkpoints:** API image/health; typed client/auth; UI route slices; Static Web Apps edge; browser/accessibility evidence.
+
 ## Sprint 8 — TestSupport and Observability Evidence
 
 **Outcome:** Non-production reliability scenarios are safely controllable and produce correlated UI, SQL, broker, and Azure Monitor evidence.
@@ -222,6 +238,8 @@ docs/                                                   ADRs, sprint evidence, r
 **Manual test:** Run one healthy and one faulted staging scenario; verify UI state, database state, broker settlement/DLQ, trace IDs, KQL results, cleanup, and alert behavior agree.
 
 **Deploy gate:** Every supported scenario has retained evidence and safe cleanup. Commit `test: add non-production observability lab`.
+
+**Natural commit checkpoints:** TestSupport lease/safety controls; fault policies; telemetry propagation/KQL; Playwright scenarios; production exclusion tests.
 
 ## Sprint 9 — CI/CD, Promotion, and Operations
 
@@ -243,6 +261,8 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Deploy gate:** The GitHub repository `ordersApp` can build and promote without long-lived Azure secrets. Commit `ci: add protected artifact promotion`.
 
+**Natural commit checkpoints:** CI/security checks; infrastructure OIDC workflow; application artifact workflow; runbooks/alerts; staging load evidence.
+
 ## Sprint 10 — Production Readiness
 
 **Outcome:** The system is supportable, secure, cost-controlled, and ready for a reviewed production promotion.
@@ -256,6 +276,8 @@ docs/                                                   ADRs, sprint evidence, r
 - [ ] Prompt for final production approval and domain/owner confirmation; do not create production resources without it.
 
 **Deploy gate:** Handoff section 35 is fully evidenced and the production approval is recorded. Commit `release: complete CloudOrders version one readiness`.
+
+**Natural commit checkpoints:** final test matrix; security/network review; restore/rollback evidence; production approval record.
 
 ## Cross-sprint verification commands
 
