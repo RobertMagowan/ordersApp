@@ -11,8 +11,10 @@ public sealed class DeploymentWorkflowPolicyTests
         var workflow = File.ReadAllText(workflowPath);
 
         Assert.Contains("actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2", workflow, StringComparison.Ordinal);
-        Assert.Contains("azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0", workflow, StringComparison.Ordinal);
+        Assert.Contains("azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0", workflow, StringComparison.Ordinal);
         Assert.Contains("name: Validate promotion ref", workflow, StringComparison.Ordinal);
+        Assert.Contains("GITHUB_REF_TYPE", workflow, StringComparison.Ordinal);
+        Assert.Contains("[[ \"$GITHUB_REF_TYPE\" == \"branch\" ]]", workflow, StringComparison.Ordinal);
         Assert.Contains("development|test", workflow, StringComparison.Ordinal);
         Assert.Contains("master)", workflow, StringComparison.Ordinal);
         Assert.Contains("Manual deployments are allowed only from development, test, or master", workflow, StringComparison.Ordinal);

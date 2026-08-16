@@ -18,6 +18,10 @@ public sealed class ContractPackTests
         var v1Contract = File.ReadAllText(Path.Combine(contractsDirectory, "v1-contracts.md"));
         Assert.Contains("## 25. Business scope and status model", v1Contract, StringComparison.Ordinal);
         Assert.Contains("## 35. Version-1 definition of done", v1Contract, StringComparison.Ordinal);
+
+        var traceability = File.ReadAllText(Path.Combine(contractsDirectory, "traceability.md"));
+        Assert.Contains("DeploymentWorkflowPolicyTests.DeploymentWorkflowEnforcesPinnedPromotionAndReleasePolicy", traceability, StringComparison.Ordinal);
+        Assert.Contains("ContractPackTests.RepositoryContainsVersionedContractPackAndTraceability", traceability, StringComparison.Ordinal);
     }
 
     private static void AssertContractDocument(string contractsDirectory, string fileName, string requiredText)

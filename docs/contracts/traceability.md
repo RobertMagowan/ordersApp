@@ -23,8 +23,8 @@ The map connects the source-backed contracts to repository ownership, automated 
 | Section 33: same immutable artifact, expand/migrate/contract, manifest/rollback | `.github/workflows/deploy.yml`, `infra/`, `ops/runbooks/` | workflow policy tests, Bicep validation, deployment/rollback evidence (current policy test; further tests planned) | Sprint 2 workflow; Sprint 3 migration; Sprint 14 release automation |
 | Section 34: DLQ, outbox, migration, identity, telemetry, restore, rollback runbooks | `ops/runbooks/`, `docs/evidence/` | runbook rehearsal and evidence checks (planned) | Sprint 5 messaging; Sprint 13 observability; Sprint 14 operations |
 | Section 35: complete v1 gate | all product, infra, tests, and evidence | Release matrix and acceptance audit (planned) | Sprint 15 |
-| Workflow: Actions are Node 24 releases pinned to full reviewed SHAs; manual dispatch is promotion-only; TLS is verified; summary has release/artifact/endpoint | `.github/workflows/deploy.yml`, `tests/CloudOrders.ArchitectureTests` | `RepositoryPolicyTests.DeploymentWorkflowEnforcesPinnedPromotionAndReleasePolicy` | Sprint 2 Task 1 |
-| Contract pack is repository-owned and versioned | `docs/contracts/`, `tests/CloudOrders.ArchitectureTests` | `RepositoryPolicyTests.RepositoryContainsVersionedContractPackAndTraceability` | Sprint 2 Task 1 |
+| Workflow: Actions are Node 24 releases pinned to full reviewed SHAs; manual dispatch is promotion-only; TLS is verified; summary has release/artifact/endpoint | `.github/workflows/deploy.yml`, `tests/CloudOrders.ArchitectureTests` | `DeploymentWorkflowPolicyTests.DeploymentWorkflowEnforcesPinnedPromotionAndReleasePolicy` | Sprint 2 Task 1 |
+| Contract pack is repository-owned and versioned | `docs/contracts/`, `tests/CloudOrders.ArchitectureTests` | `ContractPackTests.RepositoryContainsVersionedContractPackAndTraceability` | Sprint 2 Task 1 |
 
 ## Evidence ownership
 
