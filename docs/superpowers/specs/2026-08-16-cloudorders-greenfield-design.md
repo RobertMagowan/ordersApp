@@ -75,20 +75,21 @@ Tests are layered: fast domain/application unit tests; SQL Server/Testcontainers
 
 1. Bootstrap the repository, solution policy, contributor guide, documentation, and unprivileged CI.
 2. Freeze executable API, event, telemetry, and schema contracts.
-3. Implement domain, persistence, API idempotency, health, auth boundaries, and tests.
-4. Implement outbox publication, Inbox processing, settlement, and failure-window tests.
-5. Make the local Docker/emulator stack and happy/failure paths reproducible.
-6. Build Azure foundation Bicep, private networking, identities, RBAC, and SQL bootstrap.
-7. Implement and deploy the two Flex Consumption Function Apps.
-8. Containerize/deploy the API and establish the Blazor WASM hosting, typed-client, and authentication boundary.
-9. Build the responsive frontend shell, dispatch-control design system, shared components, and accessibility baseline.
-10. Implement the order lookup, creation, details, history, and status-tracking workflows against the deployed API.
-11. Complete frontend resilience, cross-browser/accessibility evidence, browser telemetry, performance budgets, deployment, and rollback verification.
-12. Add non-production TestSupport, Observability Lab, KQL, workbooks, alerts, and full E2E evidence.
-13. Complete artifact promotion, security/supply-chain checks, load tests, and operational runbooks.
-14. Complete restore, rollback, and production-readiness gates.
+3. Establish workflow safeguards, repository-owned contracts, and the protected Azure `test` environment before material data features.
+4. Implement SQL persistence and durable HTTP idempotency, then separately add Entra authorization and customer history.
+5. Implement outbox publication, Inbox processing, settlement, and failure-window tests.
+6. Make the local Docker/emulator stack and happy/failure paths reproducible.
+7. Build Azure foundation Bicep, private networking, identities, RBAC, and SQL bootstrap.
+8. Implement and deploy the two Flex Consumption Function Apps.
+9. Containerize/deploy the API and establish the Blazor WASM hosting, typed-client, and authentication boundary.
+10. Build the responsive frontend shell, dispatch-control design system, shared components, and accessibility baseline.
+11. Implement the order lookup, creation, details, history, and status-tracking workflows against the deployed API.
+12. Complete frontend resilience, cross-browser/accessibility evidence, browser telemetry, performance budgets, deployment, and rollback verification.
+13. Add non-production TestSupport, Observability Lab, KQL, workbooks, alerts, and full E2E evidence.
+14. Complete artifact promotion, security/supply-chain checks, load tests, and operational runbooks.
+15. Complete restore, rollback, and production-readiness gates.
 
-Each phase must leave the repository buildable and include objective acceptance commands. Database changes use expand/migrate/contract; deployment never calls `Database.Migrate()` from application startup.
+Each remaining phase must leave the repository buildable and include objective acceptance commands. It then receives three working days of independent development-environment verification selected for the technology/risk and one to two working days of QA-only testing in Azure `test`; evidence, defects, and re-test records are retained. Defects are fixed only from a fresh `feature/*` branch and re-promoted. Database changes use expand/migrate/contract; deployment never calls `Database.Migrate()` from application startup.
 
 ## Deferred execution inputs
 

@@ -38,7 +38,7 @@ Target `net10.0` with stable C# 14, nullable reference types, implicit usings, a
 
 ## Testing Guidelines
 
-Write the failing test before production code. Use xUnit for .NET tests, bUnit for components, Playwright for browser journeys/accessibility, and NBomber only for staging load tests. Test names describe behavior in PascalCase. Every sprint must leave a manual test path, automated verification, and a deployable artifact or documented infrastructure gate.
+Write the failing test before production code. Use xUnit for .NET tests, bUnit for components, Playwright for browser journeys/accessibility, and NBomber only for staging load tests. Test names describe behavior in PascalCase. Every sprint must leave a manual test path, automated verification, and a deployable artifact or documented infrastructure gate. For each remaining sprint, a separate high-capability agent performs three working days of technology-appropriate verification against Azure `development`, then a QA-only agent validates the promoted release in Azure `test` for one to two working days. Store release IDs, commands, outcomes, defects, and re-test evidence in `docs/evidence/sprint-<number>/`; fix defects on a fresh `feature/*` branch and repeat the affected gates before promotion.
 
 ## Commits and Pull Requests
 
