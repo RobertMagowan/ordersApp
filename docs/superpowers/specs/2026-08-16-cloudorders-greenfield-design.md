@@ -61,7 +61,7 @@ At-least-once delivery is intentional. `EventId` remains the stable business occ
 
 ## Azure platform and security
 
-Azure Static Web Apps Standard hosts standalone Blazor WebAssembly and proxies same-origin `/api` traffic to the linked API Container App. Azure SQL, Service Bus, Function storage, Key Vault, and ACR use private endpoints after bootstrap. Runtime access uses managed identities and least-privilege data-plane/SQL roles; no runtime identity receives `db_owner`.
+Azure Static Web Apps Standard hosts standalone Blazor WebAssembly and proxies same-origin `/api` traffic to the linked API Container App. Azure SQL, Service Bus, Function storage, Key Vault, and runtime ACR pulls use private endpoints after bootstrap. ACR public access remains disabled; its single firewall exception is the `AzureServices` trusted-services bypass contract for the system-assigned ACR Task, Defender scanning when enabled, and server-side ACR import during promotion. Container Instances and Machine Learning are neither deployed nor authorized against the registry. Runtime access uses managed identities and least-privilege data-plane/SQL roles; no runtime identity receives `db_owner`.
 
 Bicep is the infrastructure source of truth, split into foundation, application, and observability entry points with environment parameter files. Stable API versions and regional support are rechecked immediately before pinning. GitHub Actions uses OIDC, protected environments, immutable artifacts, explicit concurrency, and promotion of identical artifacts through development, test, and production; `test` is the staging-equivalent environment. Secrets, `.env`, `local.settings.json`, generated ARM JSON, tokens, and browser auth state are never committed.
 
