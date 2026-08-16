@@ -24,10 +24,10 @@
 - Create: `infra/bicepconfig.json`
 - Create: `infra/avm-versions.md`
 
-- [ ] Add a `br` alias named `avm` targeting the public AVM path (`mcr.microsoft.com/bicep/avm`) and enable the Bicep linter configuration used by CI; module references will use `br/avm:res/...:<version>`.
-- [ ] Record each pinned module path, version, purpose, and the date/command used to validate it in `infra/avm-versions.md`.
-- [ ] Run `az bicep build --file infra/main.bicep` to confirm the config is discovered from the `infra` directory.
-- [ ] Commit: `build: configure pinned AVM modules`.
+- [x] Add a `br` alias named `avm` targeting the public AVM path (`mcr.microsoft.com/bicep/avm`) and enable the Bicep linter configuration used by CI; module references will use `br/avm:res/...:<version>`.
+- [x] Record each pinned module path, version, purpose, and the date/command used to validate it in `infra/avm-versions.md`.
+- [x] Run `az bicep build --file infra/main.bicep` to confirm the config is discovered from the `infra` directory.
+- [x] Commit: `build: configure pinned AVM modules`.
 
 ### Task 2: Create focused AVM resource modules
 
@@ -36,11 +36,11 @@
 - Create: `infra/modules/container-registry.bicep`
 - Create: `infra/modules/container-app-environment.bicep`
 
-- [ ] Define typed parameters for names, location, tags, and the required Log Analytics/Container Apps relationships.
-- [ ] Use the pinned AVM modules for the workspace, registry, and managed environment.
-- [ ] Preserve current settings: 30-day workspace retention, resource-permission-only log access, Basic ACR SKU, admin user disabled, public registry access, and Log Analytics-backed Container Apps logs.
-- [ ] Expose outputs for workspace resource ID/customer ID, registry resource ID/login server, and managed environment resource ID.
-- [ ] Build each module through the composition root and commit: `refactor: compose foundation with AVM modules`.
+- [x] Define typed parameters for names, location, tags, and the required Log Analytics/Container Apps relationships.
+- [x] Use the pinned AVM modules for the workspace, registry, and managed environment.
+- [x] Preserve current settings: 30-day workspace retention, resource-permission-only log access, Basic ACR SKU, admin user disabled, public registry access, and Log Analytics-backed Container Apps logs.
+- [x] Expose outputs for workspace resource ID, registry resource ID/login server, and managed environment resource ID.
+- [x] Build each module through the composition root and commit: `refactor: compose foundation with AVM modules`.
 
 ### Task 3: Create the Container App workload module
 
@@ -48,11 +48,11 @@
 - Create: `infra/modules/container-app.bicep`
 - Create or modify: `infra/modules/README.md`
 
-- [ ] Accept the existing image, ACR toggle, target port, probe toggle, replica limits, registry login server, managed environment ID, and tags.
-- [ ] Use `br/avm:res/app/container-app:0.11.0` with system-assigned identity, single revision mode, external HTTPS ingress, `0.25` CPU, `0.5Gi` memory, and the existing `/health/live` liveness probe.
-- [ ] Keep the registry configuration conditional so the public bootstrap phase does not require ACR access.
-- [ ] Keep `AcrPull` as the separate native registry-scoped role assignment in `main.bicep` or a clearly documented local module; do not pass it as an app-scoped AVM role assignment.
-- [ ] Build the module and commit: `refactor: model container app with AVM`.
+- [x] Accept the existing image, ACR toggle, target port, probe toggle, replica limits, registry login server, managed environment ID, and tags.
+- [x] Use `br/avm:res/app/container-app:0.11.0` with system-assigned identity, single revision mode, external HTTPS ingress, `0.25` CPU, `0.5Gi` memory, and the existing `/health/live` liveness probe.
+- [x] Keep the registry configuration conditional so the public bootstrap phase does not require ACR access.
+- [x] Keep `AcrPull` as the separate native registry-scoped role assignment in `main.bicep`; do not pass it as an app-scoped AVM role assignment.
+- [x] Build the module and commit: `refactor: model container app with AVM`.
 
 ### Task 4: Recompose the root and add environment overlays
 
@@ -62,21 +62,21 @@
 - Create: `infra/environments/test.bicepparam`
 - Create: `infra/environments/production.bicepparam`
 
-- [ ] Keep all existing root parameters and outputs, wiring module outputs to the unchanged output names.
-- [ ] Preserve dependency ordering: workspace/registry before managed environment, managed environment before Container App, and Container App identity before the optional role assignment.
-- [ ] Set all three environment overlays to `ukwest`, with the existing environment-specific names and bootstrap defaults; keep secrets and subscription-specific values out of parameter files.
-- [ ] Run `az bicep build --file infra/main.bicep` and `git diff --check`.
-- [ ] Commit: `refactor: compose environments from AVM modules`.
+- [x] Keep all existing root parameters and outputs, wiring module outputs to the unchanged output names.
+- [x] Preserve dependency ordering: workspace/registry before managed environment, managed environment before Container App, and Container App identity before the optional role assignment.
+- [x] Set all three environment overlays to `ukwest`, with the existing environment-specific names and bootstrap defaults; keep secrets and subscription-specific values out of parameter files.
+- [x] Run `az bicep build --file infra/main.bicep` and `git diff --check`.
+- [x] Commit: `refactor: compose environments from AVM modules`.
 
 ### Task 5: Add pull-request Bicep validation
 
 **Files:**
 - Create: `.github/workflows/bicep-validation.yml`
 
-- [ ] Trigger on pull requests that touch `infra/**/*.bicep`, `infra/**/*.bicepparam`, or `infra/bicepconfig.json`.
-- [ ] Install Bicep through Azure CLI, run `az bicep lint --file infra/main.bicep` and `az bicep build --file infra/main.bicep`, and fail on errors; do not require Azure credentials.
-- [ ] Run `az bicep build-params --file` for all three environment parameter files and upload generated build diagnostics only when a command fails.
-- [ ] Commit: `ci: validate AVM Bicep on pull requests`.
+- [x] Trigger on pull requests that touch `infra/**/*.bicep`, `infra/**/*.bicepparam`, or `infra/bicepconfig.json`.
+- [x] Install Bicep through Azure CLI, run `az bicep lint --file infra/main.bicep` and `az bicep build --file infra/main.bicep`, and fail on errors; do not require Azure credentials.
+- [x] Run `az bicep build-params --file` for all three environment parameter files and remove generated build output.
+- [x] Commit: `ci: validate AVM Bicep on pull requests`.
 
 ### Task 6: Update deployment verification and execute the migration
 
@@ -85,18 +85,18 @@
 - Modify: `README.md`
 - Modify: `AGENTS.md`
 
-- [ ] Keep the existing workflow parameter contract and two deployment passes; update template references only where module outputs or parameter file usage requires it.
-- [ ] Add an environment-gated `az deployment group what-if` step using each environment overlay before deployment, without exposing secrets.
-- [ ] Run `az bicep build --file infra/main.bicep`, `dotnet build --configuration Release`, and `dotnet test --configuration Release` locally.
-- [ ] Run a development resource-group `what-if`, deploy to development, and verify `/health/live` returns HTTP 200 before promoting further.
-- [ ] Document AVM module pins, the native ACR role-assignment exception, and manual verification evidence.
-- [ ] Commit: `docs: document AVM deployment verification`.
+- [x] Keep the existing workflow parameter contract and two deployment passes; update template references to use the environment overlays and pinned module composition.
+- [x] Add an environment-gated `az deployment group what-if` step using each environment overlay before deployment, without exposing secrets.
+- [x] Run `az bicep build --file infra/main.bicep`, `dotnet build --configuration Release`, and `dotnet test --configuration Release` locally.
+- [x] Run a development resource-group `what-if`, deploy to development, and verify `/health/live` returns HTTP 200 before promoting further.
+- [x] Document AVM module pins, the native ACR role-assignment exception, and manual verification evidence.
+- [x] Commit: `docs: document AVM deployment verification`.
 
 ## Completion Checklist
 
-- [ ] All AVM module references are pinned and listed in `infra/avm-versions.md`.
-- [ ] `az bicep build --file infra/main.bicep` exits successfully.
-- [ ] Pull-request Bicep validation passes.
-- [ ] .NET build and tests pass.
-- [ ] Development `what-if`, deployment, and `/health/live` smoke test pass.
-- [ ] Working tree is clean and each implementation commit is reviewable independently.
+- [x] All AVM module references are pinned and listed in `infra/avm-versions.md`.
+- [x] `az bicep build --file infra/main.bicep` exits successfully.
+- [x] Pull-request Bicep validation commands pass locally.
+- [x] .NET build and tests pass.
+- [x] Development `what-if`, deployment, and `/health/live` smoke test pass.
+- [x] Working tree is clean and each implementation commit is reviewable independently.
