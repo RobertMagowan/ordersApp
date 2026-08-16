@@ -1,0 +1,46 @@
+name: Promotion policy
+
+on:
+  pull_request:
+    branches:
+      - development
+      - test
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  branch-policy:
+    name: Enforce promotion source branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate promotion path
+        env:
+          BASE: ${{ github.event.pull_request.base.ref }}
+          HEAD: ${{ github.event.pull_request.head.ref }}
+        run: |
+          case "$BASE" in
+            development)
+              [[ "$HEAD" == feature/* || "$HEAD" == agent/* ]] || {
+                echo "PRs into development must come from feature/* or agent/* (got $HEAD)." >&2
+                exit 1
+              }
+              ;;
+            test)
+              [[ "$HEAD" == development ]] || {
+                echo "PRs into test must come from development (got $HEAD)." >&2
+                exit 1
+              }
+              ;;
+            master)
+              [[ "$HEAD" == test ]] || {
+                echo "PRs into master must come from test (got $HEAD)." >&2
+                exit 1
+              }
+              ;;
+            *)
+              echo "Unsupported protected base branch: $BASE" >&2
+              exit 1
+              ;;
+          esac

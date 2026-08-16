@@ -4,7 +4,9 @@ on:
   pull_request:
   push:
     branches:
-      - main
+      - development
+      - test
+      - master
     paths-ignore:
       - '**/*.md'
   workflow_dispatch:

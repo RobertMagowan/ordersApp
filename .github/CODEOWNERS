@@ -1,0 +1,5 @@
+# Repository policy and deployment configuration require owner review.
+/.github/ @RobertMagowan
+/infra/ @RobertMagowan
+/ops/ @RobertMagowan
+AGENTS.md @RobertMagowan
