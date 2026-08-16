@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CloudOrders.Api/CloudOrders.Api.csproj" />
+    <Project Path="src/CloudOrders.Application/CloudOrders.Application.csproj" />
+    <Project Path="src/CloudOrders.Contracts/CloudOrders.Contracts.csproj" />
+    <Project Path="src/CloudOrders.Domain/CloudOrders.Domain.csproj" />
+    <Project Path="src/CloudOrders.Infrastructure/CloudOrders.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CloudOrders.ArchitectureTests/CloudOrders.ArchitectureTests.csproj" />
+    <Project Path="tests/CloudOrders.UnitTests/CloudOrders.UnitTests.csproj" />
+  </Folder>
+</Solution>

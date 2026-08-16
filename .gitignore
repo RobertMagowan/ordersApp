@@ -1,0 +1,35 @@
+## Build output
+**/bin/
+**/obj/
+**/TestResults/
+artifacts/
+
+## IDE and local tooling
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Secrets and local infrastructure
+.env
+.env.*
+!.env.example
+!**/.env.example
+**/local.settings.json
+**/appsettings.Local.json
+**/secrets.json
+playwright/.auth/
+test-results/
+playwright-report/
+
+## Generated infrastructure and packages
+**/generated-arm/
+*.zip
+*.nupkg
+packages/
+
+## OS files
+.DS_Store
+Thumbs.db

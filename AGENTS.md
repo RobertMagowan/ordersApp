@@ -1,0 +1,43 @@
+# Repository Guidelines
+
+## Project Structure
+
+`C:\\repos\\OrderApp` is the repository root. The solution is `CloudOrders.slnx`; product and namespace names are `CloudOrders`, while the intended GitHub repository name is `ordersApp`.
+
+- `src/CloudOrders.Domain` contains order rules and status transitions.
+- `src/CloudOrders.Application` contains use cases and ports.
+- `src/CloudOrders.Contracts` contains versioned API and integration-event DTOs.
+- `src/CloudOrders.Infrastructure` contains EF Core, SQL, and messaging adapters.
+- `src/CloudOrders.Api` is the ASP.NET Core API; `src/CloudOrders.Web` will be standalone Blazor WASM.
+- `src/CloudOrders.OutboxPublisher` and `src/CloudOrders.OrderProcessor` will be isolated Azure Functions.
+- `tests/` contains unit, integration, end-to-end, bUnit, Playwright, and NBomber tests.
+- `infra/`, `local/`, `ops/`, and `.github/workflows/` contain Bicep, local emulators, operations, and CI/CD.
+
+## Build, Test, and Development Commands
+
+Run from the repository root:
+
+```powershell
+dotnet restore
+dotnet format --verify-no-changes
+dotnet build --configuration Release
+dotnet test --configuration Release
+```
+
+Local infrastructure and deployment commands are added per sprint. Never run migrations from application startup; use the documented deployment migration command.
+
+## Coding Style and Naming
+
+Target `net10.0` with stable C# 14, nullable reference types, implicit usings, analyzers, deterministic builds, and warnings treated as errors. Use four-space indentation, file-scoped namespaces, PascalCase for public types/members, and camelCase for parameters/locals. Keep API and event DTOs separate from EF/domain entities. Prefer small vertical slices and constructor-injected services.
+
+## Testing Guidelines
+
+Write the failing test before production code. Use xUnit for .NET tests, bUnit for components, Playwright for browser journeys/accessibility, and NBomber only for staging load tests. Test names describe behavior in PascalCase. Every sprint must leave a manual test path, automated verification, and a deployable artifact or documented infrastructure gate.
+
+## Commits and Pull Requests
+
+Use imperative Conventional Commit-style subjects, for example `feat: add transactional outbox`. Keep commits focused and sprint-sized. Pull requests must describe the sprint gate, link the relevant issue/plan, list test commands and manual evidence, call out migrations or Azure changes, and include screenshots for UI changes. Infrastructure PRs must include Bicep validation/what-if output.
+
+## Security and Decision Gates
+
+Never commit secrets, `.env`, `local.settings.json`, auth storage state, generated ARM JSON, or real customer data. Use managed identities and least-privilege roles in Azure. Prompt the user before choosing GitHub ownership/visibility, Azure tenant/subscription/region, Entra registrations, production domains, alert owners, budgets, or production deployment approval.
