@@ -1,7 +1,7 @@
 # Non-production Foundation Reset Evidence
 
-**Date:** 2026-08-25  
-**Scope:** Recreate only the intentionally deleted development and test MVP foundations in UK West before Sprint 3 resumes.  
+**Date:** 2026-08-25
+**Scope:** Recreate only the intentionally deleted development and test MVP foundations in UK West before Sprint 3 resumes.
 **Production:** `ordersapp-production` was never mutated; independent read-only inventories were empty.
 
 ## Reset actions
