@@ -21,6 +21,8 @@ Recreate the deleted CloudOrders development and test Azure foundations before f
 
 Azure CLI creates the two empty resource groups, since the existing workflow assumes its resource group already exists. The workflow is then manually dispatched from each protected promotion branch. Its existing three approval boundaries retain the normal OIDC login, Bicep preview, foundation deployment, immutable image publication, candidate-revision validation, and HTTPS liveness smoke.
 
+Deleting a resource group removes any RBAC assignment scoped to it. After each group is recreated, restore the existing matching GitHub OIDC service principal's `Contributor` and `Role Based Access Control Administrator` roles at that group scope only; do not create a new Entra application, federated credential, secret, or subscription-scoped assignment.
+
 The reset is accepted only when both environments show a healthy, 100%-traffic Container App revision whose release/digest identities agree with the workflow summary; `/health/live` returns HTTPS 200 with normal certificate validation. Any failed environment remains isolated and is corrected before the other is changed.
 
 ## Rollback and Cost Control
