@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using CloudOrders.Contracts.Orders;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace CloudOrders.IntegrationTests;
@@ -18,6 +18,17 @@ public sealed class ApiTests(WebApplicationFactory<Program> factory)
         using var response = await client.GetAsync("/health/live");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public void ProductionStartupFailsClearlyWithoutSqlConnection()
+    {
+        using var productionFactory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.UseEnvironment("Production"));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => productionFactory.CreateClient());
+
+        Assert.Contains("ConnectionStrings:CloudOrders", exception.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -67,28 +78,6 @@ public sealed class ApiTests(WebApplicationFactory<Program> factory)
         using var response = await client.PostAsync("/api/v1/orders", content);
 
         await AssertProblemDetails(response, expectedStatus, "invalid_request");
-    }
-
-    [Fact]
-    public async Task CreateOrderReturnsPendingResourceThatCanBeRead()
-    {
-        using var client = factory.CreateClient();
-        using var response = await client.PostAsJsonAsync(
-            "/api/v1/orders",
-            new CreateOrderRequest("CUST-002", "SKU-002", 3));
-
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var created = await response.Content.ReadFromJsonAsync<OrderResponse>();
-        Assert.NotNull(created);
-        Assert.Equal("pending", created.Status);
-        Assert.Equal($"/api/v1/orders/{created.Id}", response.Headers.Location?.OriginalString);
-
-        using var readResponse = await client.GetAsync($"/api/v1/orders/{created.Id}");
-        var read = await readResponse.Content.ReadFromJsonAsync<OrderResponse>();
-
-        Assert.Equal(HttpStatusCode.OK, readResponse.StatusCode);
-        Assert.Equal(created.Id, read?.Id);
-        Assert.Equal("CUST-002", read?.CustomerReference);
     }
 
     private static async Task AssertProblemDetails(

@@ -1,22 +1,50 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CloudOrders.Api.Health;
 using CloudOrders.Application.Abstractions;
 using CloudOrders.Application.Orders;
 using CloudOrders.Contracts.Orders;
-using CloudOrders.Infrastructure.InMemory;
+using CloudOrders.Infrastructure.Identity;
+using CloudOrders.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
+var sqlConnectionString = builder.Configuration.GetConnectionString("CloudOrders");
+var connectionCanBeDeferred = builder.Environment.IsDevelopment()
+    || builder.Environment.IsEnvironment("Test")
+    || builder.Environment.IsEnvironment("Testing");
+if (string.IsNullOrWhiteSpace(sqlConnectionString) && !connectionCanBeDeferred)
+{
+    throw new InvalidOperationException(
+        "SQL persistence requires configuration key ConnectionStrings:CloudOrders.");
+}
+
 builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
 builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow);
-builder.Services.AddSingleton<IOrderRepository, InMemoryOrderRepository>();
-builder.Services.AddSingleton<IOutboxWriter, InMemoryOutboxWriter>();
+builder.Services.AddDbContextFactory<CloudOrdersDbContext>((serviceProvider, options) =>
+{
+    var configuredConnectionString = serviceProvider
+        .GetRequiredService<IConfiguration>()
+        .GetConnectionString("CloudOrders");
+    if (!string.IsNullOrWhiteSpace(configuredConnectionString))
+    {
+        options.UseSqlServer(configuredConnectionString);
+    }
+});
+builder.Services.AddScoped<IOrderRepository, SqlOrderRepository>();
+builder.Services.AddScoped<IIdempotentOrderStore, SqlIdempotentOrderStore>();
+builder.Services.AddSingleton<ISubjectIdProvider, LocalDevelopmentSubjectIdProvider>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<CreateOrderHandler>();
 builder.Services.AddScoped<GetOrderHandler>();
+builder.Services.AddHealthChecks()
+    .AddCheck<SqlReadinessHealthCheck>("sql", tags: ["ready"]);
 
 var app = builder.Build();
 
@@ -60,7 +88,10 @@ app.MapGet("/health/live", () => TypedResults.Ok(new { status = "ok" }))
     .WithName("LiveHealth")
     .WithTags("Health");
 
-app.MapGet("/health/ready", () => TypedResults.Ok(new { status = "ready" }))
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    Predicate = registration => registration.Tags.Contains("ready")
+})
     .WithName("ReadyHealth")
     .WithTags("Health");
 
@@ -86,11 +117,23 @@ app.MapPost("/api/v1/orders", async (
             return OrderValidationProblem(httpContext, errors);
         }
 
+        if (!TryParseIdempotencyKey(httpContext, out var idempotencyKey))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "A valid Idempotency-Key UUID is required.",
+                extensions: ProblemExtensions(httpContext, "invalid_idempotency_key"));
+        }
+
+        var traceParent = Activity.Current?.Id;
+
         var result = await handler.Handle(
             new CreateOrderCommand(request.CustomerReference!, request.ProductSku!, request.Quantity),
+            idempotencyKey,
+            traceParent,
             cancellationToken);
 
-        if (!result.IsSuccess)
+        if (result.Kind is CreateOrderResultKind.ValidationError)
         {
             return OrderValidationProblem(
                 httpContext,
@@ -100,7 +143,21 @@ app.MapPost("/api/v1/orders", async (
                 });
         }
 
-        return Results.Created($"/api/v1/orders/{result.Value!.Id}", result.Value);
+        if (result.Kind is CreateOrderResultKind.Conflict)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "The idempotency key conflicts with an earlier request.",
+                extensions: ProblemExtensions(httpContext, result.ErrorCode ?? "idempotency_conflict"));
+        }
+
+        if (result.Kind is CreateOrderResultKind.Replayed)
+        {
+            httpContext.Response.Headers["Idempotency-Replayed"] = "true";
+            return Results.Ok(result.Response);
+        }
+
+        return Results.Created($"/api/v1/orders/{result.Response!.Id}", result.Response);
     })
     .WithName("CreateOrder")
     .WithTags("Orders");
@@ -126,6 +183,13 @@ static IResult OrderValidationProblem(HttpContext context, IDictionary<string, s
         {
             ["errors"] = errors
         });
+
+static bool TryParseIdempotencyKey(HttpContext context, out Guid idempotencyKey)
+{
+    idempotencyKey = Guid.Empty;
+    var values = context.Request.Headers["Idempotency-Key"];
+    return values.Count is 1 && Guid.TryParse(values[0], out idempotencyKey);
+}
 
 static IDictionary<string, object?> ProblemExtensions(HttpContext context, string errorCode) =>
     new Dictionary<string, object?>
