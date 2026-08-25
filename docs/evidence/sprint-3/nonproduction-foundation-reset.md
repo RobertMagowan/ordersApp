@@ -24,12 +24,16 @@ No Entra application, federated credential, GitHub secret, GitHub environment se
 
 ## Protected workflow evidence
 
-| Environment | Workflow run | Ref / release SHA | Result |
-| --- | --- | --- | --- |
-| Development | [32740422826](https://github.com/RobertMagowan/ordersApp/actions/runs/32740422826) | `development` / `50d41ab3fc49f9e04d9bfa943f693bcfa58a8a9e` | All four jobs succeeded after the scoped RBAC restoration. |
-| Test | [32823335502](https://github.com/RobertMagowan/ordersApp/actions/runs/32823335502) | `test` / `29034e731278e55a625960d39502929db4983a85` | All four jobs succeeded. |
+| Environment | Workflow run | Bicep deployment | Ref / release SHA | Result |
+| --- | --- | --- | --- | --- |
+| Development | [32740422826](https://github.com/RobertMagowan/ordersApp/actions/runs/32740422826) | `cloudorders-development-32740422826-2` | `development` / `50d41ab3fc49f9e04d9bfa943f693bcfa58a8a9e` | All four jobs succeeded after the scoped RBAC restoration. |
+| Test | [32823335502](https://github.com/RobertMagowan/ordersApp/actions/runs/32823335502) | `cloudorders-test-32823335502-1` | `test` / `29034e731278e55a625960d39502929db4983a85` | All four jobs succeeded. |
 
-Each run used the existing GitHub OIDC identity and the protected `preview_foundation`, `prepare_release`, and `deploy_release` approvals. The repository owner explicitly authorized each approval after its predecessor completed; no direct Bicep deployment was used.
+Each run used the existing GitHub OIDC identity and the protected `preview_foundation`, `prepare_release`, and `deploy_release` approvals. No direct Bicep deployment was used.
+
+### Completed-execution variance: deployment approvals
+
+The plan required the repository owner to review and approve each gate manually in GitHub and prohibited programmatic approvals. For this completed execution, the repository owner explicitly authorized approvals through the GitHub deployment-review API after each predecessor completed. The API records actor `RobertMagowan` for the approval actions associated with development run `32740422826` and test run `32823335502`. This proves that the actor's credential was used for the API actions, but it is not independent proof that the required review occurred in the GitHub UI. This variance is documented after execution; the original plan control is not retroactively changed.
 
 ## Independent live verification
 
@@ -40,4 +44,4 @@ Each non-production group contains exactly the four expected foundation resource
 | Development | `cloudorders-dev-api--0000001` | `cloudordersd583431devacr.azurecr.io/cloudorders-api@sha256:c70713886ebced58449be392042ded1af0d96750eeb7f8b46c06d1d6fb2b3c6a` | Latest and latest-ready match; one active healthy/provisioned/running replica has 100% traffic; release tag and ACR SHA tag resolve to the same digest; HTTPS `/health/live` returned 200 with normal certificate validation. |
 | Test | `cloudorders-test-api--0000001` | `cloudorderst583431testacr.azurecr.io/cloudorders-api@sha256:6cdfc8e67731bb01882a0d040e598368096c7f4b92f711efbd3fd3bbe853ade1` | Latest and latest-ready match; one active healthy/provisioned/running replica has 100% traffic; release tag and ACR SHA tag resolve to the same digest; HTTPS `/health/live` returned 200 with normal certificate validation. |
 
-The test verifier recorded 19/19 checks passing. This is foundation verification only: it does not replace Sprint 3 SQL development verification or test-environment QA.
+A retained, independent read-only verification outcome corroborated the resource, revision, and liveness results above. No separate verifier report is represented as an in-repository artifact. This is foundation verification only: it does not replace Sprint 3 SQL development verification or test-environment QA.

@@ -15,7 +15,7 @@
 - Use no direct Bicep deployment; `deploy.yml` must perform all resource deployment.
 - Do not change application, Bicep, workflow, GitHub environment configuration, or secrets during the reset.
 - Because deletion removes resource-group-scoped RBAC, restore the existing matching GitHub OIDC service principal's `Contributor` and `Role Based Access Control Administrator` roles at its recreated resource-group scope only; do not create Entra identities or use subscription-wide roles.
-- Protected-environment approvals require explicit repository-owner authorization. Record the approving actor and run IDs; this reset used the owner's explicitly authorized approvals through GitHub's deployment-review API after each predecessor completed.
+- Protected-environment approvals require the repository owner to review and approve them manually in GitHub; do not approve deployments programmatically. Record the approving actor and run IDs.
 - Record sanitized run IDs, revision/digest identities, and smoke outcomes under `docs/evidence/sprint-3/` after the reset.
 
 ---
@@ -97,9 +97,9 @@ gh workflow run deploy.yml --repo RobertMagowan/ordersApp --ref development
 gh run list --repo RobertMagowan/ordersApp --workflow deploy.yml --branch development --limit 1
 ```
 
-- [x] **Step 2: Owner reviews each GitHub environment approval**
+- [x] **Step 2: Owner reviews each GitHub environment approval manually in GitHub**
 
-Review the `preview_foundation`, `prepare_release`, and `deploy_release` approvals in GitHub. With explicit owner authorization, confirm each completed job summary before approving its successor and record the authorization in the evidence.
+Review the `preview_foundation`, `prepare_release`, and `deploy_release` approvals in GitHub. Confirm each completed job summary before manually approving its successor, do not use programmatic approval, and record the authorization in the evidence.
 
 - [x] **Step 3: Verify the resulting Azure identity and live endpoint**
 
@@ -136,9 +136,9 @@ gh workflow run deploy.yml --repo RobertMagowan/ordersApp --ref test
 gh run list --repo RobertMagowan/ordersApp --workflow deploy.yml --branch test --limit 1
 ```
 
-- [x] **Step 2: Owner reviews each GitHub environment approval**
+- [x] **Step 2: Owner reviews each GitHub environment approval manually in GitHub**
 
-Review the `preview_foundation`, `prepare_release`, and `deploy_release` approvals in GitHub. With explicit owner authorization, confirm each completed job summary before approving its successor and record the authorization in the evidence.
+Review the `preview_foundation`, `prepare_release`, and `deploy_release` approvals in GitHub. Confirm each completed job summary before manually approving its successor, do not use programmatic approval, and record the authorization in the evidence.
 
 - [x] **Step 3: Verify the resulting Azure identity and live endpoint**
 
@@ -164,7 +164,7 @@ git diff --check
 
 Expected: no production changes and no whitespace errors.
 
- - [ ] **Step 5: Record and commit the sanitized reset evidence**
+- [x] **Step 5: Record and commit the sanitized reset evidence**
 
 ```powershell
 git add docs/evidence/sprint-3/nonproduction-foundation-reset.md
