@@ -97,9 +97,11 @@ gh workflow run deploy.yml --repo RobertMagowan/ordersApp --ref development
 gh run list --repo RobertMagowan/ordersApp --workflow deploy.yml --branch development --limit 1
 ```
 
-- [x] **Step 2: Owner reviews each GitHub environment approval manually in GitHub**
+- [ ] **Step 2: Owner reviews each GitHub environment approval manually in GitHub**
 
 Review the `preview_foundation`, `prepare_release`, and `deploy_release` approvals in GitHub. Confirm each completed job summary before manually approving its successor, do not use programmatic approval, and record the authorization in the evidence.
+
+Execution variance: explicitly authorized deployment-review API approvals are recorded in `docs/evidence/sprint-3/nonproduction-foundation-reset.md`; this does not evidence manual GitHub review.
 
 - [x] **Step 3: Verify the resulting Azure identity and live endpoint**
 
@@ -136,9 +138,11 @@ gh workflow run deploy.yml --repo RobertMagowan/ordersApp --ref test
 gh run list --repo RobertMagowan/ordersApp --workflow deploy.yml --branch test --limit 1
 ```
 
-- [x] **Step 2: Owner reviews each GitHub environment approval manually in GitHub**
+- [ ] **Step 2: Owner reviews each GitHub environment approval manually in GitHub**
 
 Review the `preview_foundation`, `prepare_release`, and `deploy_release` approvals in GitHub. Confirm each completed job summary before manually approving its successor, do not use programmatic approval, and record the authorization in the evidence.
+
+Execution variance: explicitly authorized deployment-review API approvals are recorded in `docs/evidence/sprint-3/nonproduction-foundation-reset.md`; this does not evidence manual GitHub review.
 
 - [x] **Step 3: Verify the resulting Azure identity and live endpoint**
 
