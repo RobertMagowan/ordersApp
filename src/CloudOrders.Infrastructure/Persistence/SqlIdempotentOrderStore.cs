@@ -11,6 +11,8 @@ public sealed class SqlIdempotentOrderStore(
     IDbContextFactory<CloudOrdersDbContext> contextFactory,
     TimeProvider timeProvider) : IIdempotentOrderStore
 {
+    private const string IdempotencyPrimaryKeySqlIdentifier = "'PK_IdempotencyRecords'";
+    private const string IdempotencyTableSqlIdentifier = "'dbo.IdempotencyRecords'";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan IdempotencyRetention = TimeSpan.FromDays(7);
 
@@ -45,7 +47,7 @@ public sealed class SqlIdempotentOrderStore(
             await transaction.CommitAsync(cancellationToken);
             return CreateOrderResult.Created(request.Response);
         }
-        catch (DbUpdateException exception) when (IsDuplicateKey(exception))
+        catch (DbUpdateException exception) when (IsIdempotencyPrimaryKeyViolation(exception))
         {
             await transaction.RollbackAsync(cancellationToken);
             var racedRecord = await FindExistingInNewQueryAsync(request, cancellationToken);
@@ -118,6 +120,10 @@ public sealed class SqlIdempotentOrderStore(
             ExpiresAt = request.Order.CreatedAt.Add(IdempotencyRetention)
         };
 
-    private static bool IsDuplicateKey(DbUpdateException exception) =>
-        exception.InnerException is SqlException { Number: 2601 or 2627 };
+    private static bool IsIdempotencyPrimaryKeyViolation(DbUpdateException exception) =>
+        exception.InnerException is SqlException sqlException
+        && sqlException.Errors.Cast<SqlError>().Any(error =>
+            error.Number == 2627
+            && error.Message.Contains(IdempotencyPrimaryKeySqlIdentifier, StringComparison.Ordinal)
+            && error.Message.Contains(IdempotencyTableSqlIdentifier, StringComparison.Ordinal));
 }

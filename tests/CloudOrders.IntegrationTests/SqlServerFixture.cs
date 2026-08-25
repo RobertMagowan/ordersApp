@@ -6,7 +6,8 @@ namespace CloudOrders.IntegrationTests;
 
 public sealed class SqlServerFixture : IAsyncLifetime
 {
-    private readonly MsSqlContainer container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
+    private readonly MsSqlContainer container =
+        new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-CU26-ubuntu-22.04").Build();
 
     public Task InitializeAsync() => container.StartAsync();
 

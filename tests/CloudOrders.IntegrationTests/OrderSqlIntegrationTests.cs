@@ -2,12 +2,16 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using CloudOrders.Application.Orders;
 using CloudOrders.Contracts.Orders;
+using CloudOrders.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CloudOrders.IntegrationTests;
 
@@ -15,6 +19,10 @@ namespace CloudOrders.IntegrationTests;
 public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
 {
     private const string SubjectId = "local-development-subject";
+    private const string UniqueIndexSql =
+        "CREATE UNIQUE INDEX UX_Test_Orders_CustomerReference ON dbo.Orders (CustomerReference);";
+    private const string UniqueConstraintSql =
+        "ALTER TABLE dbo.Orders ADD CONSTRAINT UQ_Test_Orders_CustomerReference UNIQUE (CustomerReference);";
 
     [Fact]
     public async Task ReadinessChecksSqlConnection()
@@ -172,7 +180,8 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
     public async Task ConcurrentSameKeySubmissionsCreateOneTransactionSlice()
     {
         await using var database = await sqlServer.CreateDatabaseAsync();
-        using var factory = CreateFactory(database.ConnectionString);
+        var raceObserver = new IdempotencyRaceObserver(synchronizedLookupCount: 2);
+        using var factory = CreateFactory(database.ConnectionString, raceObserver);
         using var firstClient = factory.CreateClient();
         using var secondClient = factory.CreateClient();
         var key = Guid.NewGuid();
@@ -188,6 +197,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
             responses.Select(response => response.StatusCode).Order().ToArray());
         var representations = await Task.WhenAll(responses.Select(response => response.Content.ReadAsStringAsync()));
         Assert.Equal(representations[0], representations[1]);
+        AssertDuplicateKeyRecoveryObserved(raceObserver);
         await AssertSingleTransactionRowsAsync(database.ConnectionString);
     }
 
@@ -195,7 +205,8 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
     public async Task ConcurrentSameKeyDifferentPayloadSubmissionsCreateOneOrderAndReturnConflict()
     {
         await using var database = await sqlServer.CreateDatabaseAsync();
-        using var factory = CreateFactory(database.ConnectionString);
+        var raceObserver = new IdempotencyRaceObserver(synchronizedLookupCount: 2);
+        using var factory = CreateFactory(database.ConnectionString, raceObserver);
         using var firstClient = factory.CreateClient();
         using var secondClient = factory.CreateClient();
         var key = Guid.NewGuid();
@@ -209,6 +220,48 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         Assert.Contains(responses, response => response.StatusCode == HttpStatusCode.Created);
         var conflict = Assert.Single(responses, response => response.StatusCode == HttpStatusCode.Conflict);
         await AssertProblemDetailsAsync(conflict, HttpStatusCode.Conflict, "idempotency_conflict");
+        AssertDuplicateKeyRecoveryObserved(raceObserver);
+        await AssertSingleTransactionRowsAsync(database.ConnectionString);
+    }
+
+    [Theory]
+    [InlineData(UniqueIndexSql, 2601)]
+    [InlineData(UniqueConstraintSql, 2627)]
+    public async Task UnrelatedSqlDuplicateKeyViolationsAreNotClassifiedAsIdempotencyRaces(
+        string uniqueObjectSql,
+        int expectedSqlErrorNumber)
+    {
+        await using var database = await sqlServer.CreateDatabaseAsync();
+        await ExecuteAsync(database.ConnectionString, uniqueObjectSql, _ => { });
+        using (var seedFactory = CreateFactory(database.ConnectionString))
+        using (var seedClient = seedFactory.CreateClient())
+        using (var seedResponse = await PostOrderAsync(
+            seedClient,
+            Guid.NewGuid(),
+            "CUST-UNIQUE",
+            "SKU-UNIQUE-1",
+            1))
+        {
+            Assert.Equal(HttpStatusCode.Created, seedResponse.StatusCode);
+        }
+
+        var raceObserver = new IdempotencyRaceObserver(synchronizedLookupCount: 1);
+        using var factory = CreateFactory(database.ConnectionString, raceObserver);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var handler = scope.ServiceProvider.GetRequiredService<CreateOrderHandler>();
+
+        var exception = await Assert.ThrowsAsync<DbUpdateException>(() => handler.Handle(
+            new CreateOrderCommand("CUST-UNIQUE", "SKU-UNIQUE-2", 1),
+            Guid.NewGuid(),
+            traceParent: null,
+            CancellationToken.None));
+
+        var sqlException = Assert.IsType<SqlException>(exception.InnerException);
+        Assert.Equal(expectedSqlErrorNumber, sqlException.Number);
+        Assert.Equal(1, raceObserver.IdempotencyLookupCount);
+        Assert.Equal(1, raceObserver.InitialEmptyLookupCount);
+        Assert.Equal(1, raceObserver.LookupContextCount);
+        Assert.Equal(1, raceObserver.LookupCountAtFirstInsert);
         await AssertSingleTransactionRowsAsync(database.ConnectionString);
     }
 
@@ -301,7 +354,9 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         Assert.Equal(0, await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.Orders"));
     }
 
-    private static WebApplicationFactory<Program> CreateFactory(string connectionString) =>
+    private static WebApplicationFactory<Program> CreateFactory(
+        string connectionString,
+        IdempotencyRaceObserver? raceObserver = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
@@ -310,6 +365,14 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
                 {
                     ["ConnectionStrings:CloudOrders"] = connectionString
                 }));
+            if (raceObserver is not null)
+            {
+                builder.ConfigureServices(services =>
+                    services.ConfigureDbContext<CloudOrdersDbContext>(options =>
+                        options.AddInterceptors(
+                            raceObserver.CommandInterceptor,
+                            raceObserver.TransactionInterceptor)));
+            }
         });
 
     private static async Task<HttpResponseMessage> PostOrderAsync(
@@ -342,6 +405,15 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         Assert.Equal(1, await ScalarAsync<int>(connectionString, "SELECT COUNT(*) FROM dbo.Orders"));
         Assert.Equal(1, await ScalarAsync<int>(connectionString, "SELECT COUNT(*) FROM dbo.OutboxMessages"));
         Assert.Equal(1, await ScalarAsync<int>(connectionString, "SELECT COUNT(*) FROM dbo.IdempotencyRecords"));
+    }
+
+    private static void AssertDuplicateKeyRecoveryObserved(IdempotencyRaceObserver raceObserver)
+    {
+        Assert.Equal(2, raceObserver.LookupCountAtFirstInsert);
+        Assert.Equal(3, raceObserver.IdempotencyLookupCount);
+        Assert.Equal(2, raceObserver.InitialEmptyLookupCount);
+        Assert.Equal(3, raceObserver.LookupContextCount);
+        Assert.Equal(1, raceObserver.RollbackCount);
     }
 
     private static async Task AssertProblemDetailsAsync(
