@@ -13,6 +13,22 @@ public sealed class RepositoryPolicyTests
         Assert.Contains("# Repository Guidelines", guide, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void InfrastructureDeclaresNonProductionAzureSqlDeploymentContract()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var mainBicep = File.ReadAllText(Path.Combine(repositoryRoot, "infra", "main.bicep"));
+
+        Assert.Contains("param deploySql bool", mainBicep, StringComparison.Ordinal);
+        Assert.Contains("param sqlServerName string", mainBicep, StringComparison.Ordinal);
+        Assert.Contains("param sqlDatabaseName string", mainBicep, StringComparison.Ordinal);
+        Assert.Contains("param migrationIdentityName string", mainBicep, StringComparison.Ordinal);
+        Assert.Contains("output sqlServerFqdn string", mainBicep, StringComparison.Ordinal);
+        Assert.Contains("output databaseName string", mainBicep, StringComparison.Ordinal);
+        Assert.Contains("output migrationJobName string", mainBicep, StringComparison.Ordinal);
+        Assert.Contains("output migrationIdentityClientId string", mainBicep, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

@@ -31,6 +31,9 @@ param maxReplicas int
 @description('Resource tags.')
 param tags object
 
+@description('Non-secret managed-identity Azure SQL connection string. Empty leaves the bootstrap API unchanged.')
+param sqlConnectionString string = ''
+
 var containers = [
   {
     name: 'api'
@@ -39,6 +42,12 @@ var containers = [
       cpu: '0.25'
       memory: '0.5Gi'
     }
+    env: empty(sqlConnectionString) ? [] : [
+      {
+        name: 'ConnectionStrings__CloudOrders'
+        value: sqlConnectionString
+      }
+    ]
     probes: enableLivenessProbe ? [
       {
         type: 'Liveness'
