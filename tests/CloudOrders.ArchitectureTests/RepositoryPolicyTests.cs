@@ -46,6 +46,30 @@ public sealed class RepositoryPolicyTests
         Assert.DoesNotContain(outerSqlDatabaseDeploymentName, sqlDatabaseModule, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void MigrationJobReceivesAcrPullBeforePrivateImageValidation()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var mainBicep = File.ReadAllText(Path.Combine(repositoryRoot, "infra", "main.bicep"));
+        var migrationJobModule = File.ReadAllText(Path.Combine(repositoryRoot, "infra", "modules", "migration-job.bicep"));
+
+        Assert.Contains("param registryName string", migrationJobModule, StringComparison.Ordinal);
+        Assert.Contains("resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing", migrationJobModule, StringComparison.Ordinal);
+        Assert.Contains("resource migrationAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01'", migrationJobModule, StringComparison.Ordinal);
+        Assert.Contains("scope: registry", migrationJobModule, StringComparison.Ordinal);
+        Assert.Contains("principalId: migrationIdentity.properties.principalId", migrationJobModule, StringComparison.Ordinal);
+        Assert.Contains("principalType: 'ServicePrincipal'", migrationJobModule, StringComparison.Ordinal);
+        Assert.Contains("dependsOn: [", migrationJobModule, StringComparison.Ordinal);
+        Assert.Contains("migrationAcrPullRole", migrationJobModule, StringComparison.Ordinal);
+        Assert.Contains("param createJob bool", migrationJobModule, StringComparison.Ordinal);
+        Assert.Contains("resource migrationJob 'Microsoft.App/jobs@2024-03-01' = if (createJob)", migrationJobModule, StringComparison.Ordinal);
+        Assert.Contains("param deployMigrationJob bool = true", mainBicep, StringComparison.Ordinal);
+        Assert.Contains("createJob: deployMigrationJob", mainBicep, StringComparison.Ordinal);
+        Assert.Contains("param deployContainerApp bool = true", mainBicep, StringComparison.Ordinal);
+        Assert.Contains("module containerApp 'modules/container-app.bicep' = if (deployContainerApp)", mainBicep, StringComparison.Ordinal);
+        Assert.Contains("registryName: registryModule.outputs.name", mainBicep, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

@@ -27,6 +27,9 @@ param containerImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
 @description('Use the Container App managed identity to pull the image from this template-created registry.')
 param useAcr bool = false
 
+@description('Create or update the API Container App. SQL bootstrap phases keep the current API release unchanged.')
+param deployContainerApp bool = true
+
 @description('Create the AcrPull role assignment from Bicep. The GitHub workflow bootstraps it idempotently with Azure CLI.')
 param createAcrPullRole bool = false
 
@@ -56,6 +59,9 @@ param migrationIdentityName string = ''
 
 @description('Container Apps Job name for migration execution.')
 param migrationJobName string = ''
+
+@description('Create the private-image migration job after its identity and registry access are provisioned.')
+param deployMigrationJob bool = true
 
 @description('Immutable migration-runner container image.')
 param migrationImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
@@ -149,18 +155,20 @@ var apiSqlConnectionString = sqlDeploymentEnabled
 module migrationJob 'modules/migration-job.bicep' = if (sqlDeploymentEnabled) {
   name: 'cloudOrdersMigrationJob'
   params: {
+    createJob: deployMigrationJob
     location: location
     managedEnvironmentResourceId: managedEnvironment.outputs.resourceId
     migrationIdentityName: migrationIdentityName
     migrationImage: migrationImage
     name: migrationJobName
     registryLoginServer: registryModule.outputs.loginServer
+    registryName: registryModule.outputs.name
     sqlConnectionString: apiSqlConnectionString
     tags: sqlTags
   }
 }
 
-module containerApp 'modules/container-app.bicep' = {
+module containerApp 'modules/container-app.bicep' = if (deployContainerApp) {
   name: 'containerApp'
   params: {
     containerImage: containerImage
@@ -183,22 +191,22 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing =
   name: acrName
 }
 
-resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (useAcr && createAcrPullRole) {
+resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployContainerApp && useAcr && createAcrPullRole) {
   name: guid(registry.id, appName, 'AcrPull')
   scope: registry
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
-    principalId: containerApp.outputs.principalId
+    principalId: containerApp!.outputs.principalId
     principalType: 'ServicePrincipal'
   }
 }
 
-output containerAppName string = containerApp.outputs.name
-output containerAppFqdn string = containerApp.outputs.fqdn
+output containerAppName string = deployContainerApp ? containerApp!.outputs.name : ''
+output containerAppFqdn string = deployContainerApp ? containerApp!.outputs.fqdn : ''
 output registryName string = registryModule.outputs.name
 output registryLoginServer string = registryModule.outputs.loginServer
 output releaseId string = releaseId
 output sqlServerFqdn string = sqlDeploymentEnabled ? sqlServer!.outputs.fullyQualifiedDomainName : ''
 output databaseName string = sqlDeploymentEnabled ? sqlDatabase!.outputs.name : ''
-output migrationJobName string = sqlDeploymentEnabled ? migrationJob!.outputs.name : ''
+output migrationJobName string = sqlDeploymentEnabled && deployMigrationJob ? migrationJob!.outputs.name : ''
 output migrationIdentityClientId string = sqlDeploymentEnabled ? migrationJob!.outputs.identityClientId : ''

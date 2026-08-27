@@ -4,6 +4,9 @@ param location string
 @description('Container Apps Job name.')
 param name string
 
+@description('Create the private-image migration job after its identity and registry access are provisioned.')
+param createJob bool
+
 @description('Container Apps managed environment resource ID.')
 param managedEnvironmentResourceId string
 
@@ -15,6 +18,9 @@ param migrationImage string
 
 @description('ACR login server.')
 param registryLoginServer string
+
+@description('Azure Container Registry name for the migration image.')
+param registryName string
 
 @description('Managed-identity SQL connection string without secret material.')
 param sqlConnectionString string
@@ -28,7 +34,24 @@ resource migrationIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@202
   tags: tags
 }
 
-resource migrationJob 'Microsoft.App/jobs@2024-03-01' = {
+resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
+  name: registryName
+}
+
+resource migrationAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(registry.id, migrationIdentity.id, 'AcrPull')
+  scope: registry
+  properties: {
+    principalId: migrationIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+  }
+}
+
+resource migrationJob 'Microsoft.App/jobs@2024-03-01' = if (createJob) {
+  dependsOn: [
+    migrationAcrPullRole
+  ]
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
@@ -76,8 +99,8 @@ resource migrationJob 'Microsoft.App/jobs@2024-03-01' = {
   tags: tags
 }
 
-output name string = migrationJob.name
-output resourceId string = migrationJob.id
+output name string = createJob ? migrationJob.name : ''
+output resourceId string = createJob ? migrationJob.id : ''
 output identityResourceId string = migrationIdentity.id
 output identityClientId string = migrationIdentity.properties.clientId
 output identityPrincipalId string = migrationIdentity.properties.principalId
