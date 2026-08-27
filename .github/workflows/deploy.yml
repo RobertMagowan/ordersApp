@@ -66,6 +66,9 @@ jobs:
       AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
       AZURE_MANAGED_ENVIRONMENT_NAME: ${{ vars.AZURE_MANAGED_ENVIRONMENT_NAME }}
       AZURE_LOG_ANALYTICS_NAME: ${{ vars.AZURE_LOG_ANALYTICS_NAME }}
+      AZURE_SQL_ADMIN_LOGIN: ${{ vars.AZURE_SQL_ADMIN_LOGIN }}
+      AZURE_SQL_ADMIN_OBJECT_ID: ${{ vars.AZURE_SQL_ADMIN_OBJECT_ID }}
+      AZURE_SQL_ADMIN_TENANT_ID: ${{ vars.AZURE_SQL_ADMIN_TENANT_ID }}
       DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
     steps:
       - name: Read deployment state
@@ -224,6 +227,7 @@ jobs:
       image: ${{ steps.image.outputs.image }}
       image_tag: ${{ steps.image.outputs.tag }}
       digest: ${{ steps.image.outputs.digest }}
+      migration_image: ${{ steps.migration_image.outputs.image }}
       previous_image: ${{ steps.rollback_context.outputs.previous_image }}
       previous_revision: ${{ steps.rollback_context.outputs.previous_revision }}
     env:
@@ -299,6 +303,17 @@ jobs:
           echo "tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
+      - name: Build and publish immutable migration image
+        id: migration_image
+        run: |
+          LOGIN_SERVER=$(az acr show --name "$AZURE_ACR_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query loginServer --output tsv)
+          IMAGE_TAG="$LOGIN_SERVER/cloudorders-migrations:${GITHUB_SHA}"
+          docker build --file src/CloudOrders.Migrations/Dockerfile --tag "$IMAGE_TAG" .
+          docker push "$IMAGE_TAG"
+          DIGEST=$(az acr repository show --name "$AZURE_ACR_NAME" --image "cloudorders-migrations:${GITHUB_SHA}" --query digest --output tsv)
+          [[ -n "$DIGEST" ]] || { echo "Could not resolve the migration image digest." >&2; exit 1; }
+          echo "image=$LOGIN_SERVER/cloudorders-migrations@$DIGEST" >> "$GITHUB_OUTPUT"
+
       - name: Grant managed identity ACR pull access
         run: |
           PRINCIPAL_ID=$(az containerapp show \
@@ -365,8 +380,8 @@ jobs:
             echo "- Release mutation: none; deployment is in the downstream environment job"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  deploy_release:
-    name: Deploy ${{ github.ref_name }} after preview
+  preview_sql:
+    name: Preview ${{ github.ref_name }} Azure SQL
     needs: prepare_release
     runs-on: ubuntu-latest
     environment:
@@ -381,6 +396,139 @@ jobs:
       AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
       AZURE_MANAGED_ENVIRONMENT_NAME: ${{ vars.AZURE_MANAGED_ENVIRONMENT_NAME }}
       AZURE_LOG_ANALYTICS_NAME: ${{ vars.AZURE_LOG_ANALYTICS_NAME }}
+      AZURE_SQL_ADMIN_LOGIN: ${{ vars.AZURE_SQL_ADMIN_LOGIN }}
+      AZURE_SQL_ADMIN_OBJECT_ID: ${{ vars.AZURE_SQL_ADMIN_OBJECT_ID }}
+      AZURE_SQL_ADMIN_TENANT_ID: ${{ vars.AZURE_SQL_ADMIN_TENANT_ID }}
+      DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Preview nonproduction Azure SQL
+        env:
+          API_IMAGE: ${{ needs.prepare_release.outputs.image }}
+          MIGRATION_IMAGE: ${{ needs.prepare_release.outputs.migration_image }}
+        run: |
+          if [[ "$DEPLOYMENT_ENVIRONMENT" == production ]]; then
+            echo "Sprint 3 Azure SQL is intentionally not enabled for production."
+            exit 0
+          fi
+          for value in AZURE_SQL_ADMIN_LOGIN AZURE_SQL_ADMIN_OBJECT_ID AZURE_SQL_ADMIN_TENANT_ID; do
+            [[ -n "${!value}" ]] || { echo "Missing required SQL setting: $value" >&2; exit 1; }
+          done
+          az deployment group what-if --resource-group "$AZURE_RESOURCE_GROUP" --template-file infra/main.bicep --parameters "infra/environments/$DEPLOYMENT_ENVIRONMENT.bicepparam" location="$AZURE_LOCATION" environmentName="$DEPLOYMENT_ENVIRONMENT" releaseId="$GITHUB_SHA" appName="$AZURE_APP_NAME" acrName="$AZURE_ACR_NAME" managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" logAnalyticsName="$AZURE_LOG_ANALYTICS_NAME" containerImage="$API_IMAGE" migrationImage="$MIGRATION_IMAGE" useAcr=true deploySql=true sqlAdministratorLogin="$AZURE_SQL_ADMIN_LOGIN" sqlAdministratorObjectId="$AZURE_SQL_ADMIN_OBJECT_ID" sqlAdministratorTenantId="$AZURE_SQL_ADMIN_TENANT_ID" --mode Incremental --result-format FullResourcePayloads
+
+  bootstrap_sql:
+    name: Provision ${{ github.ref_name }} Azure SQL
+    needs: [preview_sql, prepare_release]
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+      AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
+      AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+      AZURE_MANAGED_ENVIRONMENT_NAME: ${{ vars.AZURE_MANAGED_ENVIRONMENT_NAME }}
+      AZURE_LOG_ANALYTICS_NAME: ${{ vars.AZURE_LOG_ANALYTICS_NAME }}
+      AZURE_SQL_ADMIN_LOGIN: ${{ vars.AZURE_SQL_ADMIN_LOGIN }}
+      AZURE_SQL_ADMIN_OBJECT_ID: ${{ vars.AZURE_SQL_ADMIN_OBJECT_ID }}
+      AZURE_SQL_ADMIN_TENANT_ID: ${{ vars.AZURE_SQL_ADMIN_TENANT_ID }}
+      DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Provision nonproduction Azure SQL
+        env:
+          API_IMAGE: ${{ needs.prepare_release.outputs.image }}
+          MIGRATION_IMAGE: ${{ needs.prepare_release.outputs.migration_image }}
+        run: |
+          if [[ "$DEPLOYMENT_ENVIRONMENT" == production ]]; then
+            echo "Sprint 3 Azure SQL is intentionally not enabled for production."
+            exit 0
+          fi
+          az deployment group create --resource-group "$AZURE_RESOURCE_GROUP" --name "cloudorders-$DEPLOYMENT_ENVIRONMENT-sql-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" --template-file infra/main.bicep --parameters "infra/environments/$DEPLOYMENT_ENVIRONMENT.bicepparam" location="$AZURE_LOCATION" environmentName="$DEPLOYMENT_ENVIRONMENT" releaseId="$GITHUB_SHA" appName="$AZURE_APP_NAME" acrName="$AZURE_ACR_NAME" managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" logAnalyticsName="$AZURE_LOG_ANALYTICS_NAME" containerImage="$API_IMAGE" migrationImage="$MIGRATION_IMAGE" useAcr=true deploySql=true sqlAdministratorLogin="$AZURE_SQL_ADMIN_LOGIN" sqlAdministratorObjectId="$AZURE_SQL_ADMIN_OBJECT_ID" sqlAdministratorTenantId="$AZURE_SQL_ADMIN_TENANT_ID" --mode Incremental
+          JOB_IDENTITY=$(az identity show --resource-group "$AZURE_RESOURCE_GROUP" --name "$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name "cloudorders-$DEPLOYMENT_ENVIRONMENT-sql-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" --query properties.outputs.migrationIdentityName.value --output tsv)" --query principalId --output tsv)
+          ACR_ID=$(az acr show --name "$AZURE_ACR_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query id --output tsv)
+          EXISTING=$(az role assignment list --assignee-object-id "$JOB_IDENTITY" --scope "$ACR_ID" --query "[?roleDefinitionName=='AcrPull'].id | [0]" --output tsv)
+          if [[ -z "$EXISTING" ]]; then
+            az role assignment create --assignee-object-id "$JOB_IDENTITY" --assignee-principal-type ServicePrincipal --role AcrPull --scope "$ACR_ID"
+          fi
+
+  run_migration:
+    name: Run ${{ github.ref_name }} SQL migration
+    needs: bootstrap_sql
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
+    steps:
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Start nonproduction migration Job
+        run: |
+          if [[ "$DEPLOYMENT_ENVIRONMENT" == production ]]; then
+            echo "No Sprint 3 migration job is configured for production."
+            exit 0
+          fi
+          case "$DEPLOYMENT_ENVIRONMENT" in
+            development) JOB_NAME='cloudorders-dev-migrations' ;;
+            test) JOB_NAME='cloudorders-test-migrations' ;;
+            *) echo "Unsupported migration environment: $DEPLOYMENT_ENVIRONMENT" >&2; exit 1 ;;
+          esac
+          az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP"
+          for _ in {1..30}; do
+            EXECUTION=$(az containerapp job execution list --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query '[0].name' --output tsv)
+            STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query properties.status --output tsv)
+            [[ "$STATUS" == Succeeded ]] && exit 0
+            [[ "$STATUS" == Failed ]] && { echo "Migration Job execution $EXECUTION failed." >&2; exit 1; }
+            sleep 10
+          done
+          echo "Migration Job did not complete within five minutes." >&2
+          exit 1
+
+  deploy_release:
+    name: Deploy ${{ github.ref_name }} after preview
+    needs: [prepare_release, run_migration]
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+      AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
+      AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+      AZURE_MANAGED_ENVIRONMENT_NAME: ${{ vars.AZURE_MANAGED_ENVIRONMENT_NAME }}
+      AZURE_LOG_ANALYTICS_NAME: ${{ vars.AZURE_LOG_ANALYTICS_NAME }}
+      AZURE_SQL_ADMIN_LOGIN: ${{ vars.AZURE_SQL_ADMIN_LOGIN }}
+      AZURE_SQL_ADMIN_OBJECT_ID: ${{ vars.AZURE_SQL_ADMIN_OBJECT_ID }}
+      AZURE_SQL_ADMIN_TENANT_ID: ${{ vars.AZURE_SQL_ADMIN_TENANT_ID }}
       DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
       DEPLOYMENT_NAME: cloudorders-${{ github.ref_name == 'master' && 'production' || github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
@@ -401,6 +549,10 @@ jobs:
         env:
           IMAGE: ${{ needs.prepare_release.outputs.image }}
         run: |
+          DEPLOY_SQL=false
+          if [[ "$DEPLOYMENT_ENVIRONMENT" != production ]]; then
+            DEPLOY_SQL=true
+          fi
           az deployment group create \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$DEPLOYMENT_NAME" \
@@ -419,6 +571,10 @@ jobs:
               useAcr=true \
               createAcrPullRole=false \
               containerImage="$IMAGE" \
+              deploySql="$DEPLOY_SQL" \
+              sqlAdministratorLogin="$AZURE_SQL_ADMIN_LOGIN" \
+              sqlAdministratorObjectId="$AZURE_SQL_ADMIN_OBJECT_ID" \
+              sqlAdministratorTenantId="$AZURE_SQL_ADMIN_TENANT_ID" \
             --mode Incremental
 
       - name: Wait for candidate revision

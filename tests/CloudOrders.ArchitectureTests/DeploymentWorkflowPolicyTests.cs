@@ -134,6 +134,29 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("REVISION: ${{ steps.candidate.outputs.revision }}", summaryStep, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void DeploymentWorkflowRunsSqlMigrationBeforeApiCandidatePromotion()
+    {
+        var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
+        var workflow = File.ReadAllText(workflowPath);
+
+        Assert.Contains("preview_sql:", workflow, StringComparison.Ordinal);
+        Assert.Contains("bootstrap_sql:", workflow, StringComparison.Ordinal);
+        Assert.Contains("run_migration:", workflow, StringComparison.Ordinal);
+        Assert.Contains("deploy_release:", workflow, StringComparison.Ordinal);
+        Assert.Contains("az containerapp job start", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("Password=", workflow, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("--allow-insecure", workflow, StringComparison.Ordinal);
+
+        var migrationIndex = workflow.IndexOf("run_migration:", StringComparison.Ordinal);
+        var deployIndex = workflow.IndexOf("deploy_release:", StringComparison.Ordinal);
+        var candidateIndex = workflow.IndexOf("name: Wait for candidate revision", StringComparison.Ordinal);
+        Assert.True(migrationIndex >= 0 && deployIndex > migrationIndex,
+            "The API deployment must wait for a successful migration job.");
+        Assert.True(candidateIndex > deployIndex,
+            "Candidate readiness must remain after migration execution.");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
