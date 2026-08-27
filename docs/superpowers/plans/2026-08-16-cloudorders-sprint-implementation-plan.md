@@ -198,6 +198,8 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Estimated effort:** 5–7 implementation days + 3 development-verification days + 1–2 QA days = 9–12 working days.
 
+**Status (2026-08-27):** Complete in `development` and `test`; production was deliberately not deployed. See `docs/evidence/sprint-3/`.
+
 **Outcome:** Repeated or concurrent POSTs cannot create duplicate orders, and the API is deployable against SQL Server before Entra authorization is enabled.
 
 **Files:** EF configurations and `Orders`, `OutboxMessages`, `IdempotencyRecords` models; migrations; `Idempotency-Key` middleware/handler; SQL integration tests using Testcontainers; initial SQL service in `local/compose.yml`; focused Azure SQL Bicep modules; deployment migration step.
@@ -206,11 +208,11 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Tasks:**
 
-- [ ] Write failing SQL tests for first request, exact replay, same-key/different-payload conflict, and two concurrent requests.
-- [ ] Add schema/indexes and one atomic transaction covering Order + IdempotencyRecord + a complete publishable OutboxMessage: stable `EventId`/`Id`, `AggregateId`, message metadata/payload, occurrence timestamps, W3C trace context, and initial pending state.
-- [ ] Implement a durable key plus canonical request hash using a temporary non-production subject abstraction; move Entra `oid` binding and customer authorization to Sprint 4.
-- [ ] Add migrations that target an explicit connection string, a pinned local SQL health check, request limits/timeout/unknown-member validation tests, and an Azure SQL deployment migration step that never runs from application startup.
-- [ ] Provision development Azure SQL and minimum API database access; any temporary bootstrap firewall exception has a named owner/expiry and moves to the Sprint 7 removal register.
+- [x] Write failing SQL tests for first request, exact replay, same-key/different-payload conflict, and two concurrent requests.
+- [x] Add schema/indexes and one atomic transaction covering Order + IdempotencyRecord + a complete publishable OutboxMessage: stable `EventId`/`Id`, `AggregateId`, message metadata/payload, occurrence timestamps, W3C trace context, and initial pending state.
+- [x] Implement a durable key plus canonical request hash using a temporary non-production subject abstraction; move Entra `oid` binding and customer authorization to Sprint 4.
+- [x] Add migrations that target an explicit connection string, a pinned local SQL health check, request limits/timeout/unknown-member validation tests, and an Azure SQL deployment migration step that never runs from application startup.
+- [x] Provision development Azure SQL and minimum API database access; any temporary bootstrap firewall exception has a named owner/expiry and moves to the Sprint 7 removal register.
 
 **Development verification (3 days):** A separate verifier runs Testcontainers concurrency/restart/replay tests, migration upgrade/rollback rehearsal, HTTP negative tests, and deployed Azure SQL first-use/replay/conflict smoke tests.
 
