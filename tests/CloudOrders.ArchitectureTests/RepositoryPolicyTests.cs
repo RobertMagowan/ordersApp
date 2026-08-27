@@ -70,6 +70,15 @@ public sealed class RepositoryPolicyTests
         Assert.Contains("registryName: registryModule.outputs.name", mainBicep, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void MigrationJobSelectsItsUserAssignedIdentityForAzureSql()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var migrationJobModule = File.ReadAllText(Path.Combine(repositoryRoot, "infra", "modules", "migration-job.bicep"));
+
+        Assert.Contains("User Id=${migrationIdentity.properties.clientId}", migrationJobModule, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

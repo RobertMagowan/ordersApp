@@ -83,7 +83,7 @@ resource migrationJob 'Microsoft.App/jobs@2024-03-01' = if (createJob) {
           env: [
             {
               name: 'ConnectionStrings__CloudOrders'
-              value: sqlConnectionString
+              value: '${sqlConnectionString};User Id=${migrationIdentity.properties.clientId}'
             }
           ]
           image: migrationImage
