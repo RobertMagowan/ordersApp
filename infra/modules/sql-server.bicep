@@ -17,7 +17,7 @@ param tenantId string
 param tags object
 
 module sqlServer 'br/avm:res/sql/server:0.22.0' = {
-  name: 'cloudOrdersSqlServer'
+  name: 'cloudOrdersSqlServerAvm'
   params: {
     administrators: {
       administratorType: 'ActiveDirectory'

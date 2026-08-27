@@ -29,6 +29,19 @@ public sealed class RepositoryPolicyTests
         Assert.Contains("output migrationIdentityClientId string", mainBicep, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void NestedAzureSqlDeploymentNamesAreDistinct()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var mainBicep = File.ReadAllText(Path.Combine(repositoryRoot, "infra", "main.bicep"));
+        var sqlServerModule = File.ReadAllText(Path.Combine(repositoryRoot, "infra", "modules", "sql-server.bicep"));
+
+        const string outerDeploymentName = "name: 'cloudOrdersSqlServer'";
+
+        Assert.Contains(outerDeploymentName, mainBicep, StringComparison.Ordinal);
+        Assert.DoesNotContain(outerDeploymentName, sqlServerModule, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
