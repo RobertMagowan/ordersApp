@@ -11,7 +11,7 @@ param name string
 param tags object
 
 module database 'br/avm:res/sql/server/database:0.3.0' = {
-  name: 'cloudOrdersSqlDatabase'
+  name: 'cloudOrdersSqlDatabaseAvm'
   params: {
     autoPauseDelay: 60
     availabilityZone: -1

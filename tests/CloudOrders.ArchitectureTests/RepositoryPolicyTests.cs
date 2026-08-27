@@ -35,11 +35,15 @@ public sealed class RepositoryPolicyTests
         var repositoryRoot = FindRepositoryRoot();
         var mainBicep = File.ReadAllText(Path.Combine(repositoryRoot, "infra", "main.bicep"));
         var sqlServerModule = File.ReadAllText(Path.Combine(repositoryRoot, "infra", "modules", "sql-server.bicep"));
+        var sqlDatabaseModule = File.ReadAllText(Path.Combine(repositoryRoot, "infra", "modules", "sql-database.bicep"));
 
-        const string outerDeploymentName = "name: 'cloudOrdersSqlServer'";
+        const string outerSqlServerDeploymentName = "name: 'cloudOrdersSqlServer'";
+        const string outerSqlDatabaseDeploymentName = "name: 'cloudOrdersSqlDatabase'";
 
-        Assert.Contains(outerDeploymentName, mainBicep, StringComparison.Ordinal);
-        Assert.DoesNotContain(outerDeploymentName, sqlServerModule, StringComparison.Ordinal);
+        Assert.Contains(outerSqlServerDeploymentName, mainBicep, StringComparison.Ordinal);
+        Assert.DoesNotContain(outerSqlServerDeploymentName, sqlServerModule, StringComparison.Ordinal);
+        Assert.Contains(outerSqlDatabaseDeploymentName, mainBicep, StringComparison.Ordinal);
+        Assert.DoesNotContain(outerSqlDatabaseDeploymentName, sqlDatabaseModule, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()
