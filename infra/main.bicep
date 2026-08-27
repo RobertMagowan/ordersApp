@@ -42,6 +42,33 @@ param targetPort int = 8080
 @description('Enable the API liveness probe. Disable only for the public bootstrap image.')
 param enableLivenessProbe bool = true
 
+@description('Deploy Azure SQL only to development or test during Sprint 3.')
+param deploySql bool = false
+
+@description('Globally unique Azure SQL logical server name.')
+param sqlServerName string = ''
+
+@description('CloudOrders Azure SQL database name.')
+param sqlDatabaseName string = 'CloudOrders'
+
+@description('User-assigned identity name for migration execution.')
+param migrationIdentityName string = ''
+
+@description('Container Apps Job name for migration execution.')
+param migrationJobName string = ''
+
+@description('Immutable migration-runner container image.')
+param migrationImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
+
+@description('Temporary Microsoft Entra SQL administrator login name.')
+param sqlAdministratorLogin string = ''
+
+@description('Object ID of the temporary Microsoft Entra SQL administrator.')
+param sqlAdministratorObjectId string = ''
+
+@description('Microsoft Entra tenant ID for the temporary SQL administrator.')
+param sqlAdministratorTenantId string = ''
+
 @description('Resource tags applied to every resource.')
 param tags object = {
   application: 'CloudOrders'
@@ -51,6 +78,18 @@ param tags object = {
 
 var containerAppTags = union(tags, {
   release: releaseId
+})
+
+var sqlDeploymentEnabled = deploySql
+  ? (environmentName == 'production'
+      ? fail('Sprint 3 Azure SQL deployment is restricted to development and test.')
+      : true)
+  : false
+var sqlTags = union(tags, {
+  expiresOn: '2026-09-10'
+  firewallException: 'AllowAllWindowsAzureIps'
+  owner: 'Robert Magowan'
+  removalSprint: '7'
 })
 
 module observability 'modules/observability.bicep' = {
@@ -81,6 +120,46 @@ module managedEnvironment 'modules/container-app-environment.bicep' = {
   }
 }
 
+module sqlServer 'modules/sql-server.bicep' = if (sqlDeploymentEnabled) {
+  name: 'cloudOrdersSqlServer'
+  params: {
+    administratorLogin: sqlAdministratorLogin
+    administratorObjectId: sqlAdministratorObjectId
+    location: location
+    name: sqlServerName
+    tags: sqlTags
+    tenantId: sqlAdministratorTenantId
+  }
+}
+
+module sqlDatabase 'modules/sql-database.bicep' = if (sqlDeploymentEnabled) {
+  name: 'cloudOrdersSqlDatabase'
+  params: {
+    location: location
+    name: sqlDatabaseName
+    serverName: sqlServer!.outputs.name
+    tags: sqlTags
+  }
+}
+
+var apiSqlConnectionString = sqlDeploymentEnabled
+  ? 'Server=tcp:${sqlServer!.outputs.fullyQualifiedDomainName},1433;Initial Catalog=${sqlDatabase!.outputs.name};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;Authentication=Active Directory Managed Identity'
+  : ''
+
+module migrationJob 'modules/migration-job.bicep' = if (sqlDeploymentEnabled) {
+  name: 'cloudOrdersMigrationJob'
+  params: {
+    location: location
+    managedEnvironmentResourceId: managedEnvironment.outputs.resourceId
+    migrationIdentityName: migrationIdentityName
+    migrationImage: migrationImage
+    name: migrationJobName
+    registryLoginServer: registryModule.outputs.loginServer
+    sqlConnectionString: apiSqlConnectionString
+    tags: sqlTags
+  }
+}
+
 module containerApp 'modules/container-app.bicep' = {
   name: 'containerApp'
   params: {
@@ -95,6 +174,7 @@ module containerApp 'modules/container-app.bicep' = {
     tags: containerAppTags
     targetPort: targetPort
     useAcr: useAcr
+    sqlConnectionString: apiSqlConnectionString
   }
 }
 
@@ -118,3 +198,7 @@ output containerAppFqdn string = containerApp.outputs.fqdn
 output registryName string = registryModule.outputs.name
 output registryLoginServer string = registryModule.outputs.loginServer
 output releaseId string = releaseId
+output sqlServerFqdn string = sqlDeploymentEnabled ? sqlServer!.outputs.fullyQualifiedDomainName : ''
+output databaseName string = sqlDeploymentEnabled ? sqlDatabase!.outputs.name : ''
+output migrationJobName string = sqlDeploymentEnabled ? migrationJob!.outputs.name : ''
+output migrationIdentityClientId string = sqlDeploymentEnabled ? migrationJob!.outputs.identityClientId : ''

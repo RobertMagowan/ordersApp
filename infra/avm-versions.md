@@ -8,5 +8,7 @@ These module versions are pinned deliberately. Upgrade them as a reviewed infras
 | `br/avm:res/app/managed-environment` | `0.8.1` | Container Apps managed environment |
 | `br/avm:res/container-registry/registry` | `0.6.0` | Private image registry |
 | `br/avm:res/operational-insights/workspace` | `0.8.0` | Log Analytics workspace |
+| `br/avm:res/sql/server` | `0.22.0` | Microsoft Entra-only Azure SQL logical server |
+| `br/avm:res/sql/server/database` | `0.3.0` | General Purpose serverless CloudOrders database |
 
 Validation baseline: Azure CLI Bicep build/lint from the repository root on 2026-08-16 with `az bicep build --file infra/main.bicep` and `az bicep lint --file infra/main.bicep`. Development deployment and `/health/live` smoke test also passed using the pinned modules.
