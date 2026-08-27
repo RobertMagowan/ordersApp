@@ -79,6 +79,8 @@ public sealed class DeploymentWorkflowPolicyTests
             "Foundation mutation must be in a downstream job after foundation preview.");
         Assert.True(previewReleaseIndex >= 0 && deployReleaseIndex > previewReleaseIndex,
             "Release mutation must be in a downstream job after the digest what-if.");
+        var releasePreviewSummaryIndex = workflow.IndexOf("name: Publish immutable release preview summary", StringComparison.Ordinal);
+        Assert.Contains("deployMigrationJob=false", workflow[previewReleaseIndex..releasePreviewSummaryIndex], StringComparison.Ordinal);
 
         var bootstrapStart = workflow.IndexOf("name: Provision MVP foundation with public bootstrap image", StringComparison.Ordinal);
         var buildImageIndex = workflow.IndexOf("name: Build and publish immutable API image", StringComparison.Ordinal);
@@ -132,6 +134,44 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("echo \"revision=$CANDIDATE_REVISION\"", smokeStep, StringComparison.Ordinal);
         Assert.DoesNotContain("properties.latestReadyRevisionName", smokeStep, StringComparison.Ordinal);
         Assert.Contains("REVISION: ${{ steps.candidate.outputs.revision }}", summaryStep, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeploymentWorkflowRunsSqlMigrationBeforeApiCandidatePromotion()
+    {
+        var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
+        var workflow = File.ReadAllText(workflowPath);
+
+        Assert.Contains("preview_sql:", workflow, StringComparison.Ordinal);
+        Assert.Contains("bootstrap_sql:", workflow, StringComparison.Ordinal);
+        Assert.Contains("run_migration:", workflow, StringComparison.Ordinal);
+        Assert.Contains("deploy_release:", workflow, StringComparison.Ordinal);
+        Assert.Contains("az containerapp job start", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("JOB_IDENTITY=", workflow, StringComparison.Ordinal);
+        Assert.Contains("deployMigrationJob=false", workflow, StringComparison.Ordinal);
+        Assert.Contains("deployMigrationJob=true", workflow, StringComparison.Ordinal);
+        Assert.Contains("deployContainerApp=false", workflow, StringComparison.Ordinal);
+        Assert.Contains("for attempt in {1..5}", workflow, StringComparison.Ordinal);
+        Assert.Contains("grep -qiF 'InvalidParameterValueInContainerTemplate'", workflow, StringComparison.Ordinal);
+        Assert.Contains("grep -qiF 'unable to pull image'", workflow, StringComparison.Ordinal);
+        var sqlBootstrapIndex = workflow.IndexOf("bootstrap_sql:", StringComparison.Ordinal);
+        var migrationIndex = workflow.IndexOf("run_migration:", StringComparison.Ordinal);
+        var sqlBootstrapSection = workflow[sqlBootstrapIndex..migrationIndex];
+        Assert.True(
+            sqlBootstrapSection.IndexOf("deployMigrationJob=false", StringComparison.Ordinal) < sqlBootstrapSection.IndexOf("deployMigrationJob=true", StringComparison.Ordinal),
+            "The migration identity and AcrPull role must be deployed before the private-image migration job.");
+        Assert.DoesNotContain("Password=", workflow, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("--allow-insecure", workflow, StringComparison.Ordinal);
+
+        var deployIndex = workflow.IndexOf("deploy_release:", StringComparison.Ordinal);
+        var candidateIndex = workflow.IndexOf("name: Wait for candidate revision", StringComparison.Ordinal);
+        Assert.True(migrationIndex >= 0 && deployIndex > migrationIndex,
+            "The API deployment must wait for a successful migration job.");
+        Assert.True(candidateIndex > deployIndex,
+            "Candidate readiness must remain after migration execution.");
+
+        var deploySection = workflow[deployIndex..candidateIndex];
+        Assert.Contains("deployMigrationJob=false", deploySection, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()

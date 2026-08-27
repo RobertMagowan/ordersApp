@@ -1,53 +1,72 @@
 using CloudOrders.Application.Abstractions;
 using CloudOrders.Application.Orders;
-using CloudOrders.Contracts.Orders;
-using CloudOrders.Domain.Orders;
 
 namespace CloudOrders.UnitTests;
 
 public sealed class CreateOrderHandlerTests
 {
     [Fact]
-    public async Task HandlePersistsOrderAndOutboxEvent()
+    public async Task HandleCanonicalizesAndPersistsIdempotentOrderSlice()
     {
-        var repository = new RecordingOrderRepository();
-        var outbox = new RecordingOutboxWriter();
-        var handler = new CreateOrderHandler(repository, outbox, TimeProvider.System);
+        var store = new RecordingIdempotentOrderStore();
+        var handler = new CreateOrderHandler(
+            store,
+            new StubSubjectIdProvider("local-development-subject"),
+            TimeProvider.System);
+        var idempotencyKey = Guid.NewGuid();
 
         var result = await handler.Handle(
             new CreateOrderCommand(" cust-001 ", " sku-001 ", 2),
+            idempotencyKey,
+            traceParent: null,
             CancellationToken.None);
 
-        Assert.True(result.IsSuccess);
-        Assert.NotNull(result.Value);
-        Assert.Equal("CUST-001", result.Value.CustomerReference);
-        Assert.Single(repository.Orders);
-        Assert.Single(outbox.Events);
-        Assert.Equal(result.Value.Id, outbox.Events[0].OrderId);
+        Assert.Equal(CreateOrderResultKind.Created, result.Kind);
+        Assert.NotNull(result.Response);
+        Assert.Equal("CUST-001", result.Response.CustomerReference);
+        Assert.NotNull(store.Request);
+        Assert.Equal("local-development-subject", store.Request.SubjectId);
+        Assert.Equal(idempotencyKey, store.Request.IdempotencyKey);
+        Assert.Equal(result.Response.Id, store.Request.IntegrationEvent.OrderId);
+        Assert.Equal(
+            "75ad5b019fad99f92b331201a6faa101d60899ad36c7bac025fd0ffa6df12616",
+            Convert.ToHexString(store.Request.RequestHash).ToLowerInvariant());
     }
 
-    private sealed class RecordingOrderRepository : IOrderRepository
+    [Fact]
+    public async Task HandleReturnsValidationResultWithoutCallingStore()
     {
-        public List<Order> Orders { get; } = [];
+        var store = new RecordingIdempotentOrderStore();
+        var handler = new CreateOrderHandler(
+            store,
+            new StubSubjectIdProvider("local-development-subject"),
+            TimeProvider.System);
 
-        public Task AddAsync(Order order, CancellationToken cancellationToken)
-        {
-            Orders.Add(order);
-            return Task.CompletedTask;
-        }
+        var result = await handler.Handle(
+            new CreateOrderCommand("CUST-001", "SKU-001", 0),
+            Guid.NewGuid(),
+            traceParent: null,
+            CancellationToken.None);
 
-        public Task<Order?> GetAsync(Guid orderId, CancellationToken cancellationToken) =>
-            Task.FromResult(Orders.SingleOrDefault(order => order.Id == orderId));
+        Assert.Equal(CreateOrderResultKind.ValidationError, result.Kind);
+        Assert.Null(store.Request);
     }
 
-    private sealed class RecordingOutboxWriter : IOutboxWriter
+    private sealed class RecordingIdempotentOrderStore : IIdempotentOrderStore
     {
-        public List<OrderCreatedIntegrationEventV1> Events { get; } = [];
+        public IdempotentOrderRequest? Request { get; private set; }
 
-        public Task AddAsync(OrderCreatedIntegrationEventV1 integrationEvent, CancellationToken cancellationToken)
+        public Task<CreateOrderResult> CreateAsync(
+            IdempotentOrderRequest request,
+            CancellationToken cancellationToken)
         {
-            Events.Add(integrationEvent);
-            return Task.CompletedTask;
+            Request = request;
+            return Task.FromResult(CreateOrderResult.Created(request.Response));
         }
+    }
+
+    private sealed class StubSubjectIdProvider(string subjectId) : ISubjectIdProvider
+    {
+        public string SubjectId { get; } = subjectId;
     }
 }
