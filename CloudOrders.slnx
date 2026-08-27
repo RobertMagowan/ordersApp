@@ -5,6 +5,7 @@
     <Project Path="src/CloudOrders.Contracts/CloudOrders.Contracts.csproj" />
     <Project Path="src/CloudOrders.Domain/CloudOrders.Domain.csproj" />
     <Project Path="src/CloudOrders.Infrastructure/CloudOrders.Infrastructure.csproj" />
+    <Project Path="src/CloudOrders.Migrations/CloudOrders.Migrations.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/CloudOrders.ArchitectureTests/CloudOrders.ArchitectureTests.csproj" />
