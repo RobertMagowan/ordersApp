@@ -20,7 +20,7 @@
 - Keep `customerReference` in v1 POST/response/event contracts. It is generated and resolved by the server; the POST value is only a compatibility target selector. Ownership and idempotency use profile IDs.
 - Do not call `Database.Migrate()` from API startup, grant customers role-management capability, commit secrets/real tenant IDs/real email, log tokens or claims dumps, weaken TLS, use ROPC/device code for the smoke utility, or persist browser/MSAL token state.
 - Fix Critical/Important findings found before the first development merge on the current Sprint 4 feature branch. Only a defect first found after an Azure deployment uses a fresh `feature/*` remediation branch and repeats the affected gates.
-- Write a failing focused test before each production change. Keep warnings at zero and record sanitized commands, release IDs, exact migration IDs, job execution names, outcomes, and re-tests under `docs/evidence/sprint-4/`.
+- Write a failing focused test before each production change. Keep warnings at zero and record sanitized commands, release IDs, exact migration IDs, job execution names, outcomes, and re-tests under `docs/evidence/sprint-4a/` or `docs/evidence/sprint-4b/`, respectively.
 
 ---
 
@@ -123,10 +123,11 @@ Modify the existing `tests/CloudOrders.UnitTests/{CreateOrderHandlerTests,Reposi
 - Modify: `docs/contracts/{v1-contracts,frontend-design,traceability}.md`
 - Modify: `docs/superpowers/plans/{2026-08-16-cloudorders-sprint-implementation-plan,2026-08-16-sprints-2-4-execution-plan}.md`
 - Modify: `.github/workflows/deploy.yml`, `tests/CloudOrders.ArchitectureTests/{ContractPackTests,DeploymentWorkflowPolicyTests}.cs`
+- Create: `ops/releases/sprint-4a-e1-migration-only.json`
 
 **Produces:** one canonical vocabulary: verified External ID customer, `user.admin`, `Orders.Read`, `Orders.Write`, `CustomerProfileId`, actor/target idempotency, and the release sequence above.
 
-- [ ] **Step 1: Write failing contract/workflow tests.** Assert the contract and Sprint 4/Sprint 9 text contains the canonical terms and contains neither `OrderUser`, group-to-customer mapping, `CloudOrders.Orders.Read`, nor `CloudOrders.Orders.Write`. Assert the workflow assigns `EXECUTION=$(az containerapp job start ... --query name --output tsv)`, passes that exact value to `--job-execution-name`, and does not use `execution list --query '[0]'`.
+- [ ] **Step 1: Write failing contract/workflow tests.** Assert the contract and Sprint 4/Sprint 9 text contains the canonical terms and contains neither `OrderUser`, group-to-customer mapping, `CloudOrders.Orders.Read`, nor `CloudOrders.Orders.Write`. Assert the workflow assigns `EXECUTION=$(az containerapp job start ... --query name --output tsv)`, passes that exact value to `--job-execution-name`, and does not use `execution list --query '[0]'`. Assert a push merge containing the checked-in E1 manifest selects migration-only mode, runs only `AddCustomerProfileOwnershipExpand`, does not build/push/deploy an API image, and asserts the active revision/digest/traffic are unchanged; removing the manifest in the later D1 merge restores normal candidate deployment.
 
 Run: `dotnet test tests/CloudOrders.ArchitectureTests --filter "FullyQualifiedName~ContractPackTests|FullyQualifiedName~DeploymentWorkflowPolicyTests" --configuration Release`
 
@@ -134,9 +135,9 @@ Expected: FAIL on the stale terminology and list-based migration polling.
 
 - [ ] **Step 2: Update the repository contracts and roadmaps.** In contract sections 26/27/32/33, define `/me`, bare `scp` values, profile ownership, actor/target idempotency, schema expand/migrate/contract, exact 401/403/404 semantics, and `user.admin`. In Sprint 9, request the two fully qualified scope URIs and treat a verified signed-in customer as the default capability; remove the `OrderUser` role. Keep future `TestOperator` work separate.
 
-- [ ] **Step 3: Correct migration-job observation.** Capture the start command's returned execution name, fail if empty, poll only it, report its final status/name, and include the name in the workflow summary/evidence. Preserve the existing migration-before-candidate dependency.
+- [ ] **Step 3: Correct migration-job observation and define merge-safe E1 mode.** Capture the start command's returned execution name, fail if empty, poll only it, report its final status/name, and include the name in the workflow summary/evidence. Create `ops/releases/sprint-4a-e1-migration-only.json` containing exactly `{ "migration": "AddCustomerProfileOwnershipExpand", "deployApi": false }`. On protected `development`/`test` push runs, `deploy.yml` reads only this exact committed manifest, validates its two-property schema and named E1 migration, skips normal artifact/API deployment, and fails if the app revision, digest, or traffic changes. The reviewed `feature/sprint4a-d1` merge deletes the manifest in the same commit that enables normal D1 deployment. Preserve the normal migration-before-candidate dependency outside that mode.
 
-- [ ] **Step 4: Record prerequisites and transition decisions that block D1 traffic.** Before D1 can receive traffic in either environment, evidence records: external tenant/subdomain/GUID; two emergency directory admins; named Cloud Application Administrator; API and local PKCE client registrations; enabled read/write scopes; `user.admin` manifest and assignment-required setting; email-OTP user flow; work-tenant federation; the initial work account's External ID object and role assignment; protected development/test GitHub variables; the named data owner; a per-environment `reset` or `mapped-backfill` decision; and a successful local interactive `/me` smoke. A mapped-backfill decision also records the protected mapping location, checksum, and reconciliation rule: an already-created `(issuer, oid)` profile retains its generated reference only when it equals the mapping reference; otherwise abort. Store IDs only in protected configuration/evidence, never the contract or Git.
+- [ ] **Step 4: Record prerequisites and transition decisions that block D1 traffic.** Before D1 can receive traffic in either environment, evidence records: external tenant/subdomain/GUID; two emergency directory admins; named Cloud Application Administrator; API and local PKCE client registrations; enabled read/write scopes; `user.admin` manifest and assignment-required setting; email-OTP user flow; work-tenant federation; the initial work account's External ID object and role assignment; protected development/test GitHub variables; the named data owner; and a per-environment `reset` or `mapped-backfill` decision. A mapped-backfill decision also records the protected mapping location, checksum, and reconciliation rule: an already-created `(issuer, oid)` profile retains its generated reference only when it equals the mapping reference; otherwise abort. The interactive `/me` smoke belongs to the D1/R1 gate after Task 5 has implemented it. Store IDs only in protected configuration/evidence, never the contract or Git.
 
 - [ ] **Step 5: Re-run focused tests and commit.**
 
@@ -415,57 +416,42 @@ Expected: all commands exit 0; the production-exclusion assertions pass.
 
 - [ ] **Step 1: Write failing R1 compatibility and fail-closed tests.** Extend `MigrationRunnerTests` to prove Sprint 3 starts against E1 with zero traffic, D1 works against E1, legacy null-owned orders return safe 404, and a D1 fallback is another recorded authenticated D1 revision or disabled order ingress—never Sprint 3. Assert the workflow records candidate/previous image digests, migration ID, and exact job execution.
 
-- [ ] **Step 2: Deploy E1 without enabling D1 traffic.** On a reviewed `feature/sprint4a-e1` branch, add a protected `migration-only` workflow mode that runs the named E1 migration but preserves the current API image and traffic weights; its summary asserts the before/after app revision/digest are identical. Merge/promote that branch through development then test, capture migration/job/revision/image evidence, and prove the old Sprint 3 revision is schema-compatible with **zero traffic**. Do not expose D1, `/me`, or identity configuration until the per-environment transition below passes.
+- [ ] **Step 2: Promote the harmless E1 migration-only release through both environments.** On a reviewed `feature/sprint4a-e1` branch, add the manifest-governed protected migration-only mode from Task 1. Merge it to `development`, then merge the same E1-only `development` commit to `test` before D1 exists on `development`. In each environment run only E1 and assert the before/after API revision/digest/traffic are identical. The active Sprint 3 revision may continue normal pre-authentication traffic at this point, but record it solely as E1 schema-compatible—not as any future D1 rollback target. Do not run either data transition, expose D1, or add identity configuration yet.
 
-- [ ] **Step 3: Perform the per-environment quiesced transition.** For development, then separately test: set order-route ingress to fail closed/remove all application traffic; wait for in-flight requests to drain; inventory profiles, orders, outbox, and idempotency; run the approved transaction. `reset` deletes in FK-safe order (`IdempotencyRecords`, `OutboxMessages`, `Orders`, then unreferenced profiles). `mapped-backfill` validates a protected one-to-one mapping, creates/reconciles profiles, sets every order owner, and deletes unverifiable pre-Sprint-4 idempotency rows. Recheck inside the transaction and immediately before E2 later: zero unowned/null ownership rows, zero unmapped orders, zero legacy idempotency rows, and no duplicate future actor/key values. Restore ingress only with D1; never reactivate Sprint 3.
+- [ ] **Step 3: Quiesce, transition, and immediately deploy D1 in development.** Set order-route ingress to fail closed/remove all application traffic; wait for in-flight requests to drain; inventory profiles, orders, outbox, and idempotency; run the approved transaction. `reset` deletes in FK-safe order (`IdempotencyRecords`, `OutboxMessages`, `Orders`, then unreferenced profiles). `mapped-backfill` validates a protected one-to-one mapping, creates/reconciles profiles, sets every order owner, and deletes unverifiable pre-Sprint-4 idempotency rows. Recheck inside the transaction: zero unowned/null ownership rows, zero unmapped orders, zero legacy idempotency rows, and no duplicate future actor/key values. Immediately merge/deploy reviewed `feature/sprint4a-d1`, which deletes the E1 manifest and enables D1; restore ingress only after the D1 candidate is healthy. Never reactivate Sprint 3.
 
-- [ ] **Step 4: Promote R1 (D1 on E1) and run Sprint 4A gates.** On a reviewed `feature/sprint4a-d1` branch, deploy D1 to development after identity prerequisites/configuration are present, confirm exact healthy candidate revision/digest/TLS/health, and smoke `/me`, own POST/GET/replay, safe foreign/absent 404, admin cross-customer, role revoke/regrant with a fresh token, SQL profile/order/idempotency ownership, and redacted audit. Perform the three-working-day developer verification and independent review. Promote the same reviewed R1 artifact to test; run independent QA for one-to-two working days using two OTP customers plus the federated admin. No history/cursor path is asserted.
+- [ ] **Step 4: Verify R1 development, then transition and promote D1 in test.** Before the three-day development verification starts, run the local interactive PKCE `/me` smoke against the local D1 API without persisting a token. Verify the deployed D1 revision/digest/TLS/health, `/me`, own POST/GET/replay, safe foreign/absent 404, admin cross-customer, role revoke/regrant with a fresh token, SQL profile/order/idempotency ownership, and redacted audit. After the development gate passes, open the normal `development` -> `test` PR for the reviewed D1 commit. During its protected test deployment, quiesce test under fail-closed ingress, run the test transition against its already-present E1 schema, deploy D1 immediately, and restore ingress only after it is healthy. Run one-to-two days of QA in test using two OTP customers plus the federated admin. No history/cursor path is asserted.
 
 - [ ] **Step 5: Close Sprint 4A.** Fix post-deployment defects on fresh `feature/*` remediation branches and repeat the affected gate. Record immutable R1 digests/revisions, transition evidence, and release status. Do not start Sprint 4B until test QA passes and D1 is the only traffic-bearing API behavior.
 
 ## Sprint 4B — History and ownership contract
 
-### Task 8: Add authorized history, cursor keys, and the H1 release
+### Task 8: Execute R2 (E2 with unchanged D1 behavior)
 
 **Files:**
 
-- Create: `src/CloudOrders.Contracts/Orders/OrderHistoryPage.cs`, `src/CloudOrders.Application/Orders/{OrderHistoryBoundary,OrderHistorySlice,ListCustomerOrdersHandler}.cs`, and cursor files under `src/CloudOrders.Api/History/`
-- Modify: `src/CloudOrders.Application/Abstractions/IOrderRepository.cs`, `src/CloudOrders.Api/Program.cs`, `src/CloudOrders.Infrastructure/Persistence/SqlOrderRepository.cs`, `infra/{main.bicep,environments/*.bicepparam}`, `infra/modules/container-app.bicep`, `.github/workflows/{deploy,bicep-validation}.yml`
-- Create: `ops/runbooks/cursor-key-rotation.md`, `tests/CloudOrders.UnitTests/OrderHistoryCursorCodecTests.cs`, `tests/CloudOrders.IntegrationTests/OrderHistoryIntegrationTests.cs`
+- Create: `src/CloudOrders.Infrastructure/Persistence/Migrations/*_EnforceCustomerProfileOwnership.{cs,Designer.cs}` and update the snapshot.
+- Modify: D1 persistence mapping/tests, `.github/workflows/deploy.yml`, and `docs/evidence/sprint-4b/r2-*.md`.
 
-**Interfaces:**
+- [ ] **Step 1: Write the R2 compatibility matrix.** Test D1 against E1/E2 and the recorded immutable D1 image. Assert a fresh precondition transaction, exact migration polling, no Sprint 3 rollback, and D1 as the sole rollback target.
 
-```csharp
-public sealed record OrderHistoryPage(IReadOnlyList<OrderResponse> Items, string? NextCursor);
-public sealed record OrderHistoryBoundary(DateTimeOffset CreatedAtUtc, Guid OrderId);
-public sealed record OrderHistorySlice(IReadOnlyList<OwnedOrder> Items, OrderHistoryBoundary? NextBoundary);
-public sealed record OrderHistoryCursorPayload(int Version, string KeyId, Guid CustomerProfileId, long CreatedAtUtcTicks, Guid OrderId, long ExpiresAtUnixSeconds);
-public sealed record CursorSigningKey(string Id, ReadOnlyMemory<byte> Material);
-public interface ICursorSigningKeyRing { CursorSigningKey SigningKey { get; } bool TryGetValidationKey(string keyId, out CursorSigningKey key); }
-```
+- [ ] **Step 2: Promote R2.** On a reviewed `feature/sprint4b-r2` branch, generate E2 only after the fresh quiesced transaction/preconditions pass; make ownership non-null, switch idempotency uniqueness to actor/key, and retain nullable `SubjectId`. Deploy/test R2 with focused migration, D1 create/get/replay, direct SQL, and rollback-to-D1 evidence. H1 starts only after R2 passes in test.
 
-- [ ] **Step 1: Write history/cursor failures.** Cover exact `Orders.Read` scope, page default 20/range 1-100, `CreatedAt DESC, Id DESC`, equal-time tie breaking, no gaps/duplicates, customer target binding, 15-minute expiry, 1024-character input limit, malformed base64/JSON/signature, unknown key/version, and absent/foreign parity.
-
-- [ ] **Step 2: Keep cursors above persistence.** Decode at the API/handler, pass only `OrderHistoryBoundary?`, query only the authorized profile with `pageSize + 1`, then encode the returned typed boundary. The repository never parses/signs/returns cursor strings.
-
-- [ ] **Step 3: Implement secure rotation/configuration.** Deterministically serialize/sign the payload with HMAC-SHA256; require a known key ID, matching profile, valid expiry, and a decoded 32-byte minimum key. Pass current/previous material only as `@secure()` Bicep parameters into non-production Container App secrets and `secretRef`; key IDs are non-secret. Phase A distributes K2 validation-only, B makes K2 current/K1 previous, C removes K1 only after cursor TTL plus the 14-day D2 rollback window. Production remains disabled/identifier-free.
-
-- [ ] **Step 4: Review, promote H1, and target-test it.** Run cursor/ownership/Bicep tests, independent review, and development smoke against D1/E2-compatible schema only after R2 below. Promote H1 to test and run independent history/cursor QA. Preserve the recorded D1 revision as H1 rollback target.
-
-### Task 9: Execute R2 E2/D1, R3 D2, and R4 E3/D2 in order
+### Task 9: Add H1 history, then execute R3 and R4
 
 **Files:**
 
-- Create: `src/CloudOrders.Infrastructure/Persistence/Migrations/*_EnforceCustomerProfileOwnership.{cs,Designer.cs}` and `*_RemoveLegacyIdempotencySubject.{cs,Designer.cs}`; update snapshot at each boundary.
-- Modify: D1 then D2 persistence mapping/tests and `docs/evidence/sprint-4b/{r2,h1,r3,r4}-*.md`.
+- Create: `src/CloudOrders.Contracts/Orders/OrderHistoryPage.cs`, `src/CloudOrders.Application/Orders/{OrderHistoryBoundary,OrderHistorySlice,ListCustomerOrdersHandler}.cs`, cursor files under `src/CloudOrders.Api/History/`, `ops/runbooks/cursor-key-rotation.md`, and history tests.
+- Create: `src/CloudOrders.Infrastructure/Persistence/Migrations/*_RemoveLegacyIdempotencySubject.{cs,Designer.cs}` and update the snapshot.
+- Modify: `IOrderRepository`, API/SQL history persistence, non-production Bicep/workflow secret configuration, D2 mapping/tests, and `docs/evidence/sprint-4b/{h1,r3,r4}-*.md`.
 
-- [ ] **Step 1: Write the full compatibility matrix.** Test D1 against E1/E2, H1 against E2, D2 against E2/E3, and the recorded immutable image for each prior revision. Assert E2 precondition rechecks, exact migration polling, no Sprint 3 rollback, and correct D1/D2 fallback target before each destructive boundary.
+- [ ] **Step 1: Write H1 history/cursor failures.** Cover exact `Orders.Read` scope, page default 20/range 1-100, `CreatedAt DESC, Id DESC`, equal-time tie breaking, no gaps/duplicates, customer target binding, 15-minute expiry, 1024-character input limit, malformed base64/JSON/signature, unknown key/version, and absent/foreign parity. Decode at the API/handler, pass only `OrderHistoryBoundary?`, and query only the authorized profile with `pageSize + 1`.
 
-- [ ] **Step 2: Promote R2 (E2 + unchanged D1 behavior).** On a reviewed `feature/*` phase branch, generate E2 only after the fresh quiesced transaction/preconditions pass; make ownership non-null, switch idempotency uniqueness to actor/key, and retain nullable `SubjectId`. Deploy/test R2 with focused migration, D1 create/get/replay, direct SQL, and rollback-to-D1 evidence. H1 starts only after R2 passes in test.
+- [ ] **Step 2: Implement and promote H1 only after R2 test passes.** Deterministically sign a target-bound payload with HMAC-SHA256; require known key/version/profile/expiry and a 32-byte minimum key. Pass current/previous material only as non-production `@secure()` Bicep parameters into Container App secrets and `secretRef`; Phase A distributes K2 validation-only, B signs K2 and validates K1, and C removes K1 only after cursor TTL plus the 14-day D2 window. Review, smoke, and QA H1 against E2; preserve D1 as rollback target.
 
-- [ ] **Step 3: Promote R3 (D2, no migration) and soak.** On another reviewed phase branch remove `SubjectId` from D2 code while E2 retains it; deploy/test with targeted smoke, direct SQL, and D2-to-D1 rollback proof. Retain exact D1/D2 images and D2 as the ready rollback target for 14 calendar days after test smoke.
+- [ ] **Step 3: Promote R3 (D2, no migration) and soak.** On a reviewed `feature/sprint4b-r3` branch remove `SubjectId` from D2 code while E2 retains it; deploy/test with targeted smoke, direct SQL, and D2-to-D1 rollback proof. Retain exact D1/D2 images and D2 as the ready rollback target for 14 calendar days after test smoke.
 
-- [ ] **Step 4: Promote R4 (E3 + D2-compatible rebuild).** Only after the soak, use a reviewed phase branch to drop the legacy column/key, deploy/test D2-compatible code, and prove rollback only to the retained pre-E3 D2 image. Record that D1 and Sprint 3 are permanently unavailable as post-E3 rollbacks.
+- [ ] **Step 4: Promote R4 (E3 + D2-compatible rebuild).** Only after the soak, use a reviewed `feature/sprint4b-r4` branch to drop the legacy column/key, deploy/test D2-compatible code, and prove rollback only to the retained pre-E3 D2 image. Record that D1 and Sprint 3 are permanently unavailable as post-E3 rollbacks.
 
 ### Task 10: Run final verification and close Sprint 4B without production
 
@@ -482,7 +468,7 @@ public interface ICursorSigningKeyRing { CursorSigningKey SigningKey { get; } bo
 
 ## Plan self-review checklist
 
-- **Coverage:** Tasks 1-8 cover every token, ownership, migration/rollback, cursor, audit, control-plane, federation, runtime, smoke, and QA requirement while retaining default customers, one initial federated admin, no Graph writes for the API, and no production.
+- **Coverage:** Tasks 1-10 cover every token, ownership, migration/rollback, cursor, audit, control-plane, federation, runtime, smoke, and QA requirement while retaining default customers, one initial federated admin, no Graph writes for the API, and no production.
 - **Terminology:** The only customer capability term is verified External ID customer; the only elevated product role is `user.admin`; requested scope URIs and bare `scp` comparisons are intentionally distinct.
 - **Type consistency:** `AuthenticatedSubject -> CustomerProfile`; `OwnedOrder.Owner.CustomerProfileId` is the read authorization resource; idempotency uses actor and target profile IDs; persistence receives `OrderHistoryBoundary`, while only the API cursor codec handles `OrderHistoryCursorPayload`/strings.
 - **File consistency:** ASP.NET policy types remain under `CloudOrders.Api/Identity`; temporary subject-provider files are deleted; `OrderHistoryPage` is the sole history response DTO.

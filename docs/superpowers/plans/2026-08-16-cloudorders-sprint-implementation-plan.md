@@ -223,7 +223,7 @@ docs/                                                   ADRs, sprint evidence, r
 
 ## Sprint 4A — External ID Identity and Ownership Vertical Slice
 
-**Estimated effort:** 11–17 implementation/release days + 3 development-verification days + 1–2 QA days = **16–22 working days**.
+**Estimated effort:** 12–17 implementation/release days (including the separate E1 migration-only release) + 3 development-verification days + 1–2 QA days = **16–22 working days**.
 
 **Outcome:** A verified Microsoft Entra External ID customer can authenticate, discover their opaque server-generated customer reference through `GET /api/v1/me`, create/read/replay only their own orders, and an explicitly assigned `user.admin` can act across customer records. Default customers receive no app-role assignment; `user.admin` is the only elevated product role and never grants directory administration.
 
@@ -234,7 +234,7 @@ docs/                                                   ADRs, sprint evidence, r
 - [ ] Reconcile contracts and all later-sprint references to use bare delegated scopes `Orders.Read`/`Orders.Write`, exact role `user.admin`, verified External ID customer, `CustomerProfileId`, and safe absent/foreign `404`; correct migration-job polling to capture and poll its exact started execution.
 - [ ] Add real JWT bearer validation for exact signature/lifetime/issuer/tenant/audience/client/`oid`/delegated-scope checks. Use fake authentication only for policy tests; signed local JWTs own cryptographic and malformed-claim negatives.
 - [ ] Add E1 `CustomerProfiles` keyed by exact issuer plus `oid`; server-generated immutable customer references; nullable profile ownership columns; deterministic D1 legacy idempotency subject `profile:{ActorCustomerProfileId:N}`; race-safe profile creation; and additive migration compatibility proof.
-- [ ] Before D1 traffic, deploy E1 through a protected migration-only release that preserves the active API image/traffic, then quiesce order traffic, perform the approved data transition transaction, and recheck zero unowned orders, zero legacy idempotency rows, and no duplicate future actor/key values. Sprint 3 is an E1 schema-compatibility proof with zero traffic only; it is not an authorization rollback target.
+- [ ] Before D1 traffic, promote the protected E1 migration-only release through both non-production environments while it preserves the active API image/traffic. Then, separately for each environment immediately before D1, quiesce order traffic, perform the approved data transition transaction, and recheck zero unowned orders, zero legacy idempotency rows, and no duplicate future actor/key values. Sprint 3 is E1 schema-compatible but is never an authorization rollback target after D1.
 - [ ] Add ASP.NET Core scope/resource policies, owner-bearing reads, actor/target idempotency, allowlisted authorization audit, `GET /api/v1/me`, and v1 POST/GET ownership behavior. `/me` requires `Orders.Read`; create requires `Orders.Write`; cross-customer resource denial is a safe `404`.
 - [ ] Promote R1 (E1 + D1) to development and test. After D1, rollback is only to a recorded authenticated D1 revision or a fail-closed order-ingress outage—never to Sprint 3.
 
@@ -246,7 +246,7 @@ docs/                                                   ADRs, sprint evidence, r
 
 ## Sprint 4B — Customer History and Ownership-Contract Completion
 
-**Estimated effort:** 11–16 implementation/release days + 3 development-verification days + 1–2 QA days = **16–21 working days** for reset data or **19–25 working days** for mapped backfill/reconciliation.
+**Estimated effort:** 12–16 implementation/release days + 3 development-verification days + 1–2 QA days = **16–21 working days** for reset data, or 15–20 implementation/release days + the same 3 + 1–2 assurance days = **19–25 working days** for mapped-backfill reconciliation.
 
 **Outcome:** A customer can page only their own history with a target-bound, signed, expiring, rotatable cursor. The idempotency schema completes its expand/migrate/contract sequence without losing a compatible authenticated rollback revision.
 
@@ -370,7 +370,7 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Estimated effort:** 3–5 implementation days + 3 development-verification days + 1–2 QA days = 7–10 working days.
 
-**Outcome:** An authenticated user can load the deployed standalone WASM shell and make an authorized same-origin API request through the linked Static Web Apps `/api` path.
+**Outcome:** A verified External ID customer can load the deployed standalone WASM shell and make an authorized same-origin API request through the linked Static Web Apps `/api` path.
 
 **Decision gate:** Reuse the Sprint 4A External ID API registration and prompt for the Entra frontend public-client registration, exact redirect URIs, non-production test users, and approved production domain. Reuse the existing GitHub environments unless the user changes them.
 
