@@ -21,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       environment: ${{ steps.promotion_ref.outputs.environment }}
+      migration_only: ${{ steps.e1_manifest.outputs.migration_only }}
+      migration: ${{ steps.e1_manifest.outputs.migration }}
     steps:
       - name: Reject a non-promotion branch
         id: promotion_ref
@@ -44,9 +46,38 @@ jobs:
               ;;
           esac
 
+      - name: Check out Sprint 4A E1 manifest
+        if: github.event_name == 'push' && (github.ref_name == 'development' || github.ref_name == 'test')
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Validate Sprint 4A E1 migration-only manifest
+        id: e1_manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "migration_only=false" >> "$GITHUB_OUTPUT"
+          echo "migration=" >> "$GITHUB_OUTPUT"
+          [[ "$GITHUB_EVENT_NAME" == push && ( "$GITHUB_REF_NAME" == development || "$GITHUB_REF_NAME" == test ) ]] || exit 0
+
+          MANIFEST='ops/releases/sprint-4a-e1-migration-only.json'
+          [[ -f "$MANIFEST" ]] || exit 0
+          python3 - "$MANIFEST" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as source:
+              manifest = json.load(source)
+          expected = {"migration": "AddCustomerProfileOwnershipExpand", "deployApi": False}
+          if manifest != expected:
+              raise SystemExit("Sprint 4A E1 manifest must contain only the named migration and deployApi=false.")
+          PY
+          echo "migration_only=true" >> "$GITHUB_OUTPUT"
+          echo "migration=AddCustomerProfileOwnershipExpand" >> "$GITHUB_OUTPUT"
+
   preview_foundation:
     name: Preview ${{ github.ref_name }} foundation
     needs: validate_promotion_ref
+    if: needs.validate_promotion_ref.outputs.migration_only != 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ needs.validate_promotion_ref.outputs.environment }}
@@ -509,9 +540,9 @@ jobs:
             test) JOB_NAME='cloudorders-test-migrations' ;;
             *) echo "Unsupported migration environment: $DEPLOYMENT_ENVIRONMENT" >&2; exit 1 ;;
           esac
-          az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP"
+          EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query name --output tsv)
+          [[ -n "$EXECUTION" ]] || { echo "Migration Job did not return an execution name." >&2; exit 1; }
           for _ in {1..30}; do
-            EXECUTION=$(az containerapp job execution list --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query '[0].name' --output tsv)
             STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query properties.status --output tsv)
             [[ "$STATUS" == Succeeded ]] && exit 0
             [[ "$STATUS" == Failed ]] && { echo "Migration Job execution $EXECUTION failed." >&2; exit 1; }
@@ -519,6 +550,60 @@ jobs:
           done
           echo "Migration Job did not complete within five minutes." >&2
           exit 1
+
+  run_sprint_4a_e1_migration_only:
+    name: Run Sprint 4A E1 migration only
+    needs: validate_promotion_ref
+    if: needs.validate_promotion_ref.outputs.migration_only == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.validate_promotion_ref.outputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
+      DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name }}
+    steps:
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Start and verify only the named E1 migration execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$DEPLOYMENT_ENVIRONMENT" in
+            development) JOB_NAME='cloudorders-dev-migrations' ;;
+            test) JOB_NAME='cloudorders-test-migrations' ;;
+            *) echo "Sprint 4A E1 is restricted to development and test." >&2; exit 1 ;;
+          esac
+
+          BEFORE_REVISION=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.latestRevisionName --output tsv)
+          BEFORE_TRAFFIC=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.traffic --output json)
+          BEFORE_DIGEST=$(az containerapp revision show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision "$BEFORE_REVISION" --query properties.template.containers[0].image --output tsv)
+          [[ -n "$BEFORE_REVISION" && -n "$BEFORE_DIGEST" ]] || { echo "Migration-only release requires an active API revision and digest." >&2; exit 1; }
+
+          EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query name --output tsv)
+          [[ -n "$EXECUTION" ]] || { echo "Migration Job did not return an execution name." >&2; exit 1; }
+          for _ in {1..30}; do
+            STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query properties.status --output tsv)
+            [[ "$STATUS" == Succeeded ]] && break
+            [[ "$STATUS" == Failed ]] && { echo "Migration Job execution $EXECUTION failed." >&2; exit 1; }
+            sleep 10
+          done
+          [[ "$STATUS" == Succeeded ]] || { echo "Migration Job did not complete within five minutes." >&2; exit 1; }
+
+          AFTER_REVISION=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.latestRevisionName --output tsv)
+          AFTER_TRAFFIC=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.traffic --output json)
+          AFTER_DIGEST=$(az containerapp revision show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision "$AFTER_REVISION" --query properties.template.containers[0].image --output tsv)
+          [[ "$BEFORE_REVISION" == "$AFTER_REVISION" && "$BEFORE_DIGEST" == "$AFTER_DIGEST" && "$BEFORE_TRAFFIC" == "$AFTER_TRAFFIC" ]] || {
+            echo "Migration-only run changed API revision, digest, or traffic." >&2
+            exit 1
+          }
 
   deploy_release:
     name: Deploy ${{ github.ref_name }} after preview

@@ -10,7 +10,7 @@ This document versions the frontend-design authority for CloudOrders. It is bind
 
 CloudOrders.Web is a standalone .NET 10 Blazor WebAssembly application. It calls CloudOrders.Api over HTTPS, exercising the real browser, API, authentication, and CORS boundary. Its companion boundaries are an isolated generated/focused `CloudOrders.Api.Client` and the non-production-only `CloudOrders.TestSupport.Api`.
 
-The primary user is an order-support operator who creates an order from a customer reference and product SKU, finds it again, and understands its current business status. The non-production Observability Lab is for authorized engineers demonstrating or diagnosing reliability scenarios.
+The primary user is a verified External ID customer who creates an order for their server-owned customer reference and product SKU, finds it again, and understands its current business status. The non-production Observability Lab is for authorized engineers demonstrating or diagnosing reliability scenarios.
 
 The primary routes are `/`, `/orders/new`, `/orders/{orderId}`, `/customers/{customerId}/orders`, `/access-denied`, and `/observability-lab` (development/test only).
 
@@ -55,11 +55,11 @@ The signature component is an accessible business route: `Received → Processin
 
 ## Authentication and security
 
-Use Microsoft Entra authorization-code flow with PKCE through the supported Blazor WebAssembly library. The SPA is a public client and never holds a secret; the frontend and API use separate registrations/scopes as required. Tokens are managed only by the selected supported authentication library, never by a custom local-storage implementation.
+Use Microsoft Entra authorization-code flow with PKCE through the supported Blazor WebAssembly library. The SPA is a public client and never holds a secret; the frontend and API use separate registrations/scopes as required. Sprint 9 requests `api://{api-client-id}/Orders.Read` and `api://{api-client-id}/Orders.Write`, while the API compares the resulting bare `scp` values `Orders.Read` and `Orders.Write`. Tokens are managed only by the selected supported authentication library, never by a custom local-storage implementation.
 
-Business API authorization and the `TestOperator` role are separate. Observability Lab access requires TestOperator. Configure exact per-environment CORS origins, permitted methods/headers, exposed correlation headers, and no wildcard credentials. Add a Blazor-compatible CSP plus frame-ancestors, referrer, MIME-sniffing, and permissions policies after validating current official guidance. Encode untrusted values and never render server error details as markup.
+Business API authorization gives the verified signed-in customer its default capability; `user.admin` is a separately assigned elevated API role. The future `TestOperator` role is separate from both. Observability Lab access requires TestOperator. Configure exact per-environment CORS origins, permitted methods/headers, exposed correlation headers, and no wildcard credentials. Add a Blazor-compatible CSP plus frame-ancestors, referrer, MIME-sniffing, and permissions policies after validating current official guidance. Encode untrusted values and never render server error details as markup.
 
-Playwright uses dedicated non-production OrderUser and TestOperator accounts. Their credentials are protected environment secrets, rotated, constrained by deliberate Conditional Access, and never production accounts. Do not use ROPC. Setup may create short-lived storage state, but it is ignored and never committed or uploaded.
+Playwright uses dedicated non-production verified customer and future TestOperator accounts. Their credentials are protected environment secrets, rotated, constrained by deliberate Conditional Access, and never production accounts. Do not use ROPC. Setup may create short-lived storage state, but it is ignored and never committed or uploaded.
 
 ## Accessibility acceptance criteria
 

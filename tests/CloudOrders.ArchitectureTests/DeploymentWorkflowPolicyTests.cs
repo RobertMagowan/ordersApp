@@ -174,6 +174,38 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("deployMigrationJob=false", deploySection, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void DeploymentWorkflowPollsOnlyTheStartedMigrationExecution()
+    {
+        var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
+        var workflow = File.ReadAllText(workflowPath);
+
+        Assert.Contains("az containerapp job start --name \"$JOB_NAME\" --resource-group \"$AZURE_RESOURCE_GROUP\" --query name --output tsv", workflow, StringComparison.Ordinal);
+        Assert.Contains("[[ -n \"$EXECUTION\" ]]", workflow, StringComparison.Ordinal);
+        Assert.Contains("az containerapp job execution show --name \"$JOB_NAME\" --resource-group \"$AZURE_RESOURCE_GROUP\" --job-execution-name \"$EXECUTION\"", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("az containerapp job execution list", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("--query '[0].name'", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeploymentWorkflowSupportsTheExactSprint4AE1MigrationOnlyManifest()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(repositoryRoot, ".github", "workflows", "deploy.yml"));
+        var manifestPath = Path.Combine(repositoryRoot, "ops", "releases", "sprint-4a-e1-migration-only.json");
+
+        Assert.True(File.Exists(manifestPath), $"Expected Sprint 4A E1 manifest at {manifestPath}.");
+        Assert.Equal("{ \"migration\": \"AddCustomerProfileOwnershipExpand\", \"deployApi\": false }", File.ReadAllText(manifestPath).TrimEnd());
+        Assert.Contains("Validate Sprint 4A E1 migration-only manifest", workflow, StringComparison.Ordinal);
+        Assert.Contains("AddCustomerProfileOwnershipExpand", workflow, StringComparison.Ordinal);
+        Assert.Contains("migration_only", workflow, StringComparison.Ordinal);
+        Assert.Contains("Run Sprint 4A E1 migration only", workflow, StringComparison.Ordinal);
+        Assert.Contains("BEFORE_REVISION", workflow, StringComparison.Ordinal);
+        Assert.Contains("BEFORE_DIGEST", workflow, StringComparison.Ordinal);
+        Assert.Contains("BEFORE_TRAFFIC", workflow, StringComparison.Ordinal);
+        Assert.Contains("Migration-only run changed API revision, digest, or traffic", workflow, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
