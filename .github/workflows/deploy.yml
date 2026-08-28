@@ -246,8 +246,8 @@ jobs:
 
   prepare_release:
     name: Prepare and preview ${{ github.ref_name }} release
-    needs: preview_foundation
-    if: needs.preview_foundation.outputs.enabled == 'true'
+    needs: [preview_foundation, validate_promotion_ref]
+    if: needs.validate_promotion_ref.outputs.migration_only != 'true' && needs.preview_foundation.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -414,7 +414,8 @@ jobs:
 
   preview_sql:
     name: Preview ${{ github.ref_name }} Azure SQL
-    needs: prepare_release
+    needs: [prepare_release, validate_promotion_ref]
+    if: needs.validate_promotion_ref.outputs.migration_only != 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -457,7 +458,8 @@ jobs:
 
   bootstrap_sql:
     name: Provision ${{ github.ref_name }} Azure SQL
-    needs: [preview_sql, prepare_release]
+    needs: [preview_sql, prepare_release, validate_promotion_ref]
+    if: needs.validate_promotion_ref.outputs.migration_only != 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -512,7 +514,8 @@ jobs:
 
   run_migration:
     name: Run ${{ github.ref_name }} SQL migration
-    needs: bootstrap_sql
+    needs: [bootstrap_sql, validate_promotion_ref]
+    if: needs.validate_promotion_ref.outputs.migration_only != 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -565,6 +568,7 @@ jobs:
       AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
       AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
       DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name }}
+      MIGRATION: ${{ needs.validate_promotion_ref.outputs.migration }}
     steps:
       - name: Sign in to Azure with OIDC
         uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
@@ -587,8 +591,10 @@ jobs:
           BEFORE_DIGEST=$(az containerapp revision show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision "$BEFORE_REVISION" --query properties.template.containers[0].image --output tsv)
           [[ -n "$BEFORE_REVISION" && -n "$BEFORE_DIGEST" ]] || { echo "Migration-only release requires an active API revision and digest." >&2; exit 1; }
 
-          EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query name --output tsv)
+          EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --args "--migration" "$MIGRATION" --query name --output tsv)
           [[ -n "$EXECUTION" ]] || { echo "Migration Job did not return an execution name." >&2; exit 1; }
+          EXECUTION_MIGRATION=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].args[1]' --output tsv)
+          [[ "$EXECUTION_MIGRATION" == "$MIGRATION" ]] || { echo "Migration execution did not receive the manifest's named migration." >&2; exit 1; }
           for _ in {1..30}; do
             STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query properties.status --output tsv)
             [[ "$STATUS" == Succeeded ]] && break
@@ -607,7 +613,8 @@ jobs:
 
   deploy_release:
     name: Deploy ${{ github.ref_name }} after preview
-    needs: [prepare_release, run_migration]
+    needs: [prepare_release, run_migration, validate_promotion_ref]
+    if: needs.validate_promotion_ref.outputs.migration_only != 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}

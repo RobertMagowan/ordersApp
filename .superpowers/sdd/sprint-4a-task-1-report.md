@@ -61,3 +61,43 @@ Result: passed 13 of 13 after implementation.
 
 - Docker must be started/configured before the full Testcontainers integration suite can be considered green.
 - Run `actionlint .github/workflows/deploy.yml` in CI or an environment where actionlint is installed; no local YAML parser was available for an additional syntax check.
+
+## Review remediation (Sprint 4A Task 1)
+
+### Findings fixed
+
+- The active v1 contract now defines the concrete actor/target `CustomerProfileId` idempotency request hash inputs, the three-part durable key, and exact E1 legacy compatibility behavior. The obsolete active subject-only primary-key statement is removed and covered by a negative regression assertion.
+- The E1 workflow passes the manifest-produced `AddCustomerProfileOwnershipExpand` value as the migration runner's sole `--migration` argument, inspects the started execution's arguments, and rejects an execution that did not receive that exact value. The runner accepts only that argument shape, migrates to the named EF migration rather than all pending migrations, and verifies it was applied.
+- Every ordinary deployment job now explicitly excludes `migration_only == 'true'`; the E1 job is only selected by the protected `push` predicate for `development` and `test`.
+- Architecture tests now require the exact two-property manifest schema, protected-push predicate, normal-path exclusion, named migration argument/started-execution verification, runner target consumption, and named-migration application verification.
+
+### TDD evidence
+
+Red command:
+
+```powershell
+dotnet test tests\CloudOrders.ArchitectureTests\CloudOrders.ArchitectureTests.csproj --configuration Release --no-restore
+```
+
+Result: failed 2 newly added regressions as expected (the contract lacked concrete actor/target hash/key/E1 wording, and the workflow did not consume or verify the named manifest migration).
+
+Green command:
+
+```powershell
+dotnet test tests\CloudOrders.ArchitectureTests\CloudOrders.ArchitectureTests.csproj --configuration Release --no-restore
+```
+
+Result: passed 14 of 14.
+
+### Additional verification
+
+- `dotnet build src\CloudOrders.Migrations\CloudOrders.Migrations.csproj --configuration Release --no-restore`: passed with 0 warnings and 0 errors.
+- `dotnet format CloudOrders.slnx --verify-no-changes --no-restore`: passed.
+- `git diff --check`: passed.
+- `npx.cmd --yes prettier@3.6.2 --check .github/workflows/deploy.yml`: YAML parsed successfully, but reported pre-existing workflow formatting differences; no formatting rewrite was applied.
+- A full `dotnet build CloudOrders.slnx --configuration Release --no-restore` was attempted but failed because a separate active `testhost` process (PID 29664) held IntegrationTests output DLLs. The focused build and architecture test above are unaffected. The process was not terminated because it is external concurrent work.
+
+### Review-remediation concerns
+
+- `actionlint` is not installed locally; run it in CI or an environment that provides it.
+- Re-run the full solution build/test after the external IntegrationTests `testhost` process exits. Docker remains required for the Testcontainers integration suite.

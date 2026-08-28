@@ -40,6 +40,10 @@ public sealed class ContractPackTests
         Assert.Contains("`user.admin`", v1Contract, StringComparison.Ordinal);
         Assert.Contains("CustomerProfileId", v1Contract, StringComparison.Ordinal);
         Assert.Contains("actor/target", v1Contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SHA-256 over the canonical request payload plus ActorCustomerProfileId and TargetCustomerProfileId", v1Contract, StringComparison.Ordinal);
+        Assert.Contains("`(ActorCustomerProfileId, TargetCustomerProfileId, IdempotencyKey)`", v1Contract, StringComparison.Ordinal);
+        Assert.Contains("E1 legacy compatibility: existing `(SubjectId, IdempotencyKey)` records remain readable only for a retry that resolves to the same actor and target CustomerProfileId; E1 creates no subject-only hash or key.", v1Contract, StringComparison.Ordinal);
+        Assert.DoesNotContain("IdempotencyRecords has primary key `(SubjectId, IdempotencyKey)`", v1Contract, StringComparison.Ordinal);
         Assert.Contains("401", v1Contract, StringComparison.Ordinal);
         Assert.Contains("403", v1Contract, StringComparison.Ordinal);
         Assert.Contains("404", v1Contract, StringComparison.Ordinal);

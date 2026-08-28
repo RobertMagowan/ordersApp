@@ -53,8 +53,8 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("preview_foundation:", workflow, StringComparison.Ordinal);
         Assert.Contains("prepare_release:", workflow, StringComparison.Ordinal);
         Assert.Contains("deploy_release:", workflow, StringComparison.Ordinal);
-        Assert.Contains("needs: preview_foundation", workflow, StringComparison.Ordinal);
-        Assert.Contains("needs: prepare_release", workflow, StringComparison.Ordinal);
+        Assert.Contains("needs: [preview_foundation, validate_promotion_ref]", workflow, StringComparison.Ordinal);
+        Assert.Contains("needs: [prepare_release, validate_promotion_ref]", workflow, StringComparison.Ordinal);
         Assert.Contains("name: Preview immutable release", workflow, StringComparison.Ordinal);
         Assert.Contains("releaseId=\"$GITHUB_SHA\"", workflow, StringComparison.Ordinal);
         Assert.Contains("releaseId=bootstrap", workflow, StringComparison.Ordinal);
@@ -204,6 +204,39 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("BEFORE_DIGEST", workflow, StringComparison.Ordinal);
         Assert.Contains("BEFORE_TRAFFIC", workflow, StringComparison.Ordinal);
         Assert.Contains("Migration-only run changed API revision, digest, or traffic", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Sprint4AE1WorkflowConstrictsTheProtectedPushToTheNamedMigration()
+    {
+        var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml"));
+
+        const string protectedPushPredicate = "github.event_name == 'push' && (github.ref_name == 'development' || github.ref_name == 'test')";
+        Assert.Contains($"if: {protectedPushPredicate}", workflow, StringComparison.Ordinal);
+        Assert.Contains("expected = {\"migration\": \"AddCustomerProfileOwnershipExpand\", \"deployApi\": False}", workflow, StringComparison.Ordinal);
+        Assert.Contains("if manifest != expected:", workflow, StringComparison.Ordinal);
+        Assert.Contains("MIGRATION: ${{ needs.validate_promotion_ref.outputs.migration }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("--args \"--migration\" \"$MIGRATION\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("EXECUTION_MIGRATION=$(az containerapp job execution show", workflow, StringComparison.Ordinal);
+        Assert.Contains("[[ \"$EXECUTION_MIGRATION\" == \"$MIGRATION\" ]]", workflow, StringComparison.Ordinal);
+
+        var normalJobs = new[] { "preview_foundation", "prepare_release", "preview_sql", "bootstrap_sql", "run_migration", "deploy_release" };
+        Assert.All(normalJobs, job => Assert.Contains($"  {job}:", workflow, StringComparison.Ordinal));
+        var normalWorkflowStart = workflow.IndexOf("preview_foundation:", StringComparison.Ordinal);
+        var e1WorkflowStart = workflow.IndexOf("run_sprint_4a_e1_migration_only:", StringComparison.Ordinal);
+        var normalWorkflow = workflow[normalWorkflowStart..e1WorkflowStart];
+        Assert.Equal(
+            normalJobs.Length - 1,
+            normalWorkflow.Split("needs.validate_promotion_ref.outputs.migration_only != 'true'", StringSplitOptions.None).Length - 1);
+        var deployReleaseStart = workflow.IndexOf("  deploy_release:", StringComparison.Ordinal);
+        Assert.Contains("needs.validate_promotion_ref.outputs.migration_only != 'true'", workflow[deployReleaseStart..], StringComparison.Ordinal);
+        Assert.Contains("if: needs.validate_promotion_ref.outputs.migration_only == 'true'", workflow[e1WorkflowStart..], StringComparison.Ordinal);
+
+        var migrationRunner = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "CloudOrders.Migrations", "Program.cs"));
+        Assert.Contains("--migration", migrationRunner, StringComparison.Ordinal);
+        Assert.Contains("MigrateAsync(targetMigration)", migrationRunner, StringComparison.Ordinal);
+        Assert.Contains("GetAppliedMigrationsAsync", migrationRunner, StringComparison.Ordinal);
+        Assert.Contains("Named SQL migration was not applied", migrationRunner, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()
