@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` (inline) or `superpowers:subagent-driven-development` (one fresh worker per task) to execute this plan task-by-task. Steps use checkbox syntax for tracking.
 
+> **Historical roadmap-update plan.** The project-wide roadmap now supersedes its authorization/history split with Sprint 4A (External ID identity/ownership) and Sprint 4B (history/schema-contract completion). Use `2026-08-16-cloudorders-sprint-implementation-plan.md` for all current estimates and sequencing.
+
 **Goal:** Re-baseline the remaining CloudOrders roadmap so every sprint is independently deployable, verified in Azure development, and independently QA-tested in Azure test.
 
 **Architecture:** Preserve delivered Sprints 0–1. Split the former broad Sprint 2 into workflow/contract/test-environment assurance, SQL durability, and API authorization/customer history; shift later sprint numbers without changing their technical dependency order. A common gate defines the evidence, roles, and defect loop for each remaining sprint.

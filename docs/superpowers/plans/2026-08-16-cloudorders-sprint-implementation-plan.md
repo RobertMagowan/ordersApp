@@ -36,9 +36,10 @@ Estimates assume one focused developer. Remaining-sprint estimates explicitly in
 | 0.5 | DevOps promotion foundation | Baseline delivered | 2–3 days |
 | 0.6 | MVP Azure container deployment and AVM hardening | Baseline delivered | 3–5 days |
 | 1 | Domain, contracts, and API vertical slice | Baseline delivered to development | 4–6 days |
-| 2 | Workflow, contract, and test-environment assurance | Next | 6–8 days |
-| 3 | SQL schema and durable HTTP idempotency | Planned | 9–12 days |
-| 4 | API authorization and customer history | Planned | 8–11 days |
+| 2 | Workflow, contract, and test-environment assurance | Complete in development and test | 6–8 days |
+| 3 | SQL schema and durable HTTP idempotency | Complete in development and test; no production deployment | 9–12 days |
+| 4A | External ID identity and ownership vertical slice | Planned | 16–22 days |
+| 4B | Customer history and ownership-contract completion | Planned; depends on 4A | 16–21 days (reset) or 19–25 days (mapped backfill) |
 | 5 | Outbox, inbox, Service Bus, and development Functions | Planned | 11–15 days |
 | 6 | Reproducible local platform | Planned | 7–10 days |
 | 7 | Azure security and network foundation | Planned | 12–17 days |
@@ -51,7 +52,7 @@ Estimates assume one focused developer. Remaining-sprint estimates explicitly in
 | 14 | CI/CD, promotion, and operations | Planned | 11–15 days |
 | 15 | Production readiness | Planned | 9–13 days |
 
-The revised roadmap contains 18 sprint phases: three foundation phases plus Sprints 1–15. Total estimated effort is 134–188 working days; after the delivered work through Sprint 1, approximately 124–172 working days remain before defect remediation. Historical checklists remain unchecked as acceptance-audit items; Sprint 2 starts by evidencing each delivered item or carrying a concrete correction into its first commits.
+The revised roadmap contains 19 sprint phases: three foundation phases, Sprints 1–3, Sprint 4A, Sprint 4B, and Sprints 5–15. The total estimated effort is **158–220 working days** for the reset path or **161–224 working days** for the mapped-backfill path. With Sprints 0–3 delivered in non-production, approximately **133–184** (reset) or **136–188** (mapped-backfill) working days remain before defect remediation. Estimates exclude external access/approval delays, Azure incidents, and the elapsed 14-calendar-day D2 soak.
 
 ## Repository Map and File Ownership
 
@@ -220,25 +221,48 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Deploy gate:** The protected workflow validates Bicep, applies the reviewed migration, deploys the immutable API image, and proves exactly one Order, Outbox row, and IdempotencyRecord for concurrent idempotent submissions.
 
-## Sprint 4 — API Authorization and Customer History
+## Sprint 4A — External ID Identity and Ownership Vertical Slice
 
-**Estimated effort:** 4–6 implementation days + 3 development-verification days + 1–2 QA days = 8–11 working days.
+**Estimated effort:** 11–17 implementation/release days + 3 development-verification days + 1–2 QA days = **16–22 working days**.
 
-**Outcome:** The API uses Entra bearer authorization and customer-scoped history without cross-customer disclosure.
+**Outcome:** A verified Microsoft Entra External ID customer can authenticate, discover their opaque server-generated customer reference through `GET /api/v1/me`, create/read/replay only their own orders, and an explicitly assigned `user.admin` can act across customer records. Default customers receive no app-role assignment; `user.admin` is the only elevated product role and never grants directory administration.
 
-**Decision gate:** Confirm ownership of `CloudOrders-Api-development`, delegated scopes, claims/customer-scope source, and non-production API test identity before enabling authorization.
+**Decision gate:** Before any D1 authenticated traffic, the named data owner records a separate development/test `reset` or `mapped-backfill` decision. A reset is permitted only for synthetic/disposable data. A mapping is protected outside Git and must be one-to-one from legacy `CustomerReference` to exact external-tenant `(issuer, oid)`; email is never an identity key. The external tenant, API/public-client registrations, email OTP flow, workforce federation, one federated work-account `user.admin`, protected environment configuration, and recovery administrators must exist before the first **D1** development merge; E1 uses a separate migration-only release that preserves the active API image and traffic.
 
 **Tasks:**
 
-- [ ] Add Entra bearer validation, `CloudOrders.Orders.Read`/`CloudOrders.Orders.Write` policies, authorized customer-scope derivation, and cross-customer `404` behavior.
-- [ ] Bind idempotency to the tenant-scoped Entra `oid`: lowercase `D` GUID, canonical ASCII customer/product references, invariant quantity, and SHA-256 UTF-8 payload hash; reject malformed identity, Unicode, delimiter, and payload-conflict cases.
-- [ ] Implement `GET /api/v1/customers/{customerReference}/orders` with stable `(CreatedAtUtc, Id)` newest-first ordering, opaque cursor, page sizes 1–100, and authorization/paging tests.
+- [ ] Reconcile contracts and all later-sprint references to use bare delegated scopes `Orders.Read`/`Orders.Write`, exact role `user.admin`, verified External ID customer, `CustomerProfileId`, and safe absent/foreign `404`; correct migration-job polling to capture and poll its exact started execution.
+- [ ] Add real JWT bearer validation for exact signature/lifetime/issuer/tenant/audience/client/`oid`/delegated-scope checks. Use fake authentication only for policy tests; signed local JWTs own cryptographic and malformed-claim negatives.
+- [ ] Add E1 `CustomerProfiles` keyed by exact issuer plus `oid`; server-generated immutable customer references; nullable profile ownership columns; deterministic D1 legacy idempotency subject `profile:{ActorCustomerProfileId:N}`; race-safe profile creation; and additive migration compatibility proof.
+- [ ] Before D1 traffic, deploy E1 through a protected migration-only release that preserves the active API image/traffic, then quiesce order traffic, perform the approved data transition transaction, and recheck zero unowned orders, zero legacy idempotency rows, and no duplicate future actor/key values. Sprint 3 is an E1 schema-compatibility proof with zero traffic only; it is not an authorization rollback target.
+- [ ] Add ASP.NET Core scope/resource policies, owner-bearing reads, actor/target idempotency, allowlisted authorization audit, `GET /api/v1/me`, and v1 POST/GET ownership behavior. `/me` requires `Orders.Read`; create requires `Orders.Write`; cross-customer resource denial is a safe `404`.
+- [ ] Promote R1 (E1 + D1) to development and test. After D1, rollback is only to a recorded authenticated D1 revision or a fail-closed order-ingress outage—never to Sprint 3.
 
-**Development verification (3 days):** A separate verifier executes authorization-positive/negative, cross-customer non-disclosure, malformed-identity, paging, and replay-after-restart tests against the deployed `development` API.
+**Development verification (3 days):** A separate verifier performs local schema/migration/SQL-state inspection; real bearer and policy matrices; authenticated own/foreign/admin/revoke/replay/concurrency tests; audit-redaction checks; workflow/Bicep/configuration checks; and Azure development smoke using two OTP customers plus the federated administrator.
 
-**QA in test (1–2 days):** A QA-only agent validates an authorized test identity, denied identity, two history pages, and cross-customer `404` through the promoted Azure `test` release.
+**QA in test (1–2 days):** A QA-only agent tests the promoted R1 release to destruction: authentication and scope failures, two-customer non-disclosure, administrator access/revocation with fresh tokens, POST/GET/replay/concurrency/recovery, direct SQL profile/order/idempotency integrity, exact revision/digest/job execution, TLS, and health. History/cursor behavior is not in this sprint.
 
-**Deploy gate:** The immutable API release passes authentication, authorization-negative, customer-history pagination, and idempotency smoke tests in both non-production environments.
+**Deploy gate:** Both non-production environments run D1 on E1 after independently evidenced transition transactions. The test release passes ownership and rollback/fail-closed checks without exposing an unauthenticated Sprint 3 route.
+
+## Sprint 4B — Customer History and Ownership-Contract Completion
+
+**Estimated effort:** 11–16 implementation/release days + 3 development-verification days + 1–2 QA days = **16–21 working days** for reset data or **19–25 working days** for mapped backfill/reconciliation.
+
+**Outcome:** A customer can page only their own history with a target-bound, signed, expiring, rotatable cursor. The idempotency schema completes its expand/migrate/contract sequence without losing a compatible authenticated rollback revision.
+
+**Tasks:**
+
+- [ ] R2: after a new write-quiescence/precondition transaction, add E2 non-null ownership and actor/key idempotency uniqueness while retaining nullable legacy `SubjectId`; deploy unchanged D1 behavior and prove D1 rollback in both environments.
+- [ ] H1: add `GET /api/v1/customers/{customerReference}/orders` only after R2 passes in test. Use exact `Orders.Read`, ownership-resource authorization, `(CreatedAtUtc, Id)` newest-first order, page size 1–100, opaque 15-minute cursor, no gaps/duplicates, and safe absent/foreign parity.
+- [ ] Add cursor key configuration/runbook. Current/previous material enters only as secure non-production Container App secrets. Validate known key/version/profile/expiry/HMAC; Phase A distributes K2 validation-only, Phase B signs K2 and validates K1, and Phase C removes K1 only after cursor TTL plus the D2 rollback window.
+- [ ] R3: deploy D2 that no longer reads/writes/maps `SubjectId` while E2 retains it. Retain exact D1/D2 images and soak D2 for **14 calendar days after the test smoke**; prove D2-to-D1 rollback before contract deletion.
+- [ ] R4: after the soak, drop `SubjectId`/obsolete key with E3 and deploy D2-compatible code. Post-E3 rollback is only to retained D2; D1 and Sprint 3 are not valid rollback targets.
+
+**Release gates:** R2, H1, R3, and R4 each receive focused local tests, independent review, Azure development smoke, test targeted QA, direct SQL/migration inspection, immutable digest/revision evidence, and an explicit current rollback target before the next phase. Post-deployment defects use a new remediation `feature/*` branch and block the next phase.
+
+**Final development verification (3 days) and QA in test (1–2 days):** After R4, repeat full local/development/test assurance: signed-JWT negatives locally; live customers/admin scopes/revocation in Azure; history boundaries; cursor target/tamper/expiry/rotation; concurrency/recovery; direct SQL integrity; rollback evidence; and secret/audit redaction. No production deployment occurs.
+
+**Deploy gate:** E3 is allowed only after the recorded D2 soak. Both non-production releases pass the history/cursor and schema-contract matrix, with no unowned data, no legacy `SubjectId`, and a retained authenticated D2 rollback artifact.
 
 ## Sprint 5 — Outbox Publisher and Inbox Processor
 
@@ -348,11 +372,11 @@ docs/                                                   ADRs, sprint evidence, r
 
 **Outcome:** An authenticated user can load the deployed standalone WASM shell and make an authorized same-origin API request through the linked Static Web Apps `/api` path.
 
-**Decision gate:** Reuse the Sprint 4 API registration and prompt for the Entra frontend public-client registration, exact redirect URIs, non-production test users, and approved production domain. Reuse the existing GitHub environments unless the user changes them.
+**Decision gate:** Reuse the Sprint 4A External ID API registration and prompt for the Entra frontend public-client registration, exact redirect URIs, non-production test users, and approved production domain. Reuse the existing GitHub environments unless the user changes them.
 
 **Files:** API Dockerfile/`.dockerignore`; Container App Bicep; `src/CloudOrders.Web/{Auth,Services,wwwroot}`; `src/CloudOrders.Api.Client`; Static Web Apps Bicep/workflow and `staticwebapp.config.json`; focused client/auth tests; Playwright authentication setup.
 
-**Interfaces:** standalone WASM public client; Entra authorization-code flow with PKCE; `IOrdersClient`; same-origin `/api/v1`; `CloudOrders.Orders.Read`/`CloudOrders.Orders.Write` scopes with the `OrderUser` app role; no browser client secret.
+**Interfaces:** standalone WASM public client; External ID authorization-code flow with PKCE; `IOrdersClient`; same-origin `/api/v1`; fully qualified scope requests `api://{api-client-id}/Orders.Read` and `api://{api-client-id}/Orders.Write`, compared in API tokens as bare `Orders.Read`/`Orders.Write`; verified customer default capability with optional exact `user.admin`; no browser client secret.
 
 **Tasks:**
 
@@ -362,7 +386,7 @@ docs/                                                   ADRs, sprint evidence, r
 - [ ] Provision Static Web Apps Standard with AVM where supported, link the Container App backend, and configure exact CORS/headers, CSP, SPA fallback, no-cache shell, immutable assets, and generated-origin denial tests.
 - [ ] Add focused client/auth tests and a Playwright smoke that signs in, loads the shell, calls an authorized API endpoint, and proves an unauthenticated/unauthorized request is rejected.
 
-**Manual test:** Sign in as the non-production `OrderUser`, load the deployed shell, retrieve the first authorized customer-history page through `/api`, refresh deep-linked navigation, sign out, and verify direct unauthenticated and generated-origin access are denied.
+**Manual test:** Sign in as a verified non-production External ID customer, load the deployed shell, retrieve the first authorized customer-history page through `/api`, refresh deep-linked navigation, sign out, and verify direct unauthenticated and generated-origin access are denied.
 
 **Deploy gate:** The API image and WASM artifact deploy immutably to development; authentication, authorization-negative, linked-backend, and shell smoke checks pass. Commit `feat: establish authenticated web delivery`.
 
@@ -530,12 +554,12 @@ PowerShell execution policy may block `npm.ps1`; use `npm.cmd` for Playwright co
 
 ## Plan Self-Review
 
-- **Spec coverage:** repository/promotion foundations (S0–0.6), delivered domain/API baseline (S1), workflow/contract/test-environment assurance (S2), SQL durability (S3), authorization/history (S4), outbox/inbox and Azure messaging (S5), local reproducibility (S6), Azure network/RBAC hardening (S7), Flex hosting (S8), web edge/authentication (S9), frontend foundation (S10), order workflows (S11), frontend quality (S12), TestSupport/observability (S13), CI/CD/operations (S14), and production readiness (S15) are each assigned.
+- **Spec coverage:** repository/promotion foundations (S0–0.6), delivered domain/API baseline (S1), delivered workflow/test assurance (S2), delivered SQL durability (S3), authenticated profile ownership (S4A), history and schema-contract completion (S4B), outbox/inbox and Azure messaging (S5), local reproducibility (S6), Azure network/RBAC hardening (S7), Flex hosting (S8), web edge/authentication (S9), frontend foundation (S10), order workflows (S11), frontend quality (S12), TestSupport/observability (S13), CI/CD/operations (S14), and production readiness (S15) are each assigned.
 - **Assurance coverage:** every remaining sprint has focused implementation commits, three independent development-verification days selected by technology/risk, one to two QA days in Azure `test`, evidence retention, and a fresh-feature-branch defect loop. QA-only agents do not edit implementation.
 - **Frontend scope correction:** the former single web sprint is split into four independently reviewable increments. S9 proves hosting/auth/API connectivity, S10 proves the accessible design system, S11 proves business workflows, and S12 proves cross-browser quality and rollback. The Observability Lab remains in S13 with its safety API.
 - **Azure deployability correction:** every delivered feature sprint now ends with an Azure development deployment or regression deployment. S2 creates the minimal protected test-environment gate, S3 introduces Azure SQL, S5 introduces minimum Service Bus/Function hosting, and S7 hardens those already-working resources rather than postponing all cloud testing.
-- **Sequence check:** each frontend sprint consumes stable API/auth contracts from earlier sprints; TestSupport follows the business UI; release automation follows all deployable artifacts. No later sprint is required to make an earlier sprint's stated manual journey possible.
+- **Sequence check:** S4A establishes identity before any customer traffic; its transition occurs under quiescence before D1 traffic, and Sprint 3 is never a security rollback. S4B first enforces ownership (R2), then adds history (H1), then bridges/contracts idempotency (R3/R4) with an explicit 14-day D2 soak. Each frontend sprint consumes the stable S4A/S4B contracts; TestSupport follows the business UI; release automation follows all deployable artifacts. No later sprint is required to make an earlier sprint's stated manual journey possible.
 - **Placeholder scan:** no unowned placeholder implementation steps remain. Tenant/app IDs, test users, production domain, budgets, alert owners, and production approval are explicit user decision gates because they cannot be safely inferred.
 - **Type/interface consistency:** `OrderCreatedIntegrationEventV1`, `OutboxDispatcher.DrainAsync(CancellationToken)`, `OrderProcessor.ProcessAsync(ServiceBusReceivedMessage, CancellationToken)`, `IIdempotencyStore`, and `/api/v1` retain their semantics. The UI explicitly maps API `pending` to the user-facing `Received` label.
 - **Security and operations:** browser secrets, automatic non-idempotent POST retry, self-hosted GitHub runners for this public repository, development identities in production, unrestricted public data services after Sprint 7, mutable artifacts, and production TestSupport are prohibited and have negative-test gates. Any temporary or managed-service network exception is explicit, least scoped, monitored, regression tested, and has a service-tag drift/removal path where applicable.
-- **Effort review:** 124–172 remaining working days (134–188 including delivered historical work) is a planning range for one developer, not elapsed calendar time; it includes the new independent assurance gates but excludes defect remediation and external delays. Re-estimate at each sprint boundary using measured throughput and newly discovered Azure constraints.
+- **Effort review:** 133–184 remaining working days on the reset path, or 136–188 on the mapped-backfill path (158–220 / 161–224 including delivered historical work), is a planning range for one developer, not elapsed calendar time. It includes independent assurance gates, excludes defect remediation/external delays, and excludes the elapsed D2 soak. Re-estimate at each sprint boundary using measured throughput and newly discovered Azure constraints.

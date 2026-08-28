@@ -1,4 +1,4 @@
-# Sprint 4 External ID Authorization Implementation Plan
+# Sprint 4A and 4B External ID Authorization Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -10,7 +10,7 @@
 
 ## Global constraints and fixed decisions
 
-- Work on `feature/*`; promote through pull requests `feature/*` -> `development` -> `test` -> `master`. Sprint 4 ends after Azure `test`; do not open a `test` -> `master` pull request and do not deploy production.
+- Work on `feature/*`; promote through pull requests `feature/*` -> `development` -> `test` -> `master`. Sprint 4A and Sprint 4B each end after Azure `test`; do not open a `test` -> `master` pull request and do not deploy production.
 - A valid, verified External ID customer identity is the default product customer capability. There is no `OrderUser` app role. `user.admin` is the sole elevated product role, is case-sensitive, is a source-code constant, has `allowedMemberTypes: ["User"]`, and the API enterprise application keeps **Assignment required = No** so ordinary customers need no assignment.
 - The initial product administrator is the existing work account federated into the External ID tenant and explicitly assigned `user.admin` on its External ID user object. Product roles never grant directory administration.
 - The CloudOrders API registration has no Microsoft Graph permissions. The separate work-tenant federation registration may have only the documented delegated `openid`, `profile`, `email`, and `User.Read` permissions required by the Microsoft identity-provider flow; it has no Graph write or application permission.
@@ -43,15 +43,29 @@ For an external tenant with subdomain `{tenant-subdomain}` and GUID `{external-t
 
 `ExternalIdentityOptions` contains `Authority`, `ValidIssuer`, `TenantId`, `Audience`, and `AllowedClientIds`. It deliberately contains no configurable admin-role or scope strings. `CloudOrdersPermissions` owns the three source constants `ReadScope = "Orders.Read"`, `WriteScope = "Orders.Write"`, and `AdminRole = "user.admin"`.
 
+## Sprint division and phase gates
+
+The review-safe split is by independently deployable behavior, not by the former task numbers. Sprint 4A delivers a complete authenticated ownership slice. Sprint 4B is a separate schema-and-history migration programme, with a targeted gate after every release phase.
+
+| Sprint | Outcome | Included work | Explicitly excluded |
+|---|---|---|---|
+| **4A — Identity and ownership** | An authenticated customer can discover their generated reference with `GET /api/v1/me`, create/read/replay only their own orders, and a `user.admin` can access another customer's order. | Contract reconciliation; Entra control plane; real JWT validation; E1 expansion; one quiesced data transition; D1 compatibility writes; profiles; authorization/audit; `/me`; v1 POST/GET; R1; three-day development verification; test QA. | History API, cursor types/codecs, cursor secrets, rotation runbook, E2/E3, and D2. |
+| **4B — History and ownership contract** | Authenticated customers can page only their own order history with rotatable, target-bound cursors; legacy idempotency storage is retired only after compatibility/soak gates. | Cursor secret/configuration; history API; R2 E2/D1; H1 history; R3 D2; 14-calendar-day rollback soak; R4 E3/D2; targeted gates plus final full assurance. | Production deployment; Graph writes; customer role management; removal of `Orders.CustomerReference` from v1. |
+
+**Decision gates.** Before D1 receives traffic, the named data owner records `reset` or `mapped-backfill` separately for development and test. A mapped backfill needs a one-to-one protected mapping; a reset is allowed only for synthetic/disposable data. Before R4, retain D2 as a production-like rollback target for **14 calendar days** after the corresponding Azure `test` R3 smoke succeeds. Any change to that duration requires a documented plan amendment and updates the cursor-key removal date.
+
+**Gate cadence.** Every development deployment (R1, R2, H1, R3, R4) has: focused local/TDD evidence, independent review, an Azure development smoke and exact revision/digest/migration/job inspection. Every test deployment has a targeted independent QA/rollback test. Sprint 4A then has a full three-working-day development verification and one-to-two-working-day test QA; Sprint 4B repeats those full gates after R4. A post-deployment defect uses a fresh remediation `feature/*` branch and repeats the affected gate before the next release phase.
+
 ## Release and rollback invariant
 
 Use these releases in order; never combine the destructive boundary with an API image that still maps the removed column.
 
-1. **E1 expand + D1 dual-compatible API:** `AddCustomerProfileOwnershipExpand` adds `CustomerProfiles`, nullable ownership columns, FKs/indexes, and retains `Orders.CustomerReference`, `IdempotencyRecords.SubjectId`, its current primary key, and all old reads/writes. The already-running Sprint 3 revision remains schema-compatible. D1 writes both `SubjectId` and the new actor/target IDs and recognizes both old and future idempotency constraint names.
-2. **Controlled non-production data transition:** inventory each environment, then obtain the named data owner's explicit `reset` or `mapped-backfill` decision. Reset is allowed only when every row is synthetic/disposable. Backfill uses an approved, one-to-one `CustomerReference -> (ValidIssuer, oid)` mapping held outside Git; never infer from email/reference. Pre-Sprint-4 idempotency rows are deleted after evidence because their actor cannot be proven. The gate requires zero unmapped orders and zero legacy idempotency rows.
-3. **E2 constraint transition + D1-compatible rebuild:** after D1 is the latest ready revision, `EnforceCustomerProfileOwnership` makes order/actor/target IDs non-null, changes idempotency uniqueness to `(ActorCustomerProfileId, IdempotencyKey)`, and makes retained `SubjectId` nullable. Deploy an API rebuild with unchanged D1 persistence behavior; its digest changes because the referenced Infrastructure assembly contains E2, but both previous and candidate D1-compatible revisions support E2. Rollback targets D1, never the original Sprint 3 image.
-4. **D2 new-shape bridge:** deploy code that no longer maps, reads, or writes `SubjectId`, while E2 still retains the nullable column. D1 remains a pre-contract rollback option.
-5. **E3 contract + D2-compatible rebuild:** after the documented D2 rollback window, `RemoveLegacyIdempotencySubject` drops `SubjectId` and the obsolete constraint/index only. Deploy an API rebuild with unchanged D2 persistence behavior; its digest changes because the referenced Infrastructure assembly contains E3, but the previous ready D2 revision remains compatible. Keep `Orders.CustomerReference` for v1 wire/event compatibility. A rollback after E3 selects the recorded pre-E3 D2 image/revision, never D1/Sprint 3.
+1. **E1 expansion, then controlled transition before D1 traffic:** `AddCustomerProfileOwnershipExpand` adds `CustomerProfiles`, nullable ownership columns, FKs/indexes, and retains `Orders.CustomerReference`, `IdempotencyRecords.SubjectId`, its current primary key, and all old reads/writes. The already-running Sprint 3 revision is schema-compatible only; prove that with **zero traffic** and never use it as a post-D1 rollback. Before enabling D1, remove all order traffic in the relevant non-production environment, run the approved reset/mapped-backfill transaction, and prove zero unowned orders, zero legacy idempotency rows, and no duplicate future actor/key values.
+2. **D1 authenticated dual-compatible API:** D1 writes the deterministic legacy `SubjectId` value `profile:{ActorCustomerProfileId:N}` as well as nullable actor/target IDs. Until E2, the legacy `(SubjectId, IdempotencyKey)` constraint remains authoritative: the same actor/key with another target is a conflict, not a second record. D1 reads/replays only the deterministic value, returning safe `404` for a legacy null-owned order. The migration transition deleted pre-Sprint-4 idempotency rows because their actor cannot be proven. After D1 begins serving traffic, rollback is either to a recorded authenticated D1 revision or a fail-closed order-ingress outage; it is never to Sprint 3.
+3. **E2 constraint transition + D1-compatible rebuild:** after D1 is the latest ready revision and a new quiescence/precondition transaction proves zero null ownership, zero legacy rows, and no duplicate `(ActorCustomerProfileId, IdempotencyKey)`, `EnforceCustomerProfileOwnership` makes order/actor/target IDs non-null, changes idempotency uniqueness to `(ActorCustomerProfileId, IdempotencyKey)`, and makes retained `SubjectId` nullable. Deploy an API rebuild with unchanged D1 persistence behavior. Rollback targets D1, never Sprint 3.
+4. **H1 history after E2:** introduce the history endpoint and cursors only after the unchanged-D1 E2 release is healthy in both environments. H1 is a code/configuration release with no schema shape change and its own compatible D1 rollback target.
+5. **D2 new-shape bridge:** deploy code that no longer maps, reads, or writes `SubjectId`, while E2 still retains the nullable column. D1 remains the pre-contract rollback option through the 14-calendar-day D2 soak.
+6. **E3 contract + D2-compatible rebuild:** only after the D2 rollback window, `RemoveLegacyIdempotencySubject` drops `SubjectId` and the obsolete constraint/index. Deploy an API rebuild with unchanged D2 persistence behavior. Keep `Orders.CustomerReference` for v1 wire/event compatibility. A rollback after E3 selects the recorded pre-E3 D2 image/revision, never D1/Sprint 3.
 
 Every workflow start captures the exact execution returned by `az containerapp job start --query name --output tsv` and polls only that value through `az containerapp job execution show --job-execution-name "$EXECUTION"`; listing `[0]` is forbidden because it can observe an older execution.
 
@@ -100,7 +114,9 @@ Modify the existing `tests/CloudOrders.UnitTests/{CreateOrderHandlerTests,Reposi
 
 ---
 
-### Task 1: Reconcile contracts, terminology, prerequisites, and migration polling
+## Sprint 4A — Identity and ownership vertical slice
+
+### Task 1: Reconcile contracts, prerequisites, data decision, and migration polling
 
 **Files:**
 
@@ -120,7 +136,7 @@ Expected: FAIL on the stale terminology and list-based migration polling.
 
 - [ ] **Step 3: Correct migration-job observation.** Capture the start command's returned execution name, fail if empty, poll only it, report its final status/name, and include the name in the workflow summary/evidence. Preserve the existing migration-before-candidate dependency.
 
-- [ ] **Step 4: Record prerequisites that block the first development merge.** The Sprint 4 PR cannot merge until the runbook evidence records: external tenant/subdomain/GUID; two emergency directory admins; named Cloud Application Administrator; API and local PKCE client registrations; enabled read/write scopes; `user.admin` manifest and assignment-required setting; email-OTP user flow; work-tenant federation; the initial work account's External ID object and role assignment; protected development GitHub variables/secrets; cursor-key owner/rotation date; development data-transition decision; and a successful local interactive `/me` smoke. Store IDs only in protected configuration/evidence, never the contract or Git.
+- [ ] **Step 4: Record prerequisites and transition decisions that block D1 traffic.** Before D1 can receive traffic in either environment, evidence records: external tenant/subdomain/GUID; two emergency directory admins; named Cloud Application Administrator; API and local PKCE client registrations; enabled read/write scopes; `user.admin` manifest and assignment-required setting; email-OTP user flow; work-tenant federation; the initial work account's External ID object and role assignment; protected development/test GitHub variables; the named data owner; a per-environment `reset` or `mapped-backfill` decision; and a successful local interactive `/me` smoke. A mapped-backfill decision also records the protected mapping location, checksum, and reconciliation rule: an already-created `(issuer, oid)` profile retains its generated reference only when it equals the mapping reference; otherwise abort. Store IDs only in protected configuration/evidence, never the contract or Git.
 
 - [ ] **Step 5: Re-run focused tests and commit.**
 
@@ -255,7 +271,7 @@ git commit -m "feat: expand customer profile ownership schema"
 **Files:**
 
 - Modify: `src/CloudOrders.Application/Abstractions/{IOrderRepository,IIdempotentOrderStore}.cs`
-- Create: owner/history/audit Application files listed in the inventory
+- Create: owner/audit Application files listed in the inventory
 - Modify: `src/CloudOrders.Application/Orders/{CreateOrderHandler,GetOrderHandler,IdempotencyRequestHasher}.cs`
 - Modify: API resource/accessor/audit files and `Program.cs`
 - Modify: `src/CloudOrders.Infrastructure/Persistence/{OrderEntity,IdempotencyRecordEntity,OrderPersistenceMapper,SqlOrderRepository,SqlIdempotentOrderStore}.cs` and configurations
@@ -280,11 +296,6 @@ public sealed record IdempotentOrderRequest(
 public interface IOrderRepository
 {
     Task<OwnedOrder?> GetOwnedAsync(Guid orderId, CancellationToken cancellationToken);
-    Task<OrderHistorySlice> ListOwnedAsync(
-        Guid customerProfileId,
-        OrderHistoryBoundary? before,
-        int pageSize,
-        CancellationToken cancellationToken);
 }
 
 // CreateOrderHandler receives these IDs only after the API has resolved and authorized the target.
@@ -296,7 +307,7 @@ Task<CreateOrderResult> Handle(
     string? traceParent,
     CancellationToken cancellationToken);
 
-public enum AuthorizationAuditAction { Authenticate, ResolveProfile, GetCurrentCustomer, CreateOrder, GetOrder, ListCustomerOrders }
+public enum AuthorizationAuditAction { Authenticate, ResolveProfile, GetCurrentCustomer, CreateOrder, GetOrder }
 public enum AuthorizationAuditResult { Allowed, Denied, NotFound }
 public enum AuthorizationCapability { None, OrdersRead, OrdersWrite, UserAdmin }
 public sealed record AuthorizationAuditEvent(
@@ -314,13 +325,13 @@ public interface IAuthorizationAuditSink
 }
 ```
 
-- [ ] **Step 1: Write the failing ownership matrix.** Cover customer `/me`, own POST/get, foreign POST/get, absent get, admin cross-customer, removed-admin replay with a fresh token, same idempotency key for two targets, same key for two actors, and exact safe 404 parity. Coarse missing scope is 403; invalid JWT is 401; resource denial is 404.
+- [ ] **Step 1: Write the failing Sprint 4A ownership matrix.** Cover a customer `/me` requiring `Orders.Read`, own POST requiring `Orders.Write`, own GET/replay requiring the applicable route scope, foreign POST/get safe 404, absent get safe 404, admin cross-customer, removed-admin replay with a fresh token, same idempotency key for two targets, same key for two actors, and exact safe 404 parity. Coarse missing scope is 403; invalid JWT is 401; resource denial is 404. No history endpoint or paging type exists in Sprint 4A.
 
 - [ ] **Step 2: Resolve actor and target before mutation.** After the route policy succeeds, `CurrentCustomerProfileAccessor` reads the raw subject once per request and calls `GetOrCreateAsync`. POST resolves the normalized submitted reference to a target profile; a customer may target itself, while exact `user.admin` may target another existing profile. Missing and denied targets use one `resource_not_found` response helper.
 
 - [ ] **Step 3: Carry owner metadata through reads.** `SqlOrderRepository.GetOwnedAsync` returns `OwnedOrder`; the endpoint authorizes `ownedOrder.Owner.CustomerProfileId` through `IAuthorizationService` before mapping the order. No handler guesses ownership from `Order.CustomerReference`, and no repository returns an ownerless order to an API read path.
 
-- [ ] **Step 4: Bind idempotency to actor and target.** Scope records by `(ActorCustomerProfileId, IdempotencyKey)`. Hash UTF-8 `v1|{actor D lowercase}|{target D lowercase}|{canonical customerReference}|{canonical productSku}|{quantity invariant}`. Persist both actor and target FKs; require target to equal `Order.CustomerProfileId`. Authorize the target before exact replay lookup so a role revoked in a newly issued token cannot replay another customer's response.
+- [ ] **Step 4: Bind D1 idempotency to actor and target without breaking E1.** Compute `legacySubjectId = $"profile:{actorCustomerProfileId:N}"`; use it for the retained E1 `(SubjectId, IdempotencyKey)` lookup/insert and persist nullable actor/target FKs on the same record. Hash UTF-8 `v1|{actor D lowercase}|{target D lowercase}|{canonical customerReference}|{canonical productSku}|{quantity invariant}`. A matching actor/key with another target conflicts during D1 because E1 still has the legacy key; E2 later enables the new actor/key constraint. Require target to equal `Order.CustomerProfileId`; authorize it before lookup so a newly revoked admin token cannot replay another customer's response.
 
 - [ ] **Step 5: Implement real allowlisted audit.** `LoggerAuthorizationAuditSink` uses one structured `ILogger` event and exactly the record fields above. Authentication challenge, profile resolution, allow/deny/not-found resource decisions, and admin cross-customer actions call the abstraction. Tests capture logger state and assert there are no token, authorization-header, raw-claim, email, customer-reference, request-body, product, quantity, or response-payload keys/values.
 
@@ -333,67 +344,42 @@ git add src tests
 git commit -m "feat: authorize profile-owned order operations"
 ```
 
-### Task 5: Add `/me`, typed history paging, and securely rotatable cursors
+### Task 5: Add the Sprint 4A `/me` discovery endpoint
 
 **Files:**
 
-- Create: `src/CloudOrders.Contracts/Identity/CurrentCustomerResponse.cs`, `src/CloudOrders.Contracts/Orders/OrderHistoryPage.cs`
-- Create: `src/CloudOrders.Application/Orders/{OrderHistoryBoundary,OrderHistorySlice,ListCustomerOrdersHandler}.cs`
-- Create: cursor files under `src/CloudOrders.Api/History/`
-- Modify: `src/CloudOrders.Api/Program.cs`, `src/CloudOrders.Infrastructure/Persistence/SqlOrderRepository.cs`
-- Create: `tests/CloudOrders.UnitTests/OrderHistoryCursorCodecTests.cs`, `tests/CloudOrders.IntegrationTests/OrderHistoryIntegrationTests.cs`
+- Create: `src/CloudOrders.Contracts/Identity/CurrentCustomerResponse.cs`
+- Modify: `src/CloudOrders.Api/Program.cs`
+- Create: `tests/CloudOrders.IntegrationTests/CurrentCustomerIntegrationTests.cs`
 
-**Interfaces and payload:**
+**Interface:**
 
 ```csharp
 public sealed record CurrentCustomerResponse(string CustomerReference);
-public sealed record OrderHistoryPage(IReadOnlyList<OrderResponse> Items, string? NextCursor);
-public sealed record OrderHistoryBoundary(DateTimeOffset CreatedAtUtc, Guid OrderId);
-public sealed record OrderHistorySlice(IReadOnlyList<OwnedOrder> Items, OrderHistoryBoundary? NextBoundary);
-public sealed record OrderHistoryCursorPayload(
-    int Version,
-    string KeyId,
-    Guid CustomerProfileId,
-    long CreatedAtUtcTicks,
-    Guid OrderId,
-    long ExpiresAtUnixSeconds);
-
-public sealed record CursorSigningKey(string Id, ReadOnlyMemory<byte> Material);
-
-public interface ICursorSigningKeyRing
-{
-    CursorSigningKey SigningKey { get; }
-    bool TryGetValidationKey(string keyId, out CursorSigningKey key);
-}
 ```
 
-- [ ] **Step 1: Write failing `/me`/history/cursor tests.** Cover default page 20, range 1-100, `CreatedAt DESC, Id DESC`, equal-timestamp tie breaking, no duplicates/gaps, target binding, 15-minute expiry, 1024-character input limit, malformed base64/JSON/signature, fixed-time signature rejection, unknown key, unsupported version, and absent/foreign identical 404.
+- [ ] **Step 1: Write failing `/me` tests.** `GET /api/v1/me` requires the exact `Orders.Read` scope, resolves exactly one authenticated profile, returns only its opaque `CustomerReference`, and remains stable across repeated calls. Cover missing/invalid token 401, missing scope 403, no email/null email, two identities with the same email, and one concurrent first `/me` plus POST sequence producing one profile/reference.
 
-- [ ] **Step 2: Keep cursor strings above persistence.** Decode in the API/handler, pass only `OrderHistoryBoundary?` to the repository, fetch `pageSize + 1`, and encode the returned typed boundary. The repository query filters the authorized `CustomerProfileId` and then applies the exact tuple boundary. It never parses, signs, or returns a cursor string.
+- [ ] **Step 2: Implement the narrowly scoped endpoint.** Use `CurrentCustomerProfileAccessor`, `RequireAuthorization("OrdersRead")`, and the existing profile store. Return no email, `oid`, issuer, role, order, or audit data. Do not add a list/history route, cursor type, repository list method, or cursor configuration in Sprint 4A.
 
-- [ ] **Step 3: Sign a target-bound payload.** Serialize the six fixed properties in a deterministic order, base64url-encode UTF-8 payload, and append base64url HMAC-SHA256 over that encoded payload. Require version `1`, known `KeyId`, matching target profile, exact UTC ticks, positive expiry, and a 32-byte-or-longer decoded key. All parse/authentication failures return the same `400 invalid_cursor` without revealing which check failed.
-
-- [ ] **Step 4: Implement rollback-safe three-phase rotation.** The key ring has one signing key and at most one additional validation key. Phase A deploys K2 as validation-only while K1 still signs; Phase B deploys K2 current/K1 previous, so the prior revision already validates K2; Phase C removes K1 only after cursor TTL plus the documented rollback window. Tests instantiate the Phase A/B rings and prove K1 cursor -> B, K2 cursor -> A, expiry, then removal after overlap.
-
-- [ ] **Step 5: Verify and commit.**
+- [ ] **Step 3: Verify and commit.**
 
 ```powershell
-dotnet test tests/CloudOrders.UnitTests --filter FullyQualifiedName~OrderHistoryCursorCodecTests --configuration Release
-dotnet test tests/CloudOrders.IntegrationTests --filter "FullyQualifiedName~OrderHistoryIntegrationTests|FullyQualifiedName~OrderOwnershipIntegrationTests" --configuration Release
-git add src tests
-git commit -m "feat: add authorized customer order history"
+dotnet test tests/CloudOrders.IntegrationTests --filter "FullyQualifiedName~CurrentCustomerIntegrationTests|FullyQualifiedName~OrderOwnershipIntegrationTests" --configuration Release
+git add src/CloudOrders.Api src/CloudOrders.Contracts tests/CloudOrders.IntegrationTests
+git commit -m "feat: add current customer discovery"
 ```
 
-### Task 6: Build the External ID control plane, PKCE smoke utility, and non-production runtime configuration
+### Task 6: Build the External ID control plane, PKCE smoke utility, and identity-only runtime configuration
 
 **Files:**
 
 - Modify: `CloudOrders.slnx`, `Directory.Packages.props`, `infra/{main.bicep,environments/development.bicepparam,environments/test.bicepparam,environments/production.bicepparam}`, `infra/modules/container-app.bicep`, `.github/workflows/{deploy,bicep-validation}.yml`, `README.md`, `AGENTS.md`
 - Create: `tools/CloudOrders.AuthSmoke/{CloudOrders.AuthSmoke.csproj,Program.cs}`
-- Create: the five `ops/runbooks/*.md` files listed in the inventory
+- Create: `ops/runbooks/{external-id-setup,external-id-role-operations,external-id-recovery,sprint-4-identity-data-transition}.md`
 - Create: `tests/CloudOrders.ArchitectureTests/ExternalIdentityInfrastructureTests.cs`
 
-- [ ] **Step 1: Write failing infrastructure and production-exclusion tests.** Assert development/test accept protected identifiers and secret references, no parameter file contains a real tenant/app ID or key, `user.admin` is not a runtime setting, and production cannot enable Sprint 4 identity/cursor material. Assert all three parameter files build and the workflow never echoes secure values.
+- [ ] **Step 1: Write failing identity infrastructure and production-exclusion tests.** Assert development/test accept protected identity identifiers, no parameter file contains a real tenant/app ID or key, `user.admin` is not a runtime setting, and production cannot enable Sprint 4 identity material. Assert all three parameter files build and the workflow never echoes secure values. Cursor keys and their runbook are Sprint 4B only.
 
 - [ ] **Step 2: Create the External ID tenant/control plane manually and document exact owners.** Record in the setup runbook: external tenant owner/subdomain/GUID; two emergency Global Administrators; routine Cloud Application Administrator; API app owner; PKCE client owner; workforce-federation app/secret owner and expiry; user-flow owner; GitHub environment owner; cursor-key owner/rotation date; data-transition approver; and evidence location. Directory admins and the `user.admin` assignee are separate identities/capabilities.
 
@@ -403,7 +389,7 @@ git commit -m "feat: add authorized customer order history"
 
 - [ ] **Step 5: Implement safe interactive PKCE smoke.** `CloudOrders.AuthSmoke` accepts authority, public-client ID, fully qualified scope(s), and HTTPS API base URL; uses `PublicClientApplicationBuilder`, system browser, `http://localhost`, and `AcquireTokenInteractive` (authorization code + PKCE); holds the access token only in memory; calls `/api/v1/me`; prints status, `errorCode`, `traceId`, and the safe `/me` body only. It never prints/decodes the token, serializes an MSAL cache, requests Graph, disables TLS, or stores browser state. Run once as an OTP customer and once as the federated work admin, then close the process/browser session.
 
-- [ ] **Step 6: Add fail-closed Bicep/workflow configuration.** Pass Authority, ValidIssuer, tenant, audience, and allowed-client IDs as protected GitHub environment variables into non-production Container App env settings. Pass current/previous cursor material only through `@secure()` Bicep parameters into Container App secrets and use `secretRef`; keep key IDs non-secret. Reject `environmentName == 'production' && externalIdentityEnabled`. Add dev/test prerequisite validation before what-if; leave production overlay disabled and identifier-free.
+- [ ] **Step 6: Add fail-closed identity Bicep/workflow configuration.** Pass Authority, ValidIssuer, tenant, audience, and allowed-client IDs as protected GitHub environment variables into non-production Container App environment settings. Reject `environmentName == 'production' && externalIdentityEnabled`. Add development/test prerequisite validation before what-if; leave the production overlay disabled and identifier-free. Do not add cursor secrets or references in Sprint 4A.
 
 - [ ] **Step 7: Verify and commit.**
 
@@ -420,67 +406,79 @@ git commit -m "feat: configure nonproduction External ID operations"
 
 Expected: all commands exit 0; the production-exclusion assertions pass.
 
-### Task 7: Promote E1/D1 -> E2/D1 -> D2 -> E3/D2 in lockstep
+### Task 7: Execute Sprint 4A E1, data transition, D1/R1, and assurance
 
 **Files:**
 
-- Create: `src/CloudOrders.Infrastructure/Persistence/Migrations/*_EnforceCustomerProfileOwnership.{cs,Designer.cs}`, `*_RemoveLegacyIdempotencySubject.{cs,Designer.cs}`; update snapshot at each boundary
-- Modify: D1 then D2 versions of persistence files in the inventory and `.github/workflows/deploy.yml`
-- Create/modify: `ops/runbooks/sprint-4-identity-data-transition.md`, `tests/CloudOrders.IntegrationTests/MigrationRunnerTests.cs`, `docs/evidence/sprint-4/development-verification.md`
+- Create/modify: `ops/runbooks/sprint-4-identity-data-transition.md`, `tests/CloudOrders.IntegrationTests/MigrationRunnerTests.cs`, `docs/evidence/sprint-4a/{development-verification,development-smoke,test-qa,review,data-transition}.md`
+- Modify: `.github/workflows/deploy.yml` only to preserve migration-before-candidate deployment, exact execution polling, and a documented fail-closed order-ingress operation.
 
-- [ ] **Step 1: Write the failing compatibility matrix before any phased release.** Extend `MigrationRunnerTests` to exercise Sprint 3 against E1, D1 against E1/E2, and D2 against E2/E3. Add workflow-policy assertions that each phase records the prior compatible revision and exact migration execution. Run the focused tests and observe failures before creating E2/E3 or deleting the D1 legacy mapping.
+- [ ] **Step 1: Write failing R1 compatibility and fail-closed tests.** Extend `MigrationRunnerTests` to prove Sprint 3 starts against E1 with zero traffic, D1 works against E1, legacy null-owned orders return safe 404, and a D1 fallback is another recorded authenticated D1 revision or disabled order ingress—never Sprint 3. Assert the workflow records candidate/previous image digests, migration ID, and exact job execution.
 
-- [ ] **Step 2: Promote R1 (E1 + D1) through both environments before advancing development.** Merge the reviewed current Sprint 4 feature branch to development, capture previous ready revision/image, exact E1 migration ID and job execution, candidate revision/image, and smoke, and prove the previous Sprint 3 image starts against E1 before allowing D1 traffic. Promote that same R1 commit/artifacts to test and repeat the compatibility proof. Do not begin the E2 phase while either environment is still on Sprint 3.
+- [ ] **Step 2: Deploy E1 without enabling D1 traffic.** On a reviewed `feature/sprint4a-e1` branch, add a protected `migration-only` workflow mode that runs the named E1 migration but preserves the current API image and traffic weights; its summary asserts the before/after app revision/digest are identical. Merge/promote that branch through development then test, capture migration/job/revision/image evidence, and prove the old Sprint 3 revision is schema-compatible with **zero traffic**. Do not expose D1, `/me`, or identity configuration until the per-environment transition below passes.
 
-- [ ] **Step 3: Inventory and choose exactly one data mode per environment.** Record counts and references for profiles, orders, outbox, and idempotency separately in development and test. `reset` requires written confirmation that all rows are synthetic/disposable and deletes in FK-safe order (`IdempotencyRecords`, `OutboxMessages`, `Orders`, then unreferenced profiles). `mapped-backfill` imports a secure uncommitted mapping, rejects duplicate issuer/oid/reference or incomplete coverage, creates profiles, sets every order owner, and deletes unverifiable legacy idempotency rows. Both modes run in a transaction, print counts not emails/IDs, and abort on any unmapped order. Complete and evidence both environments before R2.
+- [ ] **Step 3: Perform the per-environment quiesced transition.** For development, then separately test: set order-route ingress to fail closed/remove all application traffic; wait for in-flight requests to drain; inventory profiles, orders, outbox, and idempotency; run the approved transaction. `reset` deletes in FK-safe order (`IdempotencyRecords`, `OutboxMessages`, `Orders`, then unreferenced profiles). `mapped-backfill` validates a protected one-to-one mapping, creates/reconciles profiles, sets every order owner, and deletes unverifiable pre-Sprint-4 idempotency rows. Recheck inside the transaction and immediately before E2 later: zero unowned/null ownership rows, zero unmapped orders, zero legacy idempotency rows, and no duplicate future actor/key values. Restore ingress only with D1; never reactivate Sprint 3.
 
-- [ ] **Step 4: Promote R2 (E2 + D1-compatible behavior) through both environments.** On the current R2 feature branch, write/generate E2 only after zero-null evidence, update the snapshot, run the compatibility/migration suite, fix premerge findings on that branch, and commit `feat: enforce customer profile ownership`. Merge to development, poll the exact execution, and prove create/replay/read/history plus rollback to the recorded D1 revision. Promote the same R2 commit/artifacts to test and repeat before starting D2.
+- [ ] **Step 4: Promote R1 (D1 on E1) and run Sprint 4A gates.** On a reviewed `feature/sprint4a-d1` branch, deploy D1 to development after identity prerequisites/configuration are present, confirm exact healthy candidate revision/digest/TLS/health, and smoke `/me`, own POST/GET/replay, safe foreign/absent 404, admin cross-customer, role revoke/regrant with a fresh token, SQL profile/order/idempotency ownership, and redacted audit. Perform the three-working-day developer verification and independent review. Promote the same reviewed R1 artifact to test; run independent QA for one-to-two working days using two OTP customers plus the federated admin. No history/cursor path is asserted.
 
-- [ ] **Step 5: Promote R3 (D2 bridge, no migration) through both environments.** On the current R3 feature branch, remove the `SubjectId` property/mapping/read/write from code and tests while E2 retains the nullable column, run the full suite, fix premerge findings on that branch, and commit `refactor: stop using legacy idempotency subjects`. Merge/deploy to development and then promote the same commit/artifact to test. Run the full smoke matrix in each, retain D2 as latest ready for the documented rollback window, and prove D2 -> D1 rollback before E3.
+- [ ] **Step 5: Close Sprint 4A.** Fix post-deployment defects on fresh `feature/*` remediation branches and repeat the affected gate. Record immutable R1 digests/revisions, transition evidence, and release status. Do not start Sprint 4B until test QA passes and D1 is the only traffic-bearing API behavior.
 
-- [ ] **Step 6: Promote R4 (E3 + D2-compatible behavior) through both environments.** On the current R4 feature branch, add only the E3 drop after the D2 soak/rollback window, run the compatibility/migration suite, fix premerge findings on that branch, and commit `refactor: remove legacy idempotency subject schema`. Merge to development, poll the exact execution, deploy the D2-compatible rebuild, and prove the recorded pre-E3 D2 revision remains healthy. Promote the same R4 commit/artifacts to test and repeat. Record that D1/Sprint 3 are no longer post-E3 rollback targets.
+## Sprint 4B — History and ownership contract
 
-- [ ] **Step 7: Enforce the phase/defect branch distinction.** R2-R4 are planned release phases and each uses its own reviewed `feature/*` branch. Review findings discovered before that phase deploys are fixed on that current phase branch. A defect first discovered after a phase deploys uses a new remediation `feature/*` branch and blocks the next phase. Never let development advance to the next phase until test has received and passed the current one; never reuse development data mappings/evidence for test; never enable production.
-
-### Task 8: Full verification, independent review, Azure smoke, and adversarial QA
+### Task 8: Add authorized history, cursor keys, and the H1 release
 
 **Files:**
 
-- Create: `docs/evidence/sprint-4/{development-verification,development-smoke,test-qa,review}.md`
-- Modify: `docs/superpowers/plans/2026-08-16-cloudorders-sprint-implementation-plan.md` only after all gates pass
+- Create: `src/CloudOrders.Contracts/Orders/OrderHistoryPage.cs`, `src/CloudOrders.Application/Orders/{OrderHistoryBoundary,OrderHistorySlice,ListCustomerOrdersHandler}.cs`, and cursor files under `src/CloudOrders.Api/History/`
+- Modify: `src/CloudOrders.Application/Abstractions/IOrderRepository.cs`, `src/CloudOrders.Api/Program.cs`, `src/CloudOrders.Infrastructure/Persistence/SqlOrderRepository.cs`, `infra/{main.bicep,environments/*.bicepparam}`, `infra/modules/container-app.bicep`, `.github/workflows/{deploy,bicep-validation}.yml`
+- Create: `ops/runbooks/cursor-key-rotation.md`, `tests/CloudOrders.UnitTests/OrderHistoryCursorCodecTests.cs`, `tests/CloudOrders.IntegrationTests/OrderHistoryIntegrationTests.cs`
 
-- [ ] **Step 1: Run fresh local repository gates.**
+**Interfaces:**
 
-```powershell
-dotnet restore CloudOrders.slnx
-dotnet format CloudOrders.slnx --verify-no-changes --no-restore
-dotnet build CloudOrders.slnx --configuration Release --no-restore
-dotnet test CloudOrders.slnx --configuration Release --no-build
-az bicep lint --file infra/main.bicep
-az bicep build --file infra/main.bicep
-az bicep build-params --file infra/environments/development.bicepparam
-az bicep build-params --file infra/environments/test.bicepparam
-az bicep build-params --file infra/environments/production.bicepparam
-git diff --check
+```csharp
+public sealed record OrderHistoryPage(IReadOnlyList<OrderResponse> Items, string? NextCursor);
+public sealed record OrderHistoryBoundary(DateTimeOffset CreatedAtUtc, Guid OrderId);
+public sealed record OrderHistorySlice(IReadOnlyList<OwnedOrder> Items, OrderHistoryBoundary? NextBoundary);
+public sealed record OrderHistoryCursorPayload(int Version, string KeyId, Guid CustomerProfileId, long CreatedAtUtcTicks, Guid OrderId, long ExpiresAtUnixSeconds);
+public sealed record CursorSigningKey(string Id, ReadOnlyMemory<byte> Material);
+public interface ICursorSigningKeyRing { CursorSigningKey SigningKey { get; } bool TryGetValidationKey(string keyId, out CursorSigningKey key); }
 ```
 
-Expected: every command exits 0; no warnings/failures; production-exclusion tests remain green.
+- [ ] **Step 1: Write history/cursor failures.** Cover exact `Orders.Read` scope, page default 20/range 1-100, `CreatedAt DESC, Id DESC`, equal-time tie breaking, no gaps/duplicates, customer target binding, 15-minute expiry, 1024-character input limit, malformed base64/JSON/signature, unknown key/version, and absent/foreign parity.
 
-- [ ] **Step 2: Verify EF model and migration SQL at each boundary.** Run `dotnet ef migrations has-pending-model-changes`; generate idempotent E1/E2/E3 scripts; independently review E1 as additive, E2 only after zero-null evidence, and E3 only after D2. Test empty database, Sprint 3 upgrade, reset path, mapped-backfill path, D1 against E1/E2, D2 against E2/E3, failed migration, and rerun idempotency.
+- [ ] **Step 2: Keep cursors above persistence.** Decode at the API/handler, pass only `OrderHistoryBoundary?`, query only the authorized profile with `pageSize + 1`, then encode the returned typed boundary. The repository never parses/signs/returns cursor strings.
 
-- [ ] **Step 3: Inspect SQL directly.** Query `__EFMigrationsHistory`, `sys.key_constraints`, `sys.foreign_keys`, `sys.indexes`, and `sys.columns`. Assert exact migration ID, named profile alternate keys, restrictive ownership FKs, history index order, actor/target uniqueness, `Order.CustomerProfileId == Idempotency.TargetCustomerProfileId`, zero legacy/unowned rows at the applicable gate, and `SubjectId` absent only after E3.
+- [ ] **Step 3: Implement secure rotation/configuration.** Deterministically serialize/sign the payload with HMAC-SHA256; require a known key ID, matching profile, valid expiry, and a decoded 32-byte minimum key. Pass current/previous material only as `@secure()` Bicep parameters into non-production Container App secrets and `secretRef`; key IDs are non-secret. Phase A distributes K2 validation-only, B makes K2 current/K1 previous, C removes K1 only after cursor TTL plus the 14-day D2 rollback window. Production remains disabled/identifier-free.
 
-- [ ] **Step 4: Verify security/configuration modes.** Prove missing config fails startup in Development/Test/Production; Testing works only with explicit injected config; health is anonymous; real locally signed JWT negatives produce 401/403 as specified; fake auth is policy-test-only; logs/audit contain no forbidden data. Inspect a real token only through the API behavior/runbook and never retain its value.
+- [ ] **Step 4: Review, promote H1, and target-test it.** Run cursor/ownership/Bicep tests, independent review, and development smoke against D1/E2-compatible schema only after R2 below. Promote H1 to test and run independent history/cursor QA. Preserve the recorded D1 revision as H1 rollback target.
 
-- [ ] **Step 5: Verify cursor and rollback across revisions.** Exercise K1-current/K2-validation, K2-current/K1-previous, old cursor on new revision, new cursor on the prior predistributed revision, tamper/target/expiry failures, K1 removal after TTL+rollback overlap, and the recorded D1/D2 schema compatibility matrix.
+### Task 9: Execute R2 E2/D1, R3 D2, and R4 E3/D2 in order
 
-- [ ] **Step 6: Perform independent review before development merge.** A separate high-capability reviewer checks code, contracts, migrations, Bicep/workflows, runbooks, tests, role/control planes, audit redaction, and evidence. Fix all premerge Critical/Important findings on this current branch, re-run focused/full gates, and re-review.
+**Files:**
 
-- [ ] **Step 7: Run live development smoke with realizable identities.** Use one real OTP customer, a second real OTP customer, and the federated existing-work-account admin. Verify `/me`, own create/get/history/replay, cross-customer safe 404, admin access, role revoke plus fresh-token denial, role regrant plus fresh-token access, exact revision/digest/migration/job execution, TLS, health, SQL ownership, and audit. Do not retain auth state or token text.
+- Create: `src/CloudOrders.Infrastructure/Persistence/Migrations/*_EnforceCustomerProfileOwnership.{cs,Designer.cs}` and `*_RemoveLegacyIdempotencySubject.{cs,Designer.cs}`; update snapshot at each boundary.
+- Modify: D1 then D2 persistence mapping/tests and `docs/evidence/sprint-4b/{r2,h1,r3,r4}-*.md`.
 
-- [ ] **Step 8: Run nuanced test QA.** Locally fabricated signed JWTs own cryptographic/claim negatives that a live tenant cannot legitimately issue: bad signature, expired/future token, forged issuer/audience/tenant/client, malformed/multiple `oid`, app-only shape, and invented unknown/case-changed roles. Azure `test` QA uses only live-realizable states: no token, two ordinary customers with no app-role assignment, federated admin, read-only vs write scope, role grant/revoke followed by fresh token, absent/foreign parity, concurrency, replay, history boundaries, cursor rotation/tamper, recovery, and direct SQL integrity. Do not pollute the tenant by creating fake roles or weakening registrations merely to manufacture a negative.
+- [ ] **Step 1: Write the full compatibility matrix.** Test D1 against E1/E2, H1 against E2, D2 against E2/E3, and the recorded immutable image for each prior revision. Assert E2 precondition rechecks, exact migration polling, no Sprint 3 rollback, and correct D1/D2 fallback target before each destructive boundary.
 
-- [ ] **Step 9: Close without production.** For any post-deployment defect, create a fresh `feature/*` remediation branch, repeat the affected review/deployment/QA gates, and append re-test evidence. When all gates pass, update Sprint 4 status and record immutable release IDs; do not promote to master or configure production identity.
+- [ ] **Step 2: Promote R2 (E2 + unchanged D1 behavior).** On a reviewed `feature/*` phase branch, generate E2 only after the fresh quiesced transaction/preconditions pass; make ownership non-null, switch idempotency uniqueness to actor/key, and retain nullable `SubjectId`. Deploy/test R2 with focused migration, D1 create/get/replay, direct SQL, and rollback-to-D1 evidence. H1 starts only after R2 passes in test.
+
+- [ ] **Step 3: Promote R3 (D2, no migration) and soak.** On another reviewed phase branch remove `SubjectId` from D2 code while E2 retains it; deploy/test with targeted smoke, direct SQL, and D2-to-D1 rollback proof. Retain exact D1/D2 images and D2 as the ready rollback target for 14 calendar days after test smoke.
+
+- [ ] **Step 4: Promote R4 (E3 + D2-compatible rebuild).** Only after the soak, use a reviewed phase branch to drop the legacy column/key, deploy/test D2-compatible code, and prove rollback only to the retained pre-E3 D2 image. Record that D1 and Sprint 3 are permanently unavailable as post-E3 rollbacks.
+
+### Task 10: Run final verification and close Sprint 4B without production
+
+**Files:**
+
+- Create: `docs/evidence/sprint-4b/{development-verification,development-smoke,test-qa,review}.md`
+- Modify: `docs/superpowers/plans/2026-08-16-cloudorders-sprint-implementation-plan.md` only after all gates pass.
+
+- [ ] **Step 1: Run repository, migration, and direct-SQL gates.** Run restore, format, release build/test, Bicep lint/build/all parameter builds, `git diff --check`, `dotnet ef migrations has-pending-model-changes`, idempotent E1/E2/E3 scripts, and direct `__EFMigrationsHistory`/constraints/FKs/indexes/columns inspection. Assert required ownership at E2, history index ordering at H1, and `SubjectId` absent only at E3.
+
+- [ ] **Step 2: Run independent review and targeted release checks.** Review code, contracts, migrations, workflow/Bicep, runbooks, audit redaction, secret handling, release digests, and prior-image compatibility. Development and test each receive a targeted independent smoke/QA gate for R2, H1, R3, and R4 before the next phase; fix post-deployment defects on fresh branches.
+
+- [ ] **Step 3: Repeat full assurance after R4.** Complete three working days of developer-style local verification and one-to-two working days of independent Azure test QA. Cover cryptographic/claim negatives locally with signed JWTs; use only live-realizable customer/admin/sign-out/role-revoke/role-regrant, history, cursor, concurrency, recovery, SQL-integrity, and rollback states in Azure. Store sanitized evidence and update Sprint status. Do not deploy production.
 
 ## Plan self-review checklist
 
