@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
@@ -12,7 +13,7 @@ public sealed class CloudOrdersAuthorizationResultHandler : IAuthorizationMiddle
     {
         if (authorizeResult.Challenged)
         {
-            context.Response.Headers.WWWAuthenticate = JwtBearerDefaults.AuthenticationScheme;
+            await context.ChallengeAsync(JwtBearerDefaults.AuthenticationScheme);
             await Results.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "Authentication is required.",
                 extensions: ProblemExtensions(context, "authentication_required")).ExecuteAsync(context);
             return;

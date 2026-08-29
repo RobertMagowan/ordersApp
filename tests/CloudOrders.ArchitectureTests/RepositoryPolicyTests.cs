@@ -87,6 +87,7 @@ public sealed class RepositoryPolicyTests
             .Select(File.ReadAllText);
 
         Assert.DoesNotContain(productionSource, source => source.Contains("PolicyTestAuthenticationHandler", StringComparison.Ordinal));
+        Assert.DoesNotContain(productionSource, source => source.Contains("PolicyTest", StringComparison.Ordinal));
     }
 
     private static string FindRepositoryRoot()

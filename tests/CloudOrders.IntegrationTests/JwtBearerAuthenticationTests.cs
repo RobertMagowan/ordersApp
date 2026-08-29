@@ -35,6 +35,67 @@ public sealed class JwtBearerAuthenticationTests : IDisposable
         Assert.Contains("Bearer", response.Headers.WwwAuthenticate.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task TokenWithoutASignatureChallenges()
+    {
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            tokens.CreateUnsignedToken(oid: Guid.NewGuid().ToString()));
+
+        using var response = await client.GetAsync($"/api/v1/orders/{Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains("invalid_token", response.Headers.WwwAuthenticate.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("expired")]
+    [InlineData("not-before")]
+    public async Task TokenOutsideItsValidLifetimeChallenges(string validity)
+    {
+        var now = DateTime.UtcNow;
+        var token = validity == "expired"
+            ? tokens.CreateToken(oid: Guid.NewGuid().ToString(), notBefore: now.AddMinutes(-10), expires: now.AddMinutes(-1))
+            : tokens.CreateToken(oid: Guid.NewGuid().ToString(), notBefore: now.AddMinutes(1));
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await client.GetAsync($"/api/v1/orders/{Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains("invalid_token", response.Headers.WwwAuthenticate.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("multiple")]
+    public async Task TokenWithoutExactlyOneObjectIdChallenges(string oidShape)
+    {
+        var token = oidShape == "missing"
+            ? tokens.CreateToken(oid: null)
+            : tokens.CreateToken(objectIds: [Guid.NewGuid().ToString(), Guid.NewGuid().ToString()]);
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await client.GetAsync($"/api/v1/orders/{Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains("invalid_token", response.Headers.WwwAuthenticate.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AppOnlyTokenShapeChallenges()
+    {
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokens.CreateAppOnlyToken());
+
+        using var response = await client.GetAsync($"/api/v1/orders/{Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains("invalid_token", response.Headers.WwwAuthenticate.ToString(), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("issuer")]
     [InlineData("tenant")]

@@ -51,6 +51,7 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
             ValidAudience = identity.Audience,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
+            ClockSkew = TimeSpan.Zero,
             RoleClaimType = "roles"
         };
         options.Events = new JwtBearerEvents

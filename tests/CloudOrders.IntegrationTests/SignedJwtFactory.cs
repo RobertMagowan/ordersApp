@@ -20,8 +20,10 @@ internal sealed class SignedJwtFactory : IDisposable
         string? audience = null,
         string? clientId = null,
         string? oid = null,
+        IEnumerable<string>? objectIds = null,
         string? scope = "Orders.Read",
         string[]? roles = null,
+        IEnumerable<System.Security.Claims.Claim>? additionalClaims = null,
         DateTime? notBefore = null,
         DateTime? expires = null,
         bool signed = true)
@@ -31,9 +33,10 @@ internal sealed class SignedJwtFactory : IDisposable
             new("tid", tenantId ?? TenantId),
             new("azp", clientId ?? ClientId)
         };
-        if (oid is not null) claims.Add(new("oid", oid));
+        foreach (var objectId in objectIds ?? (oid is null ? [] : [oid])) claims.Add(new("oid", objectId));
         if (scope is not null) claims.Add(new("scp", scope));
         foreach (var role in roles ?? []) claims.Add(new("roles", role));
+        claims.AddRange(additionalClaims ?? []);
 
         var token = new JwtSecurityToken(
             issuer: issuer ?? Issuer,
@@ -44,6 +47,14 @@ internal sealed class SignedJwtFactory : IDisposable
             signingCredentials: signed ? new SigningCredentials(new RsaSecurityKey(rsa), SecurityAlgorithms.RsaSha256) : null);
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
+
+    internal string CreateUnsignedToken(string oid) => CreateToken(oid: oid, signed: false);
+
+    internal string CreateAppOnlyToken() => CreateToken(
+        oid: null,
+        scope: null,
+        roles: ["user.admin"],
+        additionalClaims: [new("idtyp", "app")]);
 
     public void Dispose() => rsa.Dispose();
 }

@@ -38,11 +38,11 @@ public sealed class ExternalIdentityOptionsValidator : IValidateOptions<External
         }
         else
         {
-            var clients = new HashSet<string>(StringComparer.Ordinal);
+            var clients = new HashSet<Guid>();
             foreach (var clientId in options.AllowedClientIds)
             {
                 ValidateGuid(clientId, "AllowedClientIds", failures);
-                if (!string.IsNullOrWhiteSpace(clientId) && !clients.Add(clientId))
+                if (Guid.TryParseExact(clientId, "D", out var parsedClientId) && !clients.Add(parsedClientId))
                 {
                     failures.Add("AllowedClientIds must be distinct.");
                 }
