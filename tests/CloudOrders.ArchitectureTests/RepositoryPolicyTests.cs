@@ -79,6 +79,16 @@ public sealed class RepositoryPolicyTests
         Assert.Contains("User Id=${migrationIdentity.properties.clientId}", migrationJobModule, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ProductionProjectsDoNotReferencePolicyTestAuthentication()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var productionSource = Directory.EnumerateFiles(Path.Combine(repositoryRoot, "src"), "*.cs", SearchOption.AllDirectories)
+            .Select(File.ReadAllText);
+
+        Assert.DoesNotContain(productionSource, source => source.Contains("PolicyTestAuthenticationHandler", StringComparison.Ordinal));
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

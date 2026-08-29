@@ -5,6 +5,8 @@ using System.Text.Json;
 using CloudOrders.Application.Orders;
 using CloudOrders.Contracts.Orders;
 using CloudOrders.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -364,7 +366,12 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["ConnectionStrings:CloudOrders"] = connectionString
+                    ,
+                    ["PolicyTest:AllowAll"] = "true"
                 }));
+            builder.ConfigureTestServices(services =>
+                services.AddAuthentication(PolicyTestAuthenticationHandler.SchemeName)
+                    .AddScheme<AuthenticationSchemeOptions, PolicyTestAuthenticationHandler>(PolicyTestAuthenticationHandler.SchemeName, _ => { }));
             if (raceObserver is not null)
             {
                 builder.ConfigureServices(services =>
