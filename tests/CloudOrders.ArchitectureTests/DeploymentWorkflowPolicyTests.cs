@@ -194,7 +194,10 @@ public sealed class DeploymentWorkflowPolicyTests
         var workflow = File.ReadAllText(Path.Combine(repositoryRoot, ".github", "workflows", "deploy.yml"));
         var manifestPath = Path.Combine(repositoryRoot, "ops", "releases", "sprint-4a-e1-migration-only.json");
 
-        Assert.False(File.Exists(manifestPath), $"Sprint 4A E1 manifest must be deferred until its migration exists: {manifestPath}.");
+        Assert.True(File.Exists(manifestPath), $"Sprint 4A E1 manifest must accompany its migration: {manifestPath}.");
+        Assert.Equal(
+            "{ \"migration\": \"AddCustomerProfileOwnershipExpand\", \"deployApi\": false }",
+            File.ReadAllText(manifestPath).Trim());
         Assert.Contains("Validate Sprint 4A E1 migration-only manifest", workflow, StringComparison.Ordinal);
         Assert.Contains("AddCustomerProfileOwnershipExpand", workflow, StringComparison.Ordinal);
         Assert.Contains("migration_only", workflow, StringComparison.Ordinal);

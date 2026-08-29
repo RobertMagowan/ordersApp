@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using CloudOrders.Application.Identity;
 
 namespace CloudOrders.Api.Identity;
 

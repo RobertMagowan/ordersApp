@@ -22,6 +22,9 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
         Assert.Contains(
             "20260816221235_InitialSqlPersistence",
             await context.Database.GetAppliedMigrationsAsync(CancellationToken.None));
+        Assert.Contains(
+            "20260829075044_AddCustomerProfileOwnershipExpand",
+            await context.Database.GetAppliedMigrationsAsync(CancellationToken.None));
     }
 
     [Fact]

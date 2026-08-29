@@ -21,5 +21,19 @@ internal sealed class IdempotencyRecordEntityConfiguration : IEntityTypeConfigur
             .OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(record => record.OrderId).HasDatabaseName("IX_IdempotencyRecords_OrderId");
         builder.HasIndex(record => record.ExpiresAt).HasDatabaseName("IX_IdempotencyRecords_ExpiresAt");
+        builder.HasOne<CustomerProfileEntity>()
+            .WithMany()
+            .HasForeignKey(record => record.ActorCustomerProfileId)
+            .OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("FK_IdempotencyRecords_CustomerProfiles_ActorCustomerProfileId");
+        builder.HasOne<CustomerProfileEntity>()
+            .WithMany()
+            .HasForeignKey(record => record.TargetCustomerProfileId)
+            .OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("FK_IdempotencyRecords_CustomerProfiles_TargetCustomerProfileId");
+        builder.HasIndex(record => record.ActorCustomerProfileId)
+            .HasDatabaseName("IX_IdempotencyRecords_ActorCustomerProfileId");
+        builder.HasIndex(record => record.TargetCustomerProfileId)
+            .HasDatabaseName("IX_IdempotencyRecords_TargetCustomerProfileId");
     }
 }
