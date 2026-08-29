@@ -56,6 +56,17 @@ The review-safe split is by independently deployable behavior, not by the former
 
 **Gate cadence.** Every development deployment (R1, R2, H1, R3, R4) has: focused local/TDD evidence, independent review, an Azure development smoke and exact revision/digest/migration/job inspection. Every test deployment has a targeted independent QA/rollback test. Sprint 4A then has a full three-working-day development verification and one-to-two-working-day test QA; Sprint 4B repeats those full gates after R4. A post-deployment defect uses a fresh remediation `feature/*` branch and repeats the affected gate before the next release phase.
 
+## Task-level development release gate
+
+Every task is a deployable development increment. Before starting the next task, the current task must pass this sequence:
+
+1. TDD, focused/local developer verification, direct affected-state inspection, and an independent code review.
+2. A dedicated `feature/sprint4a-task-<n>` pull request into `development`; its normal protected workflow deploys the task artifact/configuration. A migration-only task uses the reviewed E1 manifest path only when the named migration exists.
+3. A dedicated development smoke/QA agent tests the actual task capability to destruction using technology-appropriate happy-path, negative, recovery, security, concurrency, direct-state, and rollback/fail-closed cases. It records the exact revision/digest/migration-job execution and sanitized evidence under `docs/evidence/sprint-4a/task-<n>/`.
+4. Every discovered defect is fixed on a fresh `feature/*` remediation branch, independently reviewed, redeployed to development, and re-tested until no Critical, Important, or reproducible defect remains.
+
+Only after this task gate is green may implementation begin on the next task. After Task 7, run the separate whole-sprint destruction pass across the integrated 4A release in development; fix/retest every issue. Only then open the single normal `development` -> `test` PR and run Azure test QA. Task-level development promotions do not bypass branch protection or replace the full-sprint test promotion.
+
 ## Release and rollback invariant
 
 Use these releases in order; never combine the destructive boundary with an API image that still maps the removed column.
