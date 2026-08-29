@@ -188,14 +188,13 @@ public sealed class DeploymentWorkflowPolicyTests
     }
 
     [Fact]
-    public void DeploymentWorkflowSupportsTheExactSprint4AE1MigrationOnlyManifest()
+    public void DeploymentWorkflowKeepsTheSprint4AE1MigrationOnlyCapabilityDormant()
     {
         var repositoryRoot = FindRepositoryRoot();
         var workflow = File.ReadAllText(Path.Combine(repositoryRoot, ".github", "workflows", "deploy.yml"));
         var manifestPath = Path.Combine(repositoryRoot, "ops", "releases", "sprint-4a-e1-migration-only.json");
 
-        Assert.True(File.Exists(manifestPath), $"Expected Sprint 4A E1 manifest at {manifestPath}.");
-        Assert.Equal("{ \"migration\": \"AddCustomerProfileOwnershipExpand\", \"deployApi\": false }", File.ReadAllText(manifestPath).TrimEnd());
+        Assert.False(File.Exists(manifestPath), $"Sprint 4A E1 manifest must be deferred until its migration exists: {manifestPath}.");
         Assert.Contains("Validate Sprint 4A E1 migration-only manifest", workflow, StringComparison.Ordinal);
         Assert.Contains("AddCustomerProfileOwnershipExpand", workflow, StringComparison.Ordinal);
         Assert.Contains("migration_only", workflow, StringComparison.Ordinal);
@@ -204,6 +203,31 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("BEFORE_DIGEST", workflow, StringComparison.Ordinal);
         Assert.Contains("BEFORE_TRAFFIC", workflow, StringComparison.Ordinal);
         Assert.Contains("Migration-only run changed API revision, digest, or traffic", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Sprint4APlanCreatesTheE1ManifestWithTheTask3Migration()
+    {
+        var plan = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "docs",
+            "superpowers",
+            "plans",
+            "2026-08-27-sprint-4-external-id-authorization.md"));
+
+        var task1Start = plan.IndexOf("### Task 1:", StringComparison.Ordinal);
+        var task2Start = plan.IndexOf("### Task 2:", StringComparison.Ordinal);
+        var task3Start = plan.IndexOf("### Task 3:", StringComparison.Ordinal);
+        var task4Start = plan.IndexOf("### Task 4:", StringComparison.Ordinal);
+        Assert.True(task1Start >= 0 && task2Start > task1Start, "Expected bounded Task 1 plan text.");
+        Assert.True(task3Start >= 0 && task4Start > task3Start, "Expected bounded Task 3 plan text.");
+
+        var task1 = plan[task1Start..task2Start];
+        var task3 = plan[task3Start..task4Start];
+        const string manifestInventory = "- Create: `ops/releases/sprint-4a-e1-migration-only.json`";
+        Assert.DoesNotContain(manifestInventory, task1, StringComparison.Ordinal);
+        Assert.Contains(manifestInventory, task3, StringComparison.Ordinal);
+        Assert.Contains("AddCustomerProfileOwnershipExpand", task3, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -217,8 +241,9 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("if manifest != expected:", workflow, StringComparison.Ordinal);
         Assert.Contains("MIGRATION: ${{ needs.validate_promotion_ref.outputs.migration }}", workflow, StringComparison.Ordinal);
         Assert.Contains("--args \"--migration\" \"$MIGRATION\"", workflow, StringComparison.Ordinal);
-        Assert.Contains("EXECUTION_MIGRATION=$(az containerapp job execution show", workflow, StringComparison.Ordinal);
-        Assert.Contains("[[ \"$EXECUTION_MIGRATION\" == \"$MIGRATION\" ]]", workflow, StringComparison.Ordinal);
+        Assert.Contains("EXECUTION_ARGS=$(az containerapp job execution show", workflow, StringComparison.Ordinal);
+        Assert.Contains("expected = [\"--migration\", sys.argv[1]]", workflow, StringComparison.Ordinal);
+        Assert.Contains("if json.loads(sys.argv[2]) != expected:", workflow, StringComparison.Ordinal);
 
         var normalJobs = new[] { "preview_foundation", "prepare_release", "preview_sql", "bootstrap_sql", "run_migration", "deploy_release" };
         Assert.All(normalJobs, job => Assert.Contains($"  {job}:", workflow, StringComparison.Ordinal));
@@ -234,9 +259,16 @@ public sealed class DeploymentWorkflowPolicyTests
 
         var migrationRunner = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "CloudOrders.Migrations", "Program.cs"));
         Assert.Contains("--migration", migrationRunner, StringComparison.Ordinal);
-        Assert.Contains("MigrateAsync(targetMigration)", migrationRunner, StringComparison.Ordinal);
+        Assert.Contains("FindMigrationId(targetMigration)", migrationRunner, StringComparison.Ordinal);
+        Assert.Contains("GetPendingMigrationsAsync", migrationRunner, StringComparison.Ordinal);
+        Assert.Contains("pendingMigrations.SequenceEqual([resolvedTargetMigration], StringComparer.Ordinal)", migrationRunner, StringComparison.Ordinal);
+        Assert.Contains("appliedMigrationsBefore", migrationRunner, StringComparison.Ordinal);
+        Assert.Contains("MigrateAsync(resolvedTargetMigration)", migrationRunner, StringComparison.Ordinal);
+        Assert.Contains("appliedMigrationsAfter", migrationRunner, StringComparison.Ordinal);
+        Assert.Contains("appliedMigrationDelta", migrationRunner, StringComparison.Ordinal);
+        Assert.Contains("appliedMigrationDelta.SequenceEqual([resolvedTargetMigration], StringComparer.Ordinal)", migrationRunner, StringComparison.Ordinal);
         Assert.Contains("GetAppliedMigrationsAsync", migrationRunner, StringComparison.Ordinal);
-        Assert.Contains("Named SQL migration was not applied", migrationRunner, StringComparison.Ordinal);
+        Assert.DoesNotContain("appliedMigrations.Contains(targetMigration", migrationRunner, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()

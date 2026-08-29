@@ -593,8 +593,15 @@ jobs:
 
           EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --args "--migration" "$MIGRATION" --query name --output tsv)
           [[ -n "$EXECUTION" ]] || { echo "Migration Job did not return an execution name." >&2; exit 1; }
-          EXECUTION_MIGRATION=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].args[1]' --output tsv)
-          [[ "$EXECUTION_MIGRATION" == "$MIGRATION" ]] || { echo "Migration execution did not receive the manifest's named migration." >&2; exit 1; }
+          EXECUTION_ARGS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].args' --output json)
+          python3 - "$MIGRATION" "$EXECUTION_ARGS" <<'PY'
+          import json
+          import sys
+
+          expected = ["--migration", sys.argv[1]]
+          if json.loads(sys.argv[2]) != expected:
+              raise SystemExit("Migration execution did not receive exactly the manifest's named migration arguments.")
+          PY
           for _ in {1..30}; do
             STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query properties.status --output tsv)
             [[ "$STATUS" == Succeeded ]] && break

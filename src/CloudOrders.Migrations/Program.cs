@@ -37,11 +37,37 @@ try
     }
     else
     {
-        await context.GetService<IMigrator>().MigrateAsync(targetMigration);
-        var appliedMigrations = await context.Database.GetAppliedMigrationsAsync();
-        if (!appliedMigrations.Contains(targetMigration, StringComparer.Ordinal))
+        var resolvedTargetMigration = FindMigrationId(targetMigration);
+        var appliedMigrationsBefore = (await context.Database.GetAppliedMigrationsAsync()).ToArray();
+        var pendingMigrations = (await context.Database.GetPendingMigrationsAsync()).ToArray();
+        if (!pendingMigrations.SequenceEqual([resolvedTargetMigration], StringComparer.Ordinal))
         {
-            throw new InvalidOperationException($"Named SQL migration was not applied: {targetMigration}.");
+            throw new InvalidOperationException(
+                "Named SQL migration must be the only pending migration before a migration-only release.");
+        }
+
+        await context.GetService<IMigrator>().MigrateAsync(resolvedTargetMigration);
+
+        var appliedMigrationsAfter = (await context.Database.GetAppliedMigrationsAsync()).ToArray();
+        var appliedMigrationDelta = appliedMigrationsAfter
+            .Except(appliedMigrationsBefore, StringComparer.Ordinal)
+            .ToArray();
+        if (!appliedMigrationDelta.SequenceEqual([resolvedTargetMigration], StringComparer.Ordinal))
+        {
+            throw new InvalidOperationException("Migration-only release applied an unexpected migration delta.");
+        }
+
+        string FindMigrationId(string migrationSelector)
+        {
+            var matchingMigrationIds = context.Database.GetMigrations()
+                .Where(migrationId =>
+                    string.Equals(migrationId, migrationSelector, StringComparison.Ordinal) ||
+                    migrationId.EndsWith($"_{migrationSelector}", StringComparison.Ordinal))
+                .ToArray();
+
+            return matchingMigrationIds.Length == 1
+                ? matchingMigrationIds[0]
+                : throw new InvalidOperationException("Migration selector must resolve to exactly one known migration.");
         }
     }
 
