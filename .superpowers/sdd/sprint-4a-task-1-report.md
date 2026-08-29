@@ -101,3 +101,39 @@ Result: passed 14 of 14.
 
 - `actionlint` is not installed locally; run it in CI or an environment that provides it.
 - Re-run the full solution build/test after the external IntegrationTests `testhost` process exits. Docker remains required for the Testcontainers integration suite.
+
+## Deferred-manifest remediation
+
+### Findings fixed
+
+- Removed the premature E1 manifest. The deployment capability remains dormant until Task 3 creates `AddCustomerProfileOwnershipExpand` and its exact two-property manifest in the same commit.
+- Updated the Task 1/Task 3 inventory and Task 1 workflow description so the migration and manifest have one owner and D1 removes the manifest.
+- The E1 workflow now reads the started Job execution's complete container argument array and requires it to be exactly `["--migration", "AddCustomerProfileOwnershipExpand"]` (via the validated manifest output).
+- The migration runner resolves the selector to exactly one known EF migration, rejects any state where that migration is not the sole pending migration, then proves the before/after applied-migration delta contains exactly that migration.
+- The prior actor/target idempotency contract remediation remains unchanged.
+
+### TDD and verification evidence
+
+Red command:
+
+```powershell
+dotnet test tests\CloudOrders.ArchitectureTests\CloudOrders.ArchitectureTests.csproj --configuration Release --no-restore
+```
+
+Result: failed 3 of 15 as expected: Task 1 still owned the manifest, the manifest existed before the E1 migration, and the workflow checked only the second container argument.
+
+Green commands:
+
+```powershell
+dotnet test tests\CloudOrders.ArchitectureTests\CloudOrders.ArchitectureTests.csproj --configuration Release --no-restore
+dotnet build src\CloudOrders.Migrations\CloudOrders.Migrations.csproj --configuration Release --no-restore
+dotnet format CloudOrders.slnx --verify-no-changes --no-restore
+git diff --check
+```
+
+Result: architecture tests passed 15 of 15; the migration runner build passed with 0 warnings and 0 errors; format and diff checks passed.
+
+### Remaining concerns
+
+- No executable E1 migration exists yet, so the manifest deliberately remains absent. The new runner path will become operational only when Task 3 adds both artifacts.
+- `actionlint` remains unavailable locally; CI should validate `.github/workflows/deploy.yml` syntax before any protected deployment.
