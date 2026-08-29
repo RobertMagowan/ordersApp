@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using CloudOrders.Api.Identity;
 using CloudOrders.Application.Identity;
 using CloudOrders.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -72,6 +74,26 @@ public sealed class CustomerProfileSqlIntegrationTests(SqlServerFixture sqlServe
 
         Assert.Null(created.ContactEmail);
         Assert.Null(resolved.ContactEmail);
+    }
+
+    [Fact]
+    public async Task EmailVerifiedFalseFlowsThroughSubjectReaderAndStoresNoContactEmail()
+    {
+        await using var database = await sqlServer.CreateDatabaseAsync();
+        var profiles = CreateStore(database.ConnectionString, new SequenceReferenceGenerator("CUS-00000000000000000000000000000006"));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim("iss", "https://issuer.example/v2.0"),
+            new Claim("oid", Guid.NewGuid().ToString("D")),
+            new Claim("email", "customer@example.test"),
+            new Claim("email_verified", "false")
+        ], "Bearer"));
+
+        Assert.True(AuthenticatedSubjectReader.TryRead(principal, out var subject));
+
+        var profile = await profiles.GetOrCreateAsync(subject, CancellationToken.None);
+
+        Assert.Null(profile.ContactEmail);
     }
 
     private static SqlCustomerProfileStore CreateStore(string connectionString, ICustomerReferenceGenerator generator)
