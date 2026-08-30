@@ -46,7 +46,8 @@ public sealed class JwtBearerAuthenticationTests : IDisposable
         using var response = await client.GetAsync($"/api/v1/orders/{Guid.NewGuid()}");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.Contains("invalid_token", response.Headers.WwwAuthenticate.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Bearer", response.Headers.WwwAuthenticate.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("error_description", response.Headers.WwwAuthenticate.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -64,7 +65,8 @@ public sealed class JwtBearerAuthenticationTests : IDisposable
         using var response = await client.GetAsync($"/api/v1/orders/{Guid.NewGuid()}");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.Contains("invalid_token", response.Headers.WwwAuthenticate.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Bearer", response.Headers.WwwAuthenticate.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("error_description", response.Headers.WwwAuthenticate.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -81,7 +83,7 @@ public sealed class JwtBearerAuthenticationTests : IDisposable
         using var response = await client.GetAsync($"/api/v1/orders/{Guid.NewGuid()}");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.Contains("invalid_token", response.Headers.WwwAuthenticate.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Bearer", response.Headers.WwwAuthenticate.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -93,7 +95,7 @@ public sealed class JwtBearerAuthenticationTests : IDisposable
         using var response = await client.GetAsync($"/api/v1/orders/{Guid.NewGuid()}");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.Contains("invalid_token", response.Headers.WwwAuthenticate.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Bearer", response.Headers.WwwAuthenticate.ToString(), StringComparison.Ordinal);
     }
 
     [Theory]

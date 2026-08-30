@@ -42,6 +42,7 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
         var identity = externalIdentity.Value;
         options.Authority = identity.Authority;
         options.RequireHttpsMetadata = true;
+        options.IncludeErrorDetails = false;
         options.MapInboundClaims = false;
         options.TokenValidationParameters = new TokenValidationParameters
         {
@@ -73,6 +74,9 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
     });
 builder.Services.AddAuthorization(options =>
 {
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
     options.AddPolicy("OrdersRead", policy => policy.RequireAuthenticatedUser().RequireAssertion(context =>
         HasScope(context.User, CloudOrdersPermissions.ReadScope) && HasOnlyKnownRoles(context.User)));
     options.AddPolicy("OrdersWrite", policy => policy.RequireAuthenticatedUser().RequireAssertion(context =>
@@ -106,7 +110,8 @@ var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.MapOpenApi()
+        .RequireAuthorization();
 }
 
 app.UseHttpsRedirection();
@@ -144,14 +149,16 @@ app.UseStatusCodePages(async statusCodeContext =>
 
 app.MapGet("/health/live", () => TypedResults.Ok(new { status = "ok" }))
     .WithName("LiveHealth")
-    .WithTags("Health");
+    .WithTags("Health")
+    .AllowAnonymous();
 
 app.MapHealthChecks("/health/ready", new HealthCheckOptions
 {
     Predicate = registration => registration.Tags.Contains("ready")
 })
     .WithName("ReadyHealth")
-    .WithTags("Health");
+    .WithTags("Health")
+    .AllowAnonymous();
 
 app.MapPost("/api/v1/orders", async (
         CreateOrderRequest request,

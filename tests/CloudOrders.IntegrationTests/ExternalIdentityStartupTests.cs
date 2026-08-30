@@ -12,10 +12,7 @@ public sealed class ExternalIdentityStartupTests
     public void StartupFailsForMissingExternalIdentityConfiguration(string environment)
     {
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
-        {
-            builder.UseEnvironment(environment);
-            builder.UseSetting("ExternalIdentity:Authority", "");
-        });
+            builder.UseEnvironment(environment));
 
         var exception = Assert.ThrowsAny<Exception>(() => factory.CreateClient());
 
