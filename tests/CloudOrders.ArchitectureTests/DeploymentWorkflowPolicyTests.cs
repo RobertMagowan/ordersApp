@@ -264,6 +264,9 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("--migration", migrationRunner, StringComparison.Ordinal);
         Assert.Contains("FindMigrationId(targetMigration)", migrationRunner, StringComparison.Ordinal);
         Assert.Contains("GetPendingMigrationsAsync", migrationRunner, StringComparison.Ordinal);
+        Assert.Contains("targetIsAlreadyApplied", migrationRunner, StringComparison.Ordinal);
+        Assert.Contains("Named SQL migration was already applied, but one or more later migrations are pending.", migrationRunner, StringComparison.Ordinal);
+        Assert.Contains("if (targetIsAlreadyApplied)", migrationRunner, StringComparison.Ordinal);
         Assert.Contains("pendingMigrations.SequenceEqual([resolvedTargetMigration], StringComparer.Ordinal)", migrationRunner, StringComparison.Ordinal);
         Assert.Contains("appliedMigrationsBefore", migrationRunner, StringComparison.Ordinal);
         Assert.Contains("MigrateAsync(resolvedTargetMigration)", migrationRunner, StringComparison.Ordinal);
@@ -272,6 +275,29 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("appliedMigrationDelta.SequenceEqual([resolvedTargetMigration], StringComparer.Ordinal)", migrationRunner, StringComparison.Ordinal);
         Assert.Contains("GetAppliedMigrationsAsync", migrationRunner, StringComparison.Ordinal);
         Assert.DoesNotContain("appliedMigrations.Contains(targetMigration", migrationRunner, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Sprint4AE1WorkflowRunsTheNamedMigrationFromTheCurrentImmutableRunnerImage()
+    {
+        var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml"));
+        var e1JobStart = workflow.IndexOf("  run_sprint_4a_e1_migration_only:", StringComparison.Ordinal);
+        var deployReleaseStart = workflow.IndexOf("  deploy_release:", StringComparison.Ordinal);
+
+        Assert.True(e1JobStart >= 0 && deployReleaseStart > e1JobStart, "Expected a bounded E1 migration-only job.");
+        var e1Job = workflow[e1JobStart..deployReleaseStart];
+
+        Assert.Contains("name: Check out E1 migration source", e1Job, StringComparison.Ordinal);
+        Assert.Contains("id: e1_migration_image", e1Job, StringComparison.Ordinal);
+        Assert.Contains("docker build --file src/CloudOrders.Migrations/Dockerfile --tag \"$IMAGE_TAG\" .", e1Job, StringComparison.Ordinal);
+        Assert.Contains("docker push \"$IMAGE_TAG\"", e1Job, StringComparison.Ordinal);
+        Assert.Contains("image=$LOGIN_SERVER/cloudorders-migrations@$DIGEST", e1Job, StringComparison.Ordinal);
+        Assert.Contains("MIGRATION_IMAGE: ${{ steps.e1_migration_image.outputs.image }}", e1Job, StringComparison.Ordinal);
+        Assert.Contains("--image \"$MIGRATION_IMAGE\" --args \"--migration\" \"$MIGRATION\"", e1Job, StringComparison.Ordinal);
+        Assert.Contains("EXECUTION_IMAGE=$(az containerapp job execution show", e1Job, StringComparison.Ordinal);
+        Assert.Contains("if sys.argv[3] != sys.argv[4]:", e1Job, StringComparison.Ordinal);
+        Assert.Contains("Migration execution did not use the current immutable migration image.", e1Job, StringComparison.Ordinal);
+        Assert.DoesNotContain("docker build --file src/CloudOrders.Api/Dockerfile", e1Job, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()

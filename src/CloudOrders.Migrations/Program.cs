@@ -40,21 +40,33 @@ try
         var resolvedTargetMigration = FindMigrationId(targetMigration);
         var appliedMigrationsBefore = (await context.Database.GetAppliedMigrationsAsync()).ToArray();
         var pendingMigrations = (await context.Database.GetPendingMigrationsAsync()).ToArray();
-        if (!pendingMigrations.SequenceEqual([resolvedTargetMigration], StringComparer.Ordinal))
+        var targetIsAlreadyApplied = appliedMigrationsBefore.Contains(resolvedTargetMigration, StringComparer.Ordinal);
+        if (targetIsAlreadyApplied)
         {
-            throw new InvalidOperationException(
-                "Named SQL migration must be the only pending migration before a migration-only release.");
+            if (pendingMigrations.Length > 0)
+            {
+                throw new InvalidOperationException(
+                    "Named SQL migration was already applied, but one or more later migrations are pending.");
+            }
         }
-
-        await context.GetService<IMigrator>().MigrateAsync(resolvedTargetMigration);
-
-        var appliedMigrationsAfter = (await context.Database.GetAppliedMigrationsAsync()).ToArray();
-        var appliedMigrationDelta = appliedMigrationsAfter
-            .Except(appliedMigrationsBefore, StringComparer.Ordinal)
-            .ToArray();
-        if (!appliedMigrationDelta.SequenceEqual([resolvedTargetMigration], StringComparer.Ordinal))
+        else
         {
-            throw new InvalidOperationException("Migration-only release applied an unexpected migration delta.");
+            if (!pendingMigrations.SequenceEqual([resolvedTargetMigration], StringComparer.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Named SQL migration must be the only pending migration before a migration-only release.");
+            }
+
+            await context.GetService<IMigrator>().MigrateAsync(resolvedTargetMigration);
+
+            var appliedMigrationsAfter = (await context.Database.GetAppliedMigrationsAsync()).ToArray();
+            var appliedMigrationDelta = appliedMigrationsAfter
+                .Except(appliedMigrationsBefore, StringComparer.Ordinal)
+                .ToArray();
+            if (!appliedMigrationDelta.SequenceEqual([resolvedTargetMigration], StringComparer.Ordinal))
+            {
+                throw new InvalidOperationException("Migration-only release applied an unexpected migration delta.");
+            }
         }
 
         string FindMigrationId(string migrationSelector)

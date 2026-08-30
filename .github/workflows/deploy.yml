@@ -567,17 +567,36 @@ jobs:
     env:
       AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
       AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
+      AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
       DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name }}
       MIGRATION: ${{ needs.validate_promotion_ref.outputs.migration }}
     steps:
+      - name: Check out E1 migration source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Sign in to Azure with OIDC
         uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Build and publish immutable E1 migration image
+        id: e1_migration_image
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOGIN_SERVER=$(az acr show --name "$AZURE_ACR_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query loginServer --output tsv)
+          [[ -n "$LOGIN_SERVER" ]] || { echo "Could not resolve the Azure Container Registry login server." >&2; exit 1; }
+          az acr login --name "$AZURE_ACR_NAME"
+          IMAGE_TAG="$LOGIN_SERVER/cloudorders-migrations:${GITHUB_SHA}"
+          docker build --file src/CloudOrders.Migrations/Dockerfile --tag "$IMAGE_TAG" .
+          docker push "$IMAGE_TAG"
+          DIGEST=$(az acr repository show --name "$AZURE_ACR_NAME" --image "cloudorders-migrations:${GITHUB_SHA}" --query digest --output tsv)
+          [[ -n "$DIGEST" ]] || { echo "Could not resolve the pushed E1 migration image digest." >&2; exit 1; }
+          echo "image=$LOGIN_SERVER/cloudorders-migrations@$DIGEST" >> "$GITHUB_OUTPUT"
       - name: Start and verify only the named E1 migration execution
         shell: bash
+        env:
+          MIGRATION_IMAGE: ${{ steps.e1_migration_image.outputs.image }}
         run: |
           set -euo pipefail
           case "$DEPLOYMENT_ENVIRONMENT" in
@@ -591,16 +610,19 @@ jobs:
           BEFORE_DIGEST=$(az containerapp revision show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision "$BEFORE_REVISION" --query properties.template.containers[0].image --output tsv)
           [[ -n "$BEFORE_REVISION" && -n "$BEFORE_DIGEST" ]] || { echo "Migration-only release requires an active API revision and digest." >&2; exit 1; }
 
-          EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --args "--migration" "$MIGRATION" --query name --output tsv)
+          EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --image "$MIGRATION_IMAGE" --args "--migration" "$MIGRATION" --query name --output tsv)
           [[ -n "$EXECUTION" ]] || { echo "Migration Job did not return an execution name." >&2; exit 1; }
           EXECUTION_ARGS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].args' --output json)
-          python3 - "$MIGRATION" "$EXECUTION_ARGS" <<'PY'
+          EXECUTION_IMAGE=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].image' --output tsv)
+          python3 - "$MIGRATION" "$EXECUTION_ARGS" "$EXECUTION_IMAGE" "$MIGRATION_IMAGE" <<'PY'
           import json
           import sys
 
           expected = ["--migration", sys.argv[1]]
           if json.loads(sys.argv[2]) != expected:
               raise SystemExit("Migration execution did not receive exactly the manifest's named migration arguments.")
+          if sys.argv[3] != sys.argv[4]:
+              raise SystemExit("Migration execution did not use the current immutable migration image.")
           PY
           for _ in {1..30}; do
             STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query properties.status --output tsv)
