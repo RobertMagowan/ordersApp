@@ -11,7 +11,9 @@ using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 
 namespace CloudOrders.IntegrationTests;
 
-internal sealed class JwtBearerWebApplicationFactory(SignedJwtFactory tokens) : WebApplicationFactory<Program>
+internal sealed class JwtBearerWebApplicationFactory(
+    SignedJwtFactory tokens,
+    string? allowedClientId = null) : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -20,7 +22,7 @@ internal sealed class JwtBearerWebApplicationFactory(SignedJwtFactory tokens) : 
         builder.UseSetting("ExternalIdentity:ValidIssuer", SignedJwtFactory.Issuer);
         builder.UseSetting("ExternalIdentity:TenantId", SignedJwtFactory.TenantId);
         builder.UseSetting("ExternalIdentity:Audience", SignedJwtFactory.Audience);
-        builder.UseSetting("ExternalIdentity:AllowedClientIds:0", SignedJwtFactory.ClientId);
+        builder.UseSetting("ExternalIdentity:AllowedClientIds:0", allowedClientId ?? SignedJwtFactory.ClientId);
         builder.ConfigureTestServices(services =>
         {
             services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>

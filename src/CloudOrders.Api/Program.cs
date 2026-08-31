@@ -271,7 +271,10 @@ static bool HasSingleExactClaim(System.Security.Claims.ClaimsPrincipal principal
 
 static bool HasSingleAllowedClient(System.Security.Claims.ClaimsPrincipal principal, IEnumerable<string> allowedClientIds) =>
     principal.FindAll("azp").Select(claim => claim.Value).ToArray() is [var clientId]
-    && allowedClientIds.Contains(clientId, StringComparer.Ordinal);
+    && Guid.TryParseExact(clientId, "D", out var parsedClientId)
+    && allowedClientIds.Any(allowedClientId =>
+        Guid.TryParseExact(allowedClientId, "D", out var parsedAllowedClientId)
+        && parsedAllowedClientId == parsedClientId);
 
 static bool HasDelegatedScope(System.Security.Claims.ClaimsPrincipal principal) =>
     principal.FindAll("scp").Select(claim => claim.Value).Any(value => !string.IsNullOrWhiteSpace(value));

@@ -21,6 +21,21 @@ public sealed class JwtBearerAuthenticationTests : IDisposable
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Fact]
+    public async Task AllowedClientIdComparisonIgnoresGuidCasing()
+    {
+        const string clientId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        using var caseVariantFactory = new JwtBearerWebApplicationFactory(tokens, clientId.ToUpperInvariant());
+        using var client = caseVariantFactory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            tokens.CreateToken(oid: Guid.NewGuid().ToString(), clientId: clientId));
+
+        using var response = await client.GetAsync($"/api/v1/orders/{Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("bad")]
