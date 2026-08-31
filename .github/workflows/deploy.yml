@@ -100,6 +100,12 @@ jobs:
       AZURE_SQL_ADMIN_LOGIN: ${{ vars.AZURE_SQL_ADMIN_LOGIN }}
       AZURE_SQL_ADMIN_OBJECT_ID: ${{ vars.AZURE_SQL_ADMIN_OBJECT_ID }}
       AZURE_SQL_ADMIN_TENANT_ID: ${{ vars.AZURE_SQL_ADMIN_TENANT_ID }}
+      EXTERNAL_IDENTITY_ENABLED: ${{ vars.EXTERNAL_IDENTITY_ENABLED }}
+      EXTERNAL_IDENTITY_AUTHORITY: ${{ vars.EXTERNAL_IDENTITY_AUTHORITY }}
+      EXTERNAL_IDENTITY_VALID_ISSUER: ${{ vars.EXTERNAL_IDENTITY_VALID_ISSUER }}
+      EXTERNAL_IDENTITY_TENANT_ID: ${{ vars.EXTERNAL_IDENTITY_TENANT_ID }}
+      EXTERNAL_IDENTITY_AUDIENCE: ${{ vars.EXTERNAL_IDENTITY_AUDIENCE }}
+      EXTERNAL_IDENTITY_ALLOWED_CLIENT_IDS: ${{ vars.EXTERNAL_IDENTITY_ALLOWED_CLIENT_IDS }}
       DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
     steps:
       - name: Read deployment state
@@ -155,6 +161,21 @@ jobs:
           az bicep install
           az bicep lint --file infra/main.bicep
           az bicep build --file infra/main.bicep
+
+      - name: Validate nonproduction External ID settings
+        if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXTERNAL_IDENTITY_ENABLED="${EXTERNAL_IDENTITY_ENABLED:-false}"
+          if [[ "$DEPLOYMENT_ENVIRONMENT" == production ]]; then
+            [[ "$EXTERNAL_IDENTITY_ENABLED" != true ]] || { echo "External ID is not enabled for production." >&2; exit 1; }
+            exit 0
+          fi
+          [[ "$EXTERNAL_IDENTITY_ENABLED" == true ]] || { echo "External ID must be enabled for nonproduction deployment." >&2; exit 1; }
+          for value in EXTERNAL_IDENTITY_AUTHORITY EXTERNAL_IDENTITY_VALID_ISSUER EXTERNAL_IDENTITY_TENANT_ID EXTERNAL_IDENTITY_AUDIENCE EXTERNAL_IDENTITY_ALLOWED_CLIENT_IDS; do
+            [[ -n "${!value}" ]] || { echo "Missing required External ID setting: $value" >&2; exit 1; }
+          done
 
       - name: Inspect existing release
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
@@ -221,6 +242,12 @@ jobs:
               useAcr=false \
               createAcrPullRole=false \
               containerImage='mcr.microsoft.com/k8se/quickstart:latest' \
+              externalIdentityEnabled="${EXTERNAL_IDENTITY_ENABLED:-false}" \
+              externalIdentityAuthority="$EXTERNAL_IDENTITY_AUTHORITY" \
+              externalIdentityValidIssuer="$EXTERNAL_IDENTITY_VALID_ISSUER" \
+              externalIdentityTenantId="$EXTERNAL_IDENTITY_TENANT_ID" \
+              externalIdentityAudience="$EXTERNAL_IDENTITY_AUDIENCE" \
+              externalIdentityAllowedClientIds="$EXTERNAL_IDENTITY_ALLOWED_CLIENT_IDS" \
             --mode Incremental \
             --result-format FullResourcePayloads
 
@@ -268,6 +295,12 @@ jobs:
       AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
       AZURE_MANAGED_ENVIRONMENT_NAME: ${{ vars.AZURE_MANAGED_ENVIRONMENT_NAME }}
       AZURE_LOG_ANALYTICS_NAME: ${{ vars.AZURE_LOG_ANALYTICS_NAME }}
+      EXTERNAL_IDENTITY_ENABLED: ${{ vars.EXTERNAL_IDENTITY_ENABLED }}
+      EXTERNAL_IDENTITY_AUTHORITY: ${{ vars.EXTERNAL_IDENTITY_AUTHORITY }}
+      EXTERNAL_IDENTITY_VALID_ISSUER: ${{ vars.EXTERNAL_IDENTITY_VALID_ISSUER }}
+      EXTERNAL_IDENTITY_TENANT_ID: ${{ vars.EXTERNAL_IDENTITY_TENANT_ID }}
+      EXTERNAL_IDENTITY_AUDIENCE: ${{ vars.EXTERNAL_IDENTITY_AUDIENCE }}
+      EXTERNAL_IDENTITY_ALLOWED_CLIENT_IDS: ${{ vars.EXTERNAL_IDENTITY_ALLOWED_CLIENT_IDS }}
       DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
       DEPLOYMENT_NAME: cloudorders-${{ github.ref_name == 'master' && 'production' || github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
@@ -293,6 +326,20 @@ jobs:
       - name: Install Bicep
         run: az bicep install
 
+      - name: Validate nonproduction External ID settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXTERNAL_IDENTITY_ENABLED="${EXTERNAL_IDENTITY_ENABLED:-false}"
+          if [[ "$DEPLOYMENT_ENVIRONMENT" == production ]]; then
+            [[ "$EXTERNAL_IDENTITY_ENABLED" != true ]] || { echo "External ID is not enabled for production." >&2; exit 1; }
+            exit 0
+          fi
+          [[ "$EXTERNAL_IDENTITY_ENABLED" == true ]] || { echo "External ID must be enabled for nonproduction deployment." >&2; exit 1; }
+          for value in EXTERNAL_IDENTITY_AUTHORITY EXTERNAL_IDENTITY_VALID_ISSUER EXTERNAL_IDENTITY_TENANT_ID EXTERNAL_IDENTITY_AUDIENCE EXTERNAL_IDENTITY_ALLOWED_CLIENT_IDS; do
+            [[ -n "${!value}" ]] || { echo "Missing required External ID setting: $value" >&2; exit 1; }
+          done
+
       - name: Provision MVP foundation with public bootstrap image
         if: needs.preview_foundation.outputs.exists != 'true'
         run: |
@@ -314,6 +361,12 @@ jobs:
               useAcr=false \
               createAcrPullRole=false \
               containerImage='mcr.microsoft.com/k8se/quickstart:latest' \
+              externalIdentityEnabled="${EXTERNAL_IDENTITY_ENABLED:-false}" \
+              externalIdentityAuthority="$EXTERNAL_IDENTITY_AUTHORITY" \
+              externalIdentityValidIssuer="$EXTERNAL_IDENTITY_VALID_ISSUER" \
+              externalIdentityTenantId="$EXTERNAL_IDENTITY_TENANT_ID" \
+              externalIdentityAudience="$EXTERNAL_IDENTITY_AUDIENCE" \
+              externalIdentityAllowedClientIds="$EXTERNAL_IDENTITY_ALLOWED_CLIENT_IDS" \
             --mode Incremental
 
       - name: Build and publish immutable API image
@@ -389,6 +442,12 @@ jobs:
               createAcrPullRole=false \
               containerImage="$IMAGE" \
               deployMigrationJob=false \
+              externalIdentityEnabled="${EXTERNAL_IDENTITY_ENABLED:-false}" \
+              externalIdentityAuthority="$EXTERNAL_IDENTITY_AUTHORITY" \
+              externalIdentityValidIssuer="$EXTERNAL_IDENTITY_VALID_ISSUER" \
+              externalIdentityTenantId="$EXTERNAL_IDENTITY_TENANT_ID" \
+              externalIdentityAudience="$EXTERNAL_IDENTITY_AUDIENCE" \
+              externalIdentityAllowedClientIds="$EXTERNAL_IDENTITY_ALLOWED_CLIENT_IDS" \
             --mode Incremental \
             --result-format FullResourcePayloads
 
@@ -660,6 +719,12 @@ jobs:
       AZURE_SQL_ADMIN_LOGIN: ${{ vars.AZURE_SQL_ADMIN_LOGIN }}
       AZURE_SQL_ADMIN_OBJECT_ID: ${{ vars.AZURE_SQL_ADMIN_OBJECT_ID }}
       AZURE_SQL_ADMIN_TENANT_ID: ${{ vars.AZURE_SQL_ADMIN_TENANT_ID }}
+      EXTERNAL_IDENTITY_ENABLED: ${{ vars.EXTERNAL_IDENTITY_ENABLED }}
+      EXTERNAL_IDENTITY_AUTHORITY: ${{ vars.EXTERNAL_IDENTITY_AUTHORITY }}
+      EXTERNAL_IDENTITY_VALID_ISSUER: ${{ vars.EXTERNAL_IDENTITY_VALID_ISSUER }}
+      EXTERNAL_IDENTITY_TENANT_ID: ${{ vars.EXTERNAL_IDENTITY_TENANT_ID }}
+      EXTERNAL_IDENTITY_AUDIENCE: ${{ vars.EXTERNAL_IDENTITY_AUDIENCE }}
+      EXTERNAL_IDENTITY_ALLOWED_CLIENT_IDS: ${{ vars.EXTERNAL_IDENTITY_ALLOWED_CLIENT_IDS }}
       DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
       DEPLOYMENT_NAME: cloudorders-${{ github.ref_name == 'master' && 'production' || github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
@@ -675,6 +740,20 @@ jobs:
 
       - name: Install Bicep
         run: az bicep install
+
+      - name: Validate nonproduction External ID settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXTERNAL_IDENTITY_ENABLED="${EXTERNAL_IDENTITY_ENABLED:-false}"
+          if [[ "$DEPLOYMENT_ENVIRONMENT" == production ]]; then
+            [[ "$EXTERNAL_IDENTITY_ENABLED" != true ]] || { echo "External ID is not enabled for production." >&2; exit 1; }
+            exit 0
+          fi
+          [[ "$EXTERNAL_IDENTITY_ENABLED" == true ]] || { echo "External ID must be enabled for nonproduction deployment." >&2; exit 1; }
+          for value in EXTERNAL_IDENTITY_AUTHORITY EXTERNAL_IDENTITY_VALID_ISSUER EXTERNAL_IDENTITY_TENANT_ID EXTERNAL_IDENTITY_AUDIENCE EXTERNAL_IDENTITY_ALLOWED_CLIENT_IDS; do
+            [[ -n "${!value}" ]] || { echo "Missing required External ID setting: $value" >&2; exit 1; }
+          done
 
       - name: Deploy immutable image after preview
         env:
@@ -707,6 +786,12 @@ jobs:
               sqlAdministratorLogin="$AZURE_SQL_ADMIN_LOGIN" \
               sqlAdministratorObjectId="$AZURE_SQL_ADMIN_OBJECT_ID" \
               sqlAdministratorTenantId="$AZURE_SQL_ADMIN_TENANT_ID" \
+              externalIdentityEnabled="${EXTERNAL_IDENTITY_ENABLED:-false}" \
+              externalIdentityAuthority="$EXTERNAL_IDENTITY_AUTHORITY" \
+              externalIdentityValidIssuer="$EXTERNAL_IDENTITY_VALID_ISSUER" \
+              externalIdentityTenantId="$EXTERNAL_IDENTITY_TENANT_ID" \
+              externalIdentityAudience="$EXTERNAL_IDENTITY_AUDIENCE" \
+              externalIdentityAllowedClientIds="$EXTERNAL_IDENTITY_ALLOWED_CLIENT_IDS" \
             --mode Incremental
 
       - name: Wait for candidate revision

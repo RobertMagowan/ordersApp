@@ -49,3 +49,5 @@ Use imperative Conventional Commit-style subjects, for example `feat: add transa
 ## Security and Decision Gates
 
 Never commit secrets, `.env`, `local.settings.json`, auth storage state, generated ARM JSON, or real customer data. Use managed identities and least-privilege roles in Azure. The deployment workflow authenticates with GitHub OIDC; configure Azure values as GitHub environment variables/secrets, never in Bicep parameter files. Prompt the user before choosing GitHub ownership/visibility, Azure tenant/subscription/region, Entra registrations, production domains, alert owners, budgets, or production deployment approval.
+
+For Sprint 4 External ID, put non-secret identity identifiers only in protected `development` and `test` GitHub environment variables. Never place their values in parameter files, repository documentation, source defaults, logs, or deployment summaries. The production parameter overlay keeps External ID disabled; enabling it is a Bicep failure. Do not add cursor keys, cursor configuration, or cursor runbooks until Sprint 4B.

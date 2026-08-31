@@ -10,3 +10,4 @@ param containerImage = 'mcr.microsoft.com/k8se/quickstart:latest'
 param useAcr = false
 param createAcrPullRole = false
 param deploySql = false
+param externalIdentityEnabled = false

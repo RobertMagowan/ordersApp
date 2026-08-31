@@ -16,6 +16,8 @@ Sprint 3 adds a non-production Azure SQL gate: development and test build immuta
 
 The `development` and `test` GitHub environments each require the repository owner as a required deployment reviewer, permit self-review for this single-developer repository, and disallow administrator bypass. This is an enforceable deployment approval and does not add an independent PR approval requirement. Every job below references the protected environment and waits for its own approval before it can access environment secrets or start.
 
+Sprint 4 External ID runtime configuration is supplied only by the protected `development` and `test` GitHub environments. Set `EXTERNAL_IDENTITY_ENABLED=true` plus the Authority, ValidIssuer, tenant, audience, and allowed-client-ID environment variables there; do not add their values to Bicep parameter files, repository documentation, or production. The workflow validates these prerequisites by name without printing their values, and Bicep rejects an enabled External ID configuration for production.
+
 The workflow uses three ordered jobs as explicit reviewed boundaries:
 
 1. Approve `preview_foundation` so it can authenticate with OIDC. It fails closed on lookup errors other than Azure's explicit `ResourceNotFound`, captures the latest ready rollback revision/image, and runs the mutation-free foundation what-if.

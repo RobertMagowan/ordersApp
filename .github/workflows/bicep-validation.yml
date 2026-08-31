@@ -36,6 +36,27 @@ jobs:
             az bicep build-params --file "$file"
           done
 
+      - name: Reject identity identifiers in parameter overlays
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib
+          import re
+
+          files = [
+              pathlib.Path("infra/environments/development.bicepparam"),
+              pathlib.Path("infra/environments/test.bicepparam"),
+              pathlib.Path("infra/environments/production.bicepparam"),
+          ]
+          identifier = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.IGNORECASE)
+          prohibited = ("ciamlogin.com", "externalIdentityAuthority", "externalIdentityValidIssuer", "externalIdentityTenantId", "externalIdentityAudience", "externalIdentityAllowedClientIds", "cursor")
+          for path in files:
+              contents = path.read_text(encoding="utf-8")
+              if identifier.search(contents) or any(value.lower() in contents.lower() for value in prohibited):
+                  raise SystemExit(f"Identity identifiers or cursor material must not be committed to {path}.")
+          PY
+
       - name: Remove generated build output
         if: always()
         shell: bash
