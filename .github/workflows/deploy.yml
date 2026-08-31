@@ -249,7 +249,7 @@ jobs:
               externalIdentityAudience="$EXTERNAL_IDENTITY_AUDIENCE" \
               externalIdentityAllowedClientIds="$EXTERNAL_IDENTITY_ALLOWED_CLIENT_IDS" \
             --mode Incremental \
-            --result-format FullResourcePayloads
+            --result-format ResourceIdOnly
 
       - name: Publish foundation preview summary
         if: always() && env.AZURE_DEPLOYMENT_ENABLED == 'true'
@@ -449,7 +449,7 @@ jobs:
               externalIdentityAudience="$EXTERNAL_IDENTITY_AUDIENCE" \
               externalIdentityAllowedClientIds="$EXTERNAL_IDENTITY_ALLOWED_CLIENT_IDS" \
             --mode Incremental \
-            --result-format FullResourcePayloads
+            --result-format ResourceIdOnly
 
       - name: Publish immutable release preview summary
         if: always()
@@ -513,7 +513,7 @@ jobs:
           for value in AZURE_SQL_ADMIN_LOGIN AZURE_SQL_ADMIN_OBJECT_ID AZURE_SQL_ADMIN_TENANT_ID; do
             [[ -n "${!value}" ]] || { echo "Missing required SQL setting: $value" >&2; exit 1; }
           done
-          az deployment group what-if --resource-group "$AZURE_RESOURCE_GROUP" --template-file infra/main.bicep --parameters "infra/environments/$DEPLOYMENT_ENVIRONMENT.bicepparam" location="$AZURE_LOCATION" environmentName="$DEPLOYMENT_ENVIRONMENT" releaseId="$GITHUB_SHA" appName="$AZURE_APP_NAME" acrName="$AZURE_ACR_NAME" managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" logAnalyticsName="$AZURE_LOG_ANALYTICS_NAME" containerImage="$API_IMAGE" migrationImage="$MIGRATION_IMAGE" useAcr=true deploySql=true deployContainerApp=false deployMigrationJob=false sqlAdministratorLogin="$AZURE_SQL_ADMIN_LOGIN" sqlAdministratorObjectId="$AZURE_SQL_ADMIN_OBJECT_ID" sqlAdministratorTenantId="$AZURE_SQL_ADMIN_TENANT_ID" --mode Incremental --result-format FullResourcePayloads
+          az deployment group what-if --resource-group "$AZURE_RESOURCE_GROUP" --template-file infra/main.bicep --parameters "infra/environments/$DEPLOYMENT_ENVIRONMENT.bicepparam" location="$AZURE_LOCATION" environmentName="$DEPLOYMENT_ENVIRONMENT" releaseId="$GITHUB_SHA" appName="$AZURE_APP_NAME" acrName="$AZURE_ACR_NAME" managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" logAnalyticsName="$AZURE_LOG_ANALYTICS_NAME" containerImage="$API_IMAGE" migrationImage="$MIGRATION_IMAGE" useAcr=true deploySql=true deployContainerApp=false deployMigrationJob=false sqlAdministratorLogin="$AZURE_SQL_ADMIN_LOGIN" sqlAdministratorObjectId="$AZURE_SQL_ADMIN_OBJECT_ID" sqlAdministratorTenantId="$AZURE_SQL_ADMIN_TENANT_ID" --mode Incremental --result-format ResourceIdOnly
 
   bootstrap_sql:
     name: Provision ${{ github.ref_name }} Azure SQL

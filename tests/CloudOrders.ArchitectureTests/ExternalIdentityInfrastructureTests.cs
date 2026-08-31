@@ -84,6 +84,27 @@ public sealed class ExternalIdentityInfrastructureTests
     }
 
     [Fact]
+    public void DeploymentWhatIfCommandsAvoidIdentityBearingResourcePayloads()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var workflow = Read(repositoryRoot, ".github", "workflows", "deploy.yml");
+
+        Assert.DoesNotContain("--result-format FullResourcePayloads", workflow, StringComparison.Ordinal);
+        Assert.Equal(3, new Regex("az deployment group what-if", RegexOptions.CultureInvariant).Count(workflow));
+        Assert.Equal(3, new Regex("--result-format ResourceIdOnly", RegexOptions.CultureInvariant).Count(workflow));
+    }
+
+    [Fact]
+    public void ExternalIdSetupRecordsDeferredCursorAccountabilityWithoutAddingCursorMaterial()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var runbook = Read(repositoryRoot, "ops", "runbooks", "external-id-setup.md");
+
+        Assert.Contains("future Sprint 4B cursor-key owner and rotation date", runbook, StringComparison.Ordinal);
+        Assert.Contains("Do not create or commit a cursor key, cursor configuration, or cursor runbook during Sprint 4A.", runbook, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AuthSmokeUsesInteractivePkceAndDoesNotPersistOrExposeTokens()
     {
         var repositoryRoot = FindRepositoryRoot();

@@ -6,7 +6,7 @@ This runbook is a manual control-plane procedure. It must be performed in the ap
 
 ## Ownership record
 
-Before enabling a non-production deployment, the named identity owner records these accountable roles in the protected evidence store: External ID tenant owner and subdomain custodian; two separate emergency Global Administrators; routine Cloud Application Administrator; API application owner; PKCE public-client owner; workforce-federation application and secret owner with expiry; user-flow owner; GitHub environment owner; and data-transition approver. Directory administration and the product `user.admin` assignment are separate capabilities and must not be held or evidenced as the same authorization decision.
+Before enabling a non-production deployment, the named identity owner records these accountable roles in the protected evidence store: External ID tenant owner and subdomain custodian; two separate emergency Global Administrators; routine Cloud Application Administrator; API application owner; PKCE public-client owner; workforce-federation application and secret owner with expiry; user-flow owner; GitHub environment owner; future Sprint 4B cursor-key owner and rotation date; and data-transition approver. Directory administration and the product `user.admin` assignment are separate capabilities and must not be held or evidenced as the same authorization decision. Do not create or commit a cursor key, cursor configuration, or cursor runbook during Sprint 4A.
 
 ## External ID applications and flow
 
