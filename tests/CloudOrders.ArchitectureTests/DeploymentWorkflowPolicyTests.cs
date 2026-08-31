@@ -243,7 +243,7 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("expected = {\"migration\": \"AddCustomerProfileOwnershipExpand\", \"deployApi\": False}", workflow, StringComparison.Ordinal);
         Assert.Contains("if manifest != expected:", workflow, StringComparison.Ordinal);
         Assert.Contains("MIGRATION: ${{ needs.validate_promotion_ref.outputs.migration }}", workflow, StringComparison.Ordinal);
-        Assert.Contains("--args \"--migration\" \"$MIGRATION\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("--yaml \"$EXECUTION_TEMPLATE\"", workflow, StringComparison.Ordinal);
         Assert.Contains("EXECUTION_ARGS=$(az containerapp job execution show", workflow, StringComparison.Ordinal);
         Assert.Contains("expected = [\"--migration\", sys.argv[1]]", workflow, StringComparison.Ordinal);
         Assert.Contains("if json.loads(sys.argv[2]) != expected:", workflow, StringComparison.Ordinal);
@@ -293,7 +293,15 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("docker push \"$IMAGE_TAG\"", e1Job, StringComparison.Ordinal);
         Assert.Contains("image=$LOGIN_SERVER/cloudorders-migrations@$DIGEST", e1Job, StringComparison.Ordinal);
         Assert.Contains("MIGRATION_IMAGE: ${{ steps.e1_migration_image.outputs.image }}", e1Job, StringComparison.Ordinal);
-        Assert.Contains("--image \"$MIGRATION_IMAGE\" --args \"--migration\" \"$MIGRATION\"", e1Job, StringComparison.Ordinal);
+        Assert.Contains("EXECUTION_TEMPLATE=$(mktemp)", e1Job, StringComparison.Ordinal);
+        Assert.Contains("trap 'rm -f \"$EXECUTION_TEMPLATE\"' EXIT", e1Job, StringComparison.Ordinal);
+        Assert.Contains("containers:", e1Job, StringComparison.Ordinal);
+        Assert.Contains("name: migrations", e1Job, StringComparison.Ordinal);
+        Assert.Contains("image: \"$MIGRATION_IMAGE\"", e1Job, StringComparison.Ordinal);
+        Assert.Contains("- \"--migration\"", e1Job, StringComparison.Ordinal);
+        Assert.Contains("- \"$MIGRATION\"", e1Job, StringComparison.Ordinal);
+        Assert.Contains("--yaml \"$EXECUTION_TEMPLATE\"", e1Job, StringComparison.Ordinal);
+        Assert.DoesNotContain("--args \"--migration\" \"$MIGRATION\"", e1Job, StringComparison.Ordinal);
         Assert.Contains("EXECUTION_IMAGE=$(az containerapp job execution show", e1Job, StringComparison.Ordinal);
         Assert.Contains("if sys.argv[3] != sys.argv[4]:", e1Job, StringComparison.Ordinal);
         Assert.Contains("Migration execution did not use the current immutable migration image.", e1Job, StringComparison.Ordinal);
