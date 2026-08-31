@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -7,9 +8,12 @@ using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace CloudOrders.IntegrationTests;
 
-public sealed class ApiTests(WebApplicationFactory<Program> factory)
-    : IClassFixture<WebApplicationFactory<Program>>
+public sealed class ApiTests : IDisposable
 {
+    private readonly SignedJwtFactory tokens = new();
+    private readonly JwtBearerWebApplicationFactory factory;
+
+    public ApiTests() => factory = new JwtBearerWebApplicationFactory(tokens);
     [Fact]
     public async Task LiveHealthEndpointReturnsOkWithoutDatabase()
     {
@@ -34,7 +38,7 @@ public sealed class ApiTests(WebApplicationFactory<Program> factory)
     [Fact]
     public async Task CreateOrderRejectsUnknownJsonMembers()
     {
-        using var client = factory.CreateClient();
+        using var client = CreateAuthenticatedClient();
         using var content = JsonContent.Create(new
         {
             customerReference = "CUST-001",
@@ -55,7 +59,7 @@ public sealed class ApiTests(WebApplicationFactory<Program> factory)
     [InlineData("{\"customerReference\":\"CUST-001\",\"productSku\":null,\"quantity\":1}")]
     public async Task CreateOrderReturnsValidationProblemForMissingOrNullRequiredStrings(string payload)
     {
-        using var client = factory.CreateClient();
+        using var client = CreateAuthenticatedClient();
         using var content = new StringContent(payload, Encoding.UTF8, "application/json");
 
         using var response = await client.PostAsync("/api/v1/orders", content);
@@ -72,7 +76,7 @@ public sealed class ApiTests(WebApplicationFactory<Program> factory)
         string mediaType,
         HttpStatusCode expectedStatus)
     {
-        using var client = factory.CreateClient();
+        using var client = CreateAuthenticatedClient();
         using var content = new StringContent(payload, Encoding.UTF8, mediaType);
 
         using var response = await client.PostAsync("/api/v1/orders", content);
@@ -93,5 +97,20 @@ public sealed class ApiTests(WebApplicationFactory<Program> factory)
         Assert.Equal((int)expectedStatus, root.GetProperty("status").GetInt32());
         Assert.Equal(expectedErrorCode, root.GetProperty("errorCode").GetString());
         Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("traceId").GetString()));
+    }
+
+    public void Dispose()
+    {
+        factory.Dispose();
+        tokens.Dispose();
+    }
+
+    private HttpClient CreateAuthenticatedClient()
+    {
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            tokens.CreateToken(oid: Guid.NewGuid().ToString("D"), scope: "Orders.Read Orders.Write"));
+        return client;
     }
 }

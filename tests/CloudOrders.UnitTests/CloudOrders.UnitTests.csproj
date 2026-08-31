@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\src\CloudOrders.Domain\CloudOrders.Domain.csproj" />
     <ProjectReference Include="..\..\src\CloudOrders.Contracts\CloudOrders.Contracts.csproj" />
     <ProjectReference Include="..\..\src\CloudOrders.Application\CloudOrders.Application.csproj" />
+    <ProjectReference Include="..\..\src\CloudOrders.Api\CloudOrders.Api.csproj" />
   </ItemGroup>
 
 </Project>

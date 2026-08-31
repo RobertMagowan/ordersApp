@@ -24,5 +24,12 @@ internal sealed class OrderEntityConfiguration : IEntityTypeConfiguration<OrderE
         builder.HasIndex(order => new { order.CustomerReference, order.CreatedAt, order.Id })
             .IsDescending(false, true, true)
             .HasDatabaseName("IX_Orders_CustomerReference_CreatedAt_Id");
+        builder.HasOne<CustomerProfileEntity>()
+            .WithMany()
+            .HasForeignKey(order => order.CustomerProfileId)
+            .OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("FK_Orders_CustomerProfiles_CustomerProfileId");
+        builder.HasIndex(order => order.CustomerProfileId)
+            .HasDatabaseName("IX_Orders_CustomerProfileId");
     }
 }

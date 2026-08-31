@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` task-by-task. Tasks use checkbox syntax for tracking.
 
+> **Historical plan — superseded for Sprint 4.** Sprints 2 and 3 are complete. Every Sprint 4 reference below to Entra group-to-customer authorization, legacy role names, or former scope names is historical only and must not be executed. The binding replacement is the verified External ID `CustomerProfile` plan: bare delegated `Orders.Read`/`Orders.Write`, exact `user.admin`, `/me`, `CustomerProfileId`, actor/target idempotency, and safe absent/foreign `404`, in `2026-08-16-cloudorders-sprint-implementation-plan.md`.
+
 **Goal:** Deliver secure promotion/test-environment workflow controls, durable SQL idempotency, and Entra group-to-customer authorization with review, development verification, and Azure test QA evidence.
 
 **Architecture:** Retain the existing minimal API vertical slice while replacing in-memory persistence with EF Core SQL transactions for orders, idempotency records, and outbox messages. Authentication uses Entra bearer tokens; authorization maps configured Entra group object IDs to allowed customer references, with no customer claim trusted from the client.

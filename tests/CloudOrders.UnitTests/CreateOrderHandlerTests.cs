@@ -11,7 +11,6 @@ public sealed class CreateOrderHandlerTests
         var store = new RecordingIdempotentOrderStore();
         var handler = new CreateOrderHandler(
             store,
-            new StubSubjectIdProvider("local-development-subject"),
             TimeProvider.System);
         var idempotencyKey = Guid.NewGuid();
 
@@ -39,7 +38,6 @@ public sealed class CreateOrderHandlerTests
         var store = new RecordingIdempotentOrderStore();
         var handler = new CreateOrderHandler(
             store,
-            new StubSubjectIdProvider("local-development-subject"),
             TimeProvider.System);
 
         var result = await handler.Handle(
@@ -65,8 +63,4 @@ public sealed class CreateOrderHandlerTests
         }
     }
 
-    private sealed class StubSubjectIdProvider(string subjectId) : ISubjectIdProvider
-    {
-        public string SubjectId { get; } = subjectId;
-    }
 }

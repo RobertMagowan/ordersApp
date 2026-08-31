@@ -22,6 +22,23 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
         Assert.Contains(
             "20260816221235_InitialSqlPersistence",
             await context.Database.GetAppliedMigrationsAsync(CancellationToken.None));
+        Assert.Contains(
+            "20260829075044_AddCustomerProfileOwnershipExpand",
+            await context.Database.GetAppliedMigrationsAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task NamedMigrationRunnerSucceedsWhenTheNamedMigrationWasAlreadyAppliedAndNothingElseIsPending()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        var migration = "AddCustomerProfileOwnershipExpand";
+
+        var initialResult = await RunRunnerAsync(database.ConnectionString);
+        var rerunResult = await RunRunnerAsync(database.ConnectionString, migration);
+
+        Assert.Equal(0, initialResult.ExitCode);
+        Assert.Equal(0, rerunResult.ExitCode);
+        Assert.Contains("SQL migrations applied successfully.", rerunResult.StandardOutput, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -43,12 +60,13 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
         Assert.Contains("SQL migration failed:", result.StandardError);
     }
 
-    private static async Task<MigrationRunResult> RunRunnerAsync(string? connectionString)
+    private static async Task<MigrationRunResult> RunRunnerAsync(string? connectionString, string? migration = null)
     {
         var runnerProject = Path.Combine(RepositoryRoot(), "src", "CloudOrders.Migrations", "CloudOrders.Migrations.csproj");
         var startInfo = new ProcessStartInfo("dotnet")
         {
-            Arguments = $"run --project \"{runnerProject}\" --configuration Release --no-launch-profile",
+            Arguments = $"run --project \"{runnerProject}\" --configuration Release --no-launch-profile" +
+                (migration is null ? string.Empty : $" -- --migration {migration}"),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false

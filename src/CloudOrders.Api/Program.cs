@@ -2,14 +2,20 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CloudOrders.Api.Health;
+using CloudOrders.Api.Identity;
 using CloudOrders.Application.Abstractions;
+using CloudOrders.Application.Identity;
 using CloudOrders.Application.Orders;
 using CloudOrders.Contracts.Orders;
-using CloudOrders.Infrastructure.Identity;
 using CloudOrders.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 var sqlConnectionString = builder.Configuration.GetConnectionString("CloudOrders");
@@ -24,6 +30,59 @@ if (string.IsNullOrWhiteSpace(sqlConnectionString) && !connectionCanBeDeferred)
 
 builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
+builder.Services.AddOptions<ExternalIdentityOptions>()
+    .Bind(builder.Configuration.GetSection(ExternalIdentityOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<ExternalIdentityOptions>, ExternalIdentityOptionsValidator>();
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer();
+builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+    .Configure<IOptions<ExternalIdentityOptions>>((options, externalIdentity) =>
+    {
+        var identity = externalIdentity.Value;
+        options.Authority = identity.Authority;
+        options.RequireHttpsMetadata = true;
+        options.IncludeErrorDetails = false;
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = identity.ValidIssuer,
+            ValidateAudience = true,
+            ValidAudience = identity.Audience,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ClockSkew = TimeSpan.Zero,
+            RoleClaimType = "roles"
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = context =>
+            {
+                var principal = context.Principal!;
+                if (!HasSingleExactClaim(principal, "tid", identity.TenantId)
+                    || !HasSingleAllowedClient(principal, identity.AllowedClientIds)
+                    || !AuthenticatedSubjectReader.TryRead(principal, out _)
+                    || !HasDelegatedScope(principal))
+                {
+                    context.Fail("The token cannot establish an authorized user subject.");
+                }
+
+                return Task.CompletedTask;
+            }
+        };
+    });
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+    options.AddPolicy("OrdersRead", policy => policy.RequireAuthenticatedUser().RequireAssertion(context =>
+        HasScope(context.User, CloudOrdersPermissions.ReadScope) && HasOnlyKnownRoles(context.User)));
+    options.AddPolicy("OrdersWrite", policy => policy.RequireAuthenticatedUser().RequireAssertion(context =>
+        HasScope(context.User, CloudOrdersPermissions.WriteScope) && HasOnlyKnownRoles(context.User)));
+});
+builder.Services.AddSingleton<IAuthorizationMiddlewareResultHandler, CloudOrdersAuthorizationResultHandler>();
 builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow);
@@ -39,7 +98,8 @@ builder.Services.AddDbContextFactory<CloudOrdersDbContext>((serviceProvider, opt
 });
 builder.Services.AddScoped<IOrderRepository, SqlOrderRepository>();
 builder.Services.AddScoped<IIdempotentOrderStore, SqlIdempotentOrderStore>();
-builder.Services.AddSingleton<ISubjectIdProvider, LocalDevelopmentSubjectIdProvider>();
+builder.Services.AddScoped<ICustomerProfileStore, SqlCustomerProfileStore>();
+builder.Services.AddSingleton<ICustomerReferenceGenerator, CustomerReferenceGenerator>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<CreateOrderHandler>();
 builder.Services.AddScoped<GetOrderHandler>();
@@ -50,10 +110,13 @@ var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.MapOpenApi()
+        .RequireAuthorization();
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseExceptionHandler(exceptionHandlerApp => exceptionHandlerApp.Run(async context =>
 {
     var exception = context.Features.Get<IExceptionHandlerFeature>()?.Error;
@@ -86,14 +149,16 @@ app.UseStatusCodePages(async statusCodeContext =>
 
 app.MapGet("/health/live", () => TypedResults.Ok(new { status = "ok" }))
     .WithName("LiveHealth")
-    .WithTags("Health");
+    .WithTags("Health")
+    .AllowAnonymous();
 
 app.MapHealthChecks("/health/ready", new HealthCheckOptions
 {
     Predicate = registration => registration.Tags.Contains("ready")
 })
     .WithName("ReadyHealth")
-    .WithTags("Health");
+    .WithTags("Health")
+    .AllowAnonymous();
 
 app.MapPost("/api/v1/orders", async (
         CreateOrderRequest request,
@@ -160,7 +225,8 @@ app.MapPost("/api/v1/orders", async (
         return Results.Created($"/api/v1/orders/{result.Response!.Id}", result.Response);
     })
     .WithName("CreateOrder")
-    .WithTags("Orders");
+    .WithTags("Orders")
+    .RequireAuthorization("OrdersWrite");
 
 app.MapGet("/api/v1/orders/{orderId:guid}", async (
         Guid orderId,
@@ -171,7 +237,8 @@ app.MapGet("/api/v1/orders/{orderId:guid}", async (
         return response is null ? Results.NotFound() : Results.Ok(response);
     })
     .WithName("GetOrder")
-    .WithTags("Orders");
+    .WithTags("Orders")
+    .RequireAuthorization("OrdersRead");
 
 app.Run();
 
@@ -197,5 +264,27 @@ static IDictionary<string, object?> ProblemExtensions(HttpContext context, strin
         ["errorCode"] = errorCode,
         ["traceId"] = context.TraceIdentifier
     };
+
+static bool HasSingleExactClaim(System.Security.Claims.ClaimsPrincipal principal, string type, string expected) =>
+    principal.FindAll(type).Select(claim => claim.Value).ToArray() is [var value]
+    && string.Equals(value, expected, StringComparison.Ordinal);
+
+static bool HasSingleAllowedClient(System.Security.Claims.ClaimsPrincipal principal, IEnumerable<string> allowedClientIds) =>
+    principal.FindAll("azp").Select(claim => claim.Value).ToArray() is [var clientId]
+    && Guid.TryParseExact(clientId, "D", out var parsedClientId)
+    && allowedClientIds.Any(allowedClientId =>
+        Guid.TryParseExact(allowedClientId, "D", out var parsedAllowedClientId)
+        && parsedAllowedClientId == parsedClientId);
+
+static bool HasDelegatedScope(System.Security.Claims.ClaimsPrincipal principal) =>
+    principal.FindAll("scp").Select(claim => claim.Value).Any(value => !string.IsNullOrWhiteSpace(value));
+
+static bool HasScope(System.Security.Claims.ClaimsPrincipal principal, string requiredScope) =>
+    principal.FindAll("scp")
+        .SelectMany(claim => claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        .Any(scope => string.Equals(scope, requiredScope, StringComparison.Ordinal));
+
+static bool HasOnlyKnownRoles(System.Security.Claims.ClaimsPrincipal principal) =>
+    principal.FindAll("roles").All(role => string.Equals(role.Value, CloudOrdersPermissions.AdminRole, StringComparison.Ordinal));
 
 public partial class Program;

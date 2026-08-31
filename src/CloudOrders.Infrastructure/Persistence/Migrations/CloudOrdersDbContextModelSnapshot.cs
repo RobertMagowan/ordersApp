@@ -22,6 +22,56 @@ namespace CloudOrders.Infrastructure.Persistence.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("CloudOrders.Infrastructure.Persistence.CustomerProfileEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContactEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)")
+                        .UseCollation("Latin1_General_100_CI_AS_SC");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasPrecision(7)
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<string>("CustomerReference")
+                        .IsRequired()
+                        .HasColumnType("varchar(64)")
+                        .UseCollation("Latin1_General_100_BIN2");
+
+                    b.Property<string>("Issuer")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)")
+                        .UseCollation("Latin1_General_100_BIN2");
+
+                    b.Property<Guid>("ObjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasPrecision(7)
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.HasKey("Id")
+                        .HasName("PK_CustomerProfiles");
+
+                    b.HasAlternateKey("CustomerReference")
+                        .HasName("AK_CustomerProfiles_CustomerReference");
+
+                    b.HasAlternateKey("Issuer", "ObjectId")
+                        .HasName("AK_CustomerProfiles_Issuer_ObjectId");
+
+                    b.ToTable("CustomerProfiles", "dbo");
+                });
+
             modelBuilder.Entity("CloudOrders.Infrastructure.Persistence.IdempotencyRecordEntity", b =>
                 {
                     b.Property<string>("SubjectId")
@@ -29,6 +79,9 @@ namespace CloudOrders.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(200)");
 
                     b.Property<Guid>("IdempotencyKey")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ActorCustomerProfileId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -53,13 +106,22 @@ namespace CloudOrders.Infrastructure.Persistence.Migrations
                     b.Property<int>("ResponseStatus")
                         .HasColumnType("int");
 
+                    b.Property<Guid?>("TargetCustomerProfileId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("SubjectId", "IdempotencyKey");
+
+                    b.HasIndex("ActorCustomerProfileId")
+                        .HasDatabaseName("IX_IdempotencyRecords_ActorCustomerProfileId");
 
                     b.HasIndex("ExpiresAt")
                         .HasDatabaseName("IX_IdempotencyRecords_ExpiresAt");
 
                     b.HasIndex("OrderId")
                         .HasDatabaseName("IX_IdempotencyRecords_OrderId");
+
+                    b.HasIndex("TargetCustomerProfileId")
+                        .HasDatabaseName("IX_IdempotencyRecords_TargetCustomerProfileId");
 
                     b.ToTable("IdempotencyRecords", "dbo");
                 });
@@ -72,6 +134,9 @@ namespace CloudOrders.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasPrecision(7)
                         .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<Guid?>("CustomerProfileId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("CustomerReference")
                         .IsRequired()
@@ -102,6 +167,9 @@ namespace CloudOrders.Infrastructure.Persistence.Migrations
                         .HasColumnType("datetimeoffset(7)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CustomerProfileId")
+                        .HasDatabaseName("IX_Orders_CustomerProfileId");
 
                     b.HasIndex("CustomerReference", "CreatedAt", "Id")
                         .IsDescending(false, true, true)
@@ -180,13 +248,34 @@ namespace CloudOrders.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("CloudOrders.Infrastructure.Persistence.IdempotencyRecordEntity", b =>
                 {
+                    b.HasOne("CloudOrders.Infrastructure.Persistence.CustomerProfileEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ActorCustomerProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_IdempotencyRecords_CustomerProfiles_ActorCustomerProfileId");
+
                     b.HasOne("CloudOrders.Infrastructure.Persistence.OrderEntity", "Order")
                         .WithMany()
                         .HasForeignKey("OrderId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("CloudOrders.Infrastructure.Persistence.CustomerProfileEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TargetCustomerProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_IdempotencyRecords_CustomerProfiles_TargetCustomerProfileId");
+
                     b.Navigation("Order");
+                });
+
+            modelBuilder.Entity("CloudOrders.Infrastructure.Persistence.OrderEntity", b =>
+                {
+                    b.HasOne("CloudOrders.Infrastructure.Persistence.CustomerProfileEntity", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_Orders_CustomerProfiles_CustomerProfileId");
                 });
 
             modelBuilder.Entity("CloudOrders.Infrastructure.Persistence.OutboxMessageEntity", b =>
