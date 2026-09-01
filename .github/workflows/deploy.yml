@@ -669,17 +669,53 @@ jobs:
           BEFORE_DIGEST=$(az containerapp revision show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision "$BEFORE_REVISION" --query properties.template.containers[0].image --output tsv)
           [[ -n "$BEFORE_REVISION" && -n "$BEFORE_DIGEST" ]] || { echo "Migration-only release requires an active API revision and digest." >&2; exit 1; }
 
-          EXECUTION_TEMPLATE=$(mktemp)
-          trap 'rm -f "$EXECUTION_TEMPLATE"' EXIT
-          cat > "$EXECUTION_TEMPLATE" <<EOF
-          containers:
-            - name: migrations
-              image: "$MIGRATION_IMAGE"
-              args:
-                - "--migration"
-                - "$MIGRATION"
-          EOF
-          EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --yaml "$EXECUTION_TEMPLATE" --query name --output tsv)
+          JOB_PROVISIONING_STATE=$(az containerapp job show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.provisioningState --output tsv)
+          [[ "$JOB_PROVISIONING_STATE" == Succeeded ]] || {
+            echo "Migration-only release requires a provisioned migration Job." >&2
+            exit 1
+          }
+
+          JOB_TEMPLATE=$(mktemp)
+          trap 'rm -f "$JOB_TEMPLATE"' EXIT
+          az containerapp job show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.template --output json > "$JOB_TEMPLATE"
+          python3 - "$JOB_TEMPLATE" "$MIGRATION_IMAGE" "$MIGRATION" <<'PY'
+          import json
+          import sys
+
+          template_path, image, migration = sys.argv[1:]
+          with open(template_path, encoding="utf-8") as source:
+              template = json.load(source)
+
+          if not isinstance(template, dict):
+              raise SystemExit("Migration Job template is not an object.")
+          if template.get("volumes") or template.get("initContainers"):
+              raise SystemExit("Migration Job template uses execution-override-unsupported volumes or init containers.")
+          containers = template.get("containers")
+          if not isinstance(containers, list):
+              raise SystemExit("Migration Job template does not contain containers.")
+          migrations = [container for container in containers if container.get("name") == "migrations"]
+          if len(migrations) != 1:
+              raise SystemExit("Migration Job template must contain exactly one migrations container.")
+
+          migration_container = migrations[0]
+          resources = migration_container.get("resources")
+          if not isinstance(resources, dict) or "cpu" not in resources or "memory" not in resources:
+              raise SystemExit("Migration Job template is missing required migration container resources.")
+          if migration_container.get("volumeMounts") or migration_container.get("probes"):
+              raise SystemExit("Migration Job template uses execution-override-unsupported container settings.")
+          environment = migration_container.get("env")
+          if not isinstance(environment, list) or not any(
+              entry.get("name") == "ConnectionStrings__CloudOrders" and entry.get("value")
+              for entry in environment if isinstance(entry, dict)
+          ):
+              raise SystemExit("Migration Job template is missing its SQL connection environment setting.")
+
+          migration_container["image"] = image
+          migration_container["args"] = ["--migration", migration]
+          with open(template_path, "w", encoding="utf-8") as destination:
+              json.dump(template, destination)
+          PY
+          EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --yaml "$JOB_TEMPLATE" --query name --output tsv)
           [[ -n "$EXECUTION" ]] || { echo "Migration Job did not return an execution name." >&2; exit 1; }
           EXECUTION_ARGS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].args' --output json)
           EXECUTION_IMAGE=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].image' --output tsv)
