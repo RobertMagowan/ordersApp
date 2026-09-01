@@ -301,6 +301,8 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("template = json.load(source)", e1Job, StringComparison.Ordinal);
         Assert.Contains("if template.get(\"volumes\") or template.get(\"initContainers\"):", e1Job, StringComparison.Ordinal);
         Assert.Contains("Migration Job template uses execution-override-unsupported volumes or init containers.", e1Job, StringComparison.Ordinal);
+        Assert.Contains("if len(containers) != 1:", e1Job, StringComparison.Ordinal);
+        Assert.Contains("Migration Job template must contain exactly one container.", e1Job, StringComparison.Ordinal);
         Assert.Contains("migrations = [container for container in containers if container.get(\"name\") == \"migrations\"]", e1Job, StringComparison.Ordinal);
         Assert.Contains("ConnectionStrings__CloudOrders", e1Job, StringComparison.Ordinal);
         Assert.Contains("if migration_container.get(\"volumeMounts\") or migration_container.get(\"probes\"):", e1Job, StringComparison.Ordinal);

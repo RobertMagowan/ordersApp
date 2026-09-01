@@ -693,6 +693,8 @@ jobs:
           containers = template.get("containers")
           if not isinstance(containers, list):
               raise SystemExit("Migration Job template does not contain containers.")
+          if len(containers) != 1:
+              raise SystemExit("Migration Job template must contain exactly one container.")
           migrations = [container for container in containers if container.get("name") == "migrations"]
           if len(migrations) != 1:
               raise SystemExit("Migration Job template must contain exactly one migrations container.")
