@@ -17,6 +17,10 @@
       ],
       "developmentRun": { "number": 33457927112, "commit": "fbc68a9f0e02923880c8a06162a8d7cda2afac38", "status": "SUCCESS" }
     },
+    "historicalDeploymentRuns": [
+      { "number": 33066467680, "branch": "test", "commit": "bbfcbe4f792790703a877a02f2941cfada61d6ae", "status": "SUCCESS" },
+      { "number": 33381147912, "branch": "development", "commit": "0bf4012d16a74361500dad806d120a556fbbfd9b", "status": "FAILURE" }
+    ],
     "preservedProductWorktree": {
       "path": "C:/repos/OrderApp/.worktrees/feature-sprint4-identity-design",
       "branch": "feature/sprint4-identity-design",

@@ -10,7 +10,7 @@
 
 ## Imported Sprint 4A facts
 
-Read-only GitHub reconciliation confirmed PR #23 merged at `0bf4012d16a74361500dad806d120a556fbbfd9b` and PR #24 at `fbc68a9f0e02923880c8a06162a8d7cda2afac38`. Development run `33457927112` succeeded for the latter commit. These facts are imported in [cutover-validation.json](../../delivery/evidence/cutover-validation.json); they do not prove test deployment, QA, D1, or product completion.
+Read-only GitHub reconciliation confirmed PR #23 merged at `0bf4012d16a74361500dad806d120a556fbbfd9b` and PR #24 at `fbc68a9f0e02923880c8a06162a8d7cda2afac38`. Development run `33457927112` succeeded for the latter commit. Earlier test deployment run `33066467680` succeeded for `bbfcbe4f792790703a877a02f2941cfada61d6ae`; it is historical and does not contain E1. Failed development run `33381147912` is retained as historical failure evidence, not as a retry instruction. These facts are imported in [cutover-validation.json](../../delivery/evidence/cutover-validation.json); they do not prove E1 test deployment, QA, D1, or product completion.
 
 Tasks 1, 2, 3, and 6 stay historical merged work. E1 is historical `DEV_DEPLOYED`; Tasks 4 and 5 remain active/pending. D1 retains its `HUMAN_DECISION_REQUIRED` External ID/data-transition blocker. The preserved product worktree is `feature/sprint4-identity-design` at `5c0e1ab136f477127ce194426742a27d704d20d4`.
 
