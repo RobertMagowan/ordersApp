@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [switch] $WhatIf,
-    [switch] $Reconcile
+    [switch] $Reconcile,
+    [string] $ReconciliationSnapshotPath
 )
 
 Set-StrictMode -Version Latest
@@ -288,7 +289,7 @@ function Test-SprintDeliveryState {
         [Parameter(Mandatory)] $Config
     )
 
-    foreach ($name in 'workflowVersion', 'stateSchemaVersion', 'configurationVersion', 'workflowLifecycleOwner', 'cutover', 'currentSprint') {
+    foreach ($name in 'workflowVersion', 'stateSchemaVersion', 'configurationVersion', 'workflowLifecycleOwner', 'cutover', 'sprintPlanSource', 'sprintPlanRevision', 'currentSprint') {
         if (-not (Test-DeliveryMemberExists -InputObject $State -Name $name)) {
             throw "State is missing '$name'."
         }
@@ -309,8 +310,23 @@ function Test-SprintDeliveryState {
     Test-WorkflowLifecycleOwner -State $State -ExpectedOwner 'sprint-orchestrator' | Out-Null
     $cutover = Get-DeliveryMemberValue -InputObject $State -Name 'cutover'
     $cutoverStatus = Get-DeliveryMemberValue -InputObject $cutover -Name 'status'
-    $cutoverBlockers = Get-DeliveryMemberValue -InputObject $cutover -Name 'blockers'
-    if ($cutoverStatus -notin @('CUTOVER_BLOCKED', 'WORKFLOW_CUTOVER_COMPLETE') -or $cutoverBlockers -is [string] -or $null -eq $cutoverBlockers) {
+    $cutoverBlockers = $null
+    if ($cutover -is [System.Collections.IDictionary]) {
+        if ($cutover.Contains('blockers')) {
+            $cutoverBlockers = $cutover['blockers']
+        }
+    }
+    else {
+        $cutoverBlockersProperty = $cutover.PSObject.Properties['blockers']
+        if ($null -ne $cutoverBlockersProperty) {
+            $cutoverBlockers = $cutoverBlockersProperty.Value
+        }
+    }
+    if ($cutoverStatus -notin @('CUTOVER_BLOCKED', 'WORKFLOW_CUTOVER_COMPLETE') -or
+        -not (Test-DeliveryMemberExists -InputObject $cutover -Name 'blockers') -or
+        $null -eq $cutoverBlockers -or
+        $cutoverBlockers -is [string] -or
+        $cutoverBlockers -isnot [System.Collections.IEnumerable]) {
         throw 'State has an invalid cutover record.'
     }
     if ($cutoverStatus -eq 'WORKFLOW_CUTOVER_COMPLETE' -and @($cutoverBlockers).Count -gt 0) {
@@ -319,13 +335,16 @@ function Test-SprintDeliveryState {
 
     $vocabulary = Get-DeliveryMemberValue -InputObject $Config -Name 'vocabulary'
     $currentSprint = Get-DeliveryMemberValue -InputObject $State -Name 'currentSprint'
+    if (-not (Test-DeliveryMemberExists -InputObject $currentSprint -Name 'name') -or [string]::IsNullOrWhiteSpace((Get-DeliveryMemberValue -InputObject $currentSprint -Name 'name'))) {
+        throw 'State currentSprint is missing name.'
+    }
     $workItems = Get-DeliveryMemberValue -InputObject $currentSprint -Name 'workItems'
     if ($null -eq $workItems) {
         throw 'State currentSprint is missing workItems.'
     }
 
     foreach ($workItem in @($workItems)) {
-        foreach ($name in 'id', 'risk', 'lifecycle', 'stage', 'evidenceBindings', 'retryCounters', 'gates', 'blockers') {
+        foreach ($name in 'id', 'name', 'risk', 'lifecycle', 'stage', 'evidenceBindings', 'retryCounters', 'gates', 'blockers') {
             if (-not (Test-DeliveryMemberExists -InputObject $workItem -Name $name)) {
                 throw "Work item is missing '$name'."
             }
@@ -386,6 +405,28 @@ function Test-SprintDeliveryState {
             $environment = Get-DeliveryMemberValue -InputObject $binding -Name 'environment'
             if ($null -ne $environment -and $environment -notin @('development', 'test', 'production')) {
                 throw "Work item '$((Get-DeliveryMemberValue -InputObject $workItem -Name 'id'))' has invalid evidence environment '$environment'."
+            }
+
+            if ($bindingStatus -eq 'CURRENT' -and ($null -ne $environment -or $null -ne $workflowRun)) {
+                $artifact = Get-DeliveryMemberValue -InputObject $binding -Name 'artifact'
+                if ([string]::IsNullOrWhiteSpace($artifact)) {
+                    throw "Work item '$((Get-DeliveryMemberValue -InputObject $workItem -Name 'id'))' has current deployment evidence without an immutable artifact."
+                }
+            }
+        }
+
+        $hasHistoricalOnlyEvidence = @($evidenceBindings | Where-Object {
+            (Get-DeliveryMemberValue -InputObject $_ -Name 'status') -eq 'HISTORICAL_UNVERIFIED'
+        }).Count -gt 0
+        if ($lifecycle -in @('DEV_DEPLOYED', 'QA_DEPLOYED', 'RELEASED') -and -not $hasHistoricalOnlyEvidence) {
+            $currentDeploymentEvidence = @($evidenceBindings | Where-Object {
+                (Get-DeliveryMemberValue -InputObject $_ -Name 'status') -eq 'CURRENT' -and
+                $null -ne (Get-DeliveryMemberValue -InputObject $_ -Name 'environment') -and
+                $null -ne (Get-DeliveryMemberValue -InputObject $_ -Name 'workflowRun') -and
+                -not [string]::IsNullOrWhiteSpace((Get-DeliveryMemberValue -InputObject $_ -Name 'artifact'))
+            })
+            if ($currentDeploymentEvidence.Count -eq 0) {
+                throw "Work item '$((Get-DeliveryMemberValue -InputObject $workItem -Name 'id'))' lifecycle '$lifecycle' requires current immutable evidence."
             }
         }
 
@@ -454,6 +495,15 @@ function Get-NextDeliveryAction {
     )
 
     Test-SprintDeliveryState -State $State -Config $Config | Out-Null
+    $cutover = Get-DeliveryMemberValue -InputObject $State -Name 'cutover'
+    if ((Get-DeliveryMemberValue -InputObject $cutover -Name 'status') -ne 'WORKFLOW_CUTOVER_COMPLETE') {
+        return [pscustomobject]@{
+            kind = 'CUTOVER_BLOCKED'
+            workItemId = $null
+            reason = 'Sprint work cannot resume until the workflow cutover is complete and reconciled.'
+            sideEffect = $false
+        }
+    }
     $workItems = @(Get-DeliveryMemberValue -InputObject (Get-DeliveryMemberValue -InputObject $State -Name 'currentSprint') -Name 'workItems')
 
     $nextItem = $workItems | Where-Object { (Get-DeliveryMemberValue -InputObject $_ -Name 'lifecycle') -in @('TODO', 'IN_PROGRESS', 'PR_OPEN') } | Select-Object -First 1
@@ -646,7 +696,13 @@ if ($MyInvocation.InvocationName -ne '.') {
     $action = Get-NextDeliveryAction -State $state -Config $config
     $reconciliation = $null
     if ($Reconcile) {
-        $snapshot = Get-AuthoritativeSnapshot -RepositoryRoot $repositoryRoot
+        $snapshotInput = if ([string]::IsNullOrWhiteSpace($ReconciliationSnapshotPath)) { $null } else { Read-DeliveryJson -Path $ReconciliationSnapshotPath }
+        $snapshot = if ($null -eq $snapshotInput) {
+            Get-AuthoritativeSnapshot -RepositoryRoot $repositoryRoot
+        }
+        else {
+            Get-AuthoritativeSnapshot -RepositoryRoot $repositoryRoot -GitHubSnapshotProvider { Get-DeliveryMemberValue -InputObject $snapshotInput -Name 'github' } -AzureSnapshotProvider { Get-DeliveryMemberValue -InputObject $snapshotInput -Name 'azure' }
+        }
         $reconciliation = Compare-DeliveryState -State $state -Snapshot $snapshot
     }
 

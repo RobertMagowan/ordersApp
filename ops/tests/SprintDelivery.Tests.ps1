@@ -209,6 +209,8 @@ Describe 'Sprint delivery completion' -Tag 'completion' {
 
     It 'returns a human decision action for a decision-blocked work item' {
         $state = Get-CompletionFixture 'decision-blocked'
+        $state.cutover.status = 'WORKFLOW_CUTOVER_COMPLETE'
+        $state.cutover.blockers = [System.Collections.ArrayList]::new()
 
         $action = Get-NextDeliveryAction -State $state -Config $config
 
@@ -219,6 +221,8 @@ Describe 'Sprint delivery completion' -Tag 'completion' {
 
     It 'selects the earliest candidate before evaluating later blocked work' {
         $state = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/state.json')
+        $state.cutover.status = 'WORKFLOW_CUTOVER_COMPLETE'
+        $state.cutover.blockers = [System.Collections.ArrayList]::new()
 
         $action = Get-NextDeliveryAction -State $state -Config $config
 
@@ -726,5 +730,57 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
         $state.cutover.blockers = @('AUTHORITATIVE_AZURE_DEPLOYMENT_SNAPSHOT_UNAVAILABLE')
 
         { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
+    }
+
+    It 'rejects a null cutover blockers value while accepting an empty collection' {
+        $state = Get-CutoverFixture
+        $state.cutover.blockers = $null
+
+        { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
+
+        $state.cutover.status = 'WORKFLOW_CUTOVER_COMPLETE'
+        $state.cutover.blockers = [System.Collections.ArrayList]::new()
+        { Test-SprintDeliveryState -State $state -Config $config } | Should Not Throw
+    }
+
+    It 'does not resume product work while the workflow cutover remains blocked' {
+        $state = Get-CutoverFixture
+
+        $action = Get-NextDeliveryAction -State $state -Config $config
+
+        $action.kind | Should Be 'CUTOVER_BLOCKED'
+        $action.workItemId | Should Be $null
+    }
+
+    It 'requires an immutable deployment artifact for current deployment evidence' {
+        $state = Get-CutoverFixture
+        $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+        $e1.evidenceBindings[0].status = 'CURRENT'
+
+        { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
+    }
+
+    It 'rejects released work without a current immutable evidence binding' {
+        $state = Get-CutoverFixture
+        $item = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-4' }
+        $item.lifecycle = 'RELEASED'
+        $item.stage = 'QA'
+        $item.gates.codeReview.status = 'PASS'
+        $item.gates.ci.status = 'PASS'
+        $item.gates.devValidation.status = 'PASS'
+        $item.gates.independentReview.status = 'PASS'
+        $item.gates.qaValidation.status = 'PASS'
+
+        { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
+    }
+
+    It 'accepts a caller-supplied read-only reconciliation snapshot without cloud authentication' {
+        $powerShellHost = if ($env:OS -eq 'Windows_NT') { 'powershell' } else { 'pwsh' }
+        $snapshotPath = Join-Path $repositoryRoot 'ops/tests/fixtures/read-only-reconciliation-snapshot.json'
+
+        $output = & $powerShellHost -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repositoryRoot 'ops/Invoke-SprintDelivery.ps1') -Reconcile -WhatIf -ReconciliationSnapshotPath $snapshotPath
+
+        $LASTEXITCODE | Should Be 0
+        ($output -join "`n") | Should Match 'CUTOVER_BLOCKED'
     }
 }

@@ -11,9 +11,17 @@ pwsh -File ops/Invoke-SprintDelivery.ps1 -Reconcile -WhatIf
 
 Do not infer completion from a label. Git is authoritative for commits and worktrees, GitHub for pull requests and checks, and cloud records for deployment and artifact facts. The orchestrator is the sole lifecycle writer; all role skills are read-only consumers of state.
 
+The default reconciliation deliberately has no cloud credentials and therefore fails closed when live deployment proof is unavailable. A caller may supply a sanitized, read-only JSON snapshot with `github` and `azure` objects (including immutable deployment `artifact` values):
+
+```powershell
+pwsh -File ops/Invoke-SprintDelivery.ps1 -Reconcile -WhatIf -ReconciliationSnapshotPath <snapshot.json>
+```
+
+The command reads the snapshot only; it never authenticates, deploys, or writes lifecycle state. A cutover remains blocked unless that snapshot agrees with state and all baseline evidence is available.
+
 ## Evidence and staleness
 
-Evidence must bind the command, outcome, immutable revision, run or artifact identifier when applicable, timestamp, and classification. Reconcile before any side effect. If an authoritative fact differs, mark dependent evidence `STALE`, retain the prior record, and request reconciliation rather than overwriting history. A changed revision, run, artifact, target, requirement, or state-schema version invalidates dependent gates until re-verified.
+Evidence must bind the command, outcome, immutable revision, run or artifact identifier when applicable, timestamp, and classification. Current deployment evidence must include an immutable artifact. Reconcile before any side effect. If an authoritative fact differs, mark dependent evidence `STALE`, retain the prior record, and request reconciliation rather than overwriting history. A changed revision, run, artifact, target, requirement, or state-schema version invalidates dependent gates until re-verified.
 
 Classify an unavailable Docker daemon or equivalent unavailable local dependency as `ENVIRONMENT_FAILURE`, retain its output, and do not report it as a product defect. Restore the dependency and rerun the affected checks; do not consume retries without a distinct hypothesis.
 

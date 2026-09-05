@@ -51,6 +51,7 @@
         "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
         "workflowRun": { "type": "integer", "minimum": 1 },
         "environment": { "enum": ["development", "test", "production"] },
+        "artifact": { "type": "string", "minLength": 1 },
         "status": { "enum": ["CURRENT", "STALE", "HISTORICAL_UNVERIFIED", "SUPERSEDED"] }
       },
       "additionalProperties": false
