@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudorders.example/delivery/evidence.schema.json",
+  "type": "object",
+  "required": ["evidenceSchemaVersion", "kind", "status", "recordedAt", "bindings"],
+  "properties": {
+    "evidenceSchemaVersion": { "type": "string", "const": "1.0" },
+    "kind": { "type": "string" },
+    "status": { "enum": ["CURRENT", "STALE", "HISTORICAL_UNVERIFIED", "SUPERSEDED"] },
+    "recordedAt": { "type": "string", "format": "date-time" },
+    "bindings": {
+      "type": "object",
+      "properties": {
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "pullRequest": { "type": "integer", "minimum": 1 },
+        "workflowRun": { "type": "integer", "minimum": 1 },
+        "environment": { "enum": ["development", "test", "production"] },
+        "artifact": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
