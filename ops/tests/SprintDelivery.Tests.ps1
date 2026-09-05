@@ -156,3 +156,64 @@ Describe 'Sprint delivery contracts' -Tag 'contracts' {
         { Assert-ContractFixtureStructure -State $state } | Should Not Throw
     }
 }
+
+Describe 'Sprint delivery completion' -Tag 'completion' {
+    BeforeAll {
+        $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        . (Join-Path $repositoryRoot 'ops/Invoke-SprintDelivery.ps1')
+        $config = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/config.json')
+
+        function Get-CompletionFixture {
+            param([Parameter(Mandatory)][string] $Name)
+
+            $state = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/state.json')
+
+            switch ($Name) {
+                'all-required-gates-pass' {
+                    $item = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-4' }
+                    foreach ($gateName in $config.requiredGatesByRisk.($item.risk)) {
+                        $item.gates.$gateName.status = 'PASS'
+                    }
+
+                    return $item
+                }
+                'decision-blocked' {
+                    $state.currentSprint.workItems = @($state.currentSprint.workItems | Where-Object { $_.id -eq '4A-7-D1' })
+                    return $state
+                }
+                default { throw "Unknown completion fixture '$Name'." }
+            }
+        }
+    }
+
+    It 'derives task completion from every required risk gate' {
+        $item = Get-CompletionFixture 'all-required-gates-pass'
+
+        (Assert-TaskDone -WorkItem $item -Config $config) | Should Be $true
+        $item.gates.devValidation.status = 'STALE'
+
+        $failure = $null
+        try { Assert-TaskDone -WorkItem $item -Config $config } catch { $failure = $_.Exception.Message }
+        $failure | Should Match 'STALE'
+    }
+
+    It 'does not trust a declared release lifecycle when a required gate is pending' {
+        $item = Get-CompletionFixture 'all-required-gates-pass'
+        $item.lifecycle = 'RELEASED'
+        $item.gates.qaValidation.status = 'PENDING'
+
+        $failure = $null
+        try { Assert-TaskDone -WorkItem $item -Config $config } catch { $failure = $_.Exception.Message }
+        $failure | Should Match 'qaValidation.*PENDING'
+    }
+
+    It 'returns a human decision action for a decision-blocked work item' {
+        $state = Get-CompletionFixture 'decision-blocked'
+
+        $action = Get-NextDeliveryAction -State $state -Config $config
+
+        $action.kind | Should Be 'HUMAN_DECISION_REQUIRED'
+        $action.workItemId | Should Be '4A-7-D1'
+        $action.reason | Should Match 'External ID tenant'
+    }
+}
