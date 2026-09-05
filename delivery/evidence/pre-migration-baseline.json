@@ -1,0 +1,27 @@
+{
+  "evidenceSchemaVersion": "1.0",
+  "kind": "PRE_MIGRATION_BASELINE",
+  "status": "HISTORICAL_UNVERIFIED",
+  "recordedAt": "2026-09-05T00:00:00Z",
+  "bindings": {
+    "commit": "5c0e1ab136f477127ce194426742a27d704d20d4"
+  },
+  "observations": {
+    "scope": "Historical baseline captured before sprint-delivery workflow migration.",
+    "commands": {
+      "restore": "PASS",
+      "format": "PASS",
+      "releaseBuild": "PASS",
+      "architectureTests": { "passed": 24, "total": 24, "status": "PASS" },
+      "unitTests": { "passed": 13, "total": 13, "status": "PASS" },
+      "bicep": "PASS"
+    },
+    "integrationTests": {
+      "passed": 47,
+      "total": 73,
+      "failed": 26,
+      "classification": "ENVIRONMENT_FAILURE",
+      "reason": "Docker was unavailable to Testcontainers; failures are not classified as product defects."
+    }
+  }
+}

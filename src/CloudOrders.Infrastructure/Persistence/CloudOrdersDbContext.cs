@@ -10,6 +10,8 @@ public sealed class CloudOrdersDbContext(DbContextOptions<CloudOrdersDbContext> 
 
     internal DbSet<IdempotencyRecordEntity> IdempotencyRecords => Set<IdempotencyRecordEntity>();
 
+    internal DbSet<CustomerProfileEntity> CustomerProfiles => Set<CustomerProfileEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder) =>
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(CloudOrdersDbContext).Assembly);
 }

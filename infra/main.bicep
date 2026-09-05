@@ -45,6 +45,29 @@ param targetPort int = 8080
 @description('Enable the API liveness probe. Disable only for the public bootstrap image.')
 param enableLivenessProbe bool = true
 
+@description('Enable External ID runtime configuration. Sprint 4 permits this only outside production.')
+param externalIdentityEnabled bool = false
+
+@secure()
+@description('External ID metadata authority supplied by a protected GitHub environment variable.')
+param externalIdentityAuthority string = ''
+
+@secure()
+@description('External ID token issuer supplied by a protected GitHub environment variable.')
+param externalIdentityValidIssuer string = ''
+
+@secure()
+@description('External ID tenant identifier supplied by a protected GitHub environment variable.')
+param externalIdentityTenantId string = ''
+
+@secure()
+@description('External ID API audience supplied by a protected GitHub environment variable.')
+param externalIdentityAudience string = ''
+
+@secure()
+@description('External ID public-client identifiers supplied by a protected GitHub environment variable.')
+param externalIdentityAllowedClientIds string = ''
+
 @description('Deploy Azure SQL only to development or test during Sprint 3.')
 param deploySql bool = false
 
@@ -91,6 +114,9 @@ var sqlDeploymentEnabled = deploySql
       ? fail('Sprint 3 Azure SQL deployment is restricted to development and test.')
       : true)
   : false
+var externalIdentityConfigurationEnabled = environmentName == 'production' && externalIdentityEnabled
+  ? fail('Sprint 4 External ID configuration is restricted to development and test.')
+  : externalIdentityEnabled
 var sqlTags = union(tags, {
   expiresOn: '2026-09-10'
   firewallException: 'AllowAllWindowsAzureIps'
@@ -173,6 +199,12 @@ module containerApp 'modules/container-app.bicep' = if (deployContainerApp) {
   params: {
     containerImage: containerImage
     enableLivenessProbe: enableLivenessProbe
+    externalIdentityAllowedClientIds: externalIdentityAllowedClientIds
+    externalIdentityAudience: externalIdentityAudience
+    externalIdentityAuthority: externalIdentityAuthority
+    externalIdentityEnabled: externalIdentityConfigurationEnabled
+    externalIdentityTenantId: externalIdentityTenantId
+    externalIdentityValidIssuer: externalIdentityValidIssuer
     environmentResourceId: managedEnvironment.outputs.resourceId
     location: location
     maxReplicas: maxReplicas

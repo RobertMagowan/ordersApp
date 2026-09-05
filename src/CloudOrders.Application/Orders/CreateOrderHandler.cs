@@ -6,9 +6,10 @@ namespace CloudOrders.Application.Orders;
 
 public sealed class CreateOrderHandler(
     IIdempotentOrderStore idempotentOrderStore,
-    ISubjectIdProvider subjectIdProvider,
     TimeProvider timeProvider)
 {
+    private const string LegacySubjectId = "local-development-subject";
+
     public async Task<CreateOrderResult> Handle(
         CreateOrderCommand command,
         Guid idempotencyKey,
@@ -34,9 +35,9 @@ public sealed class CreateOrderHandler(
                 order.Quantity,
                 order.CreatedAt);
             var request = new IdempotentOrderRequest(
-                subjectIdProvider.SubjectId,
+                LegacySubjectId,
                 idempotencyKey,
-                IdempotencyRequestHasher.Compute(subjectIdProvider.SubjectId, order),
+                IdempotencyRequestHasher.Compute(LegacySubjectId, order),
                 order,
                 integrationEvent,
                 response,

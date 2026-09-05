@@ -7,7 +7,6 @@ using CloudOrders.Contracts.Orders;
 using CloudOrders.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -29,7 +28,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
     {
         await using var database = await sqlServer.CreateDatabaseAsync();
         using var factory = CreateFactory(database.ConnectionString);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateAuthenticatedClient();
 
         using var response = await client.GetAsync("/health/ready");
 
@@ -41,7 +40,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
     {
         await using var database = await sqlServer.CreateEmptyDatabaseAsync();
         using var factory = CreateFactory(database.ConnectionString);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateAuthenticatedClient();
 
         using var response = await client.GetAsync("/health/ready");
 
@@ -53,7 +52,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
     {
         await using var database = await sqlServer.CreateDatabaseAsync();
         using var factory = CreateFactory(database.ConnectionString);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateAuthenticatedClient();
 
         using var response = await PostOrderAsync(client, Guid.NewGuid(), "CUST-001", "SKU-001", 2);
 
@@ -69,7 +68,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
         Assert.Equal(created, read);
         Assert.Equal(1, await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.Orders"));
-        Assert.Equal(1, await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.__EFMigrationsHistory"));
+        Assert.Equal(2, await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.__EFMigrationsHistory"));
     }
 
     [Fact]
@@ -77,7 +76,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
     {
         await using var database = await sqlServer.CreateDatabaseAsync();
         using var factory = CreateFactory(database.ConnectionString);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateAuthenticatedClient();
         var key = Guid.NewGuid();
         using var request = CreateOrderRequestMessage(key, " CUST-002 ", " sku.002 ", 3);
         request.Headers.TryAddWithoutValidation("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
@@ -126,7 +125,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
     {
         await using var database = await sqlServer.CreateDatabaseAsync();
         using var factory = CreateFactory(database.ConnectionString);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateAuthenticatedClient();
         var key = Guid.NewGuid();
 
         using var firstResponse = await PostOrderAsync(client, key, "CUST-003", "SKU-003", 4);
@@ -146,7 +145,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
     {
         await using var database = await sqlServer.CreateDatabaseAsync();
         using var factory = CreateFactory(database.ConnectionString);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateAuthenticatedClient();
         var key = Guid.NewGuid();
 
         using var firstResponse = await PostOrderAsync(client, key, " cust-004 ", "sku.004", 5);
@@ -165,7 +164,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
     {
         await using var database = await sqlServer.CreateDatabaseAsync();
         using var factory = CreateFactory(database.ConnectionString);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateAuthenticatedClient();
         var key = Guid.NewGuid();
 
         using var firstResponse = await PostOrderAsync(client, key, "CUST-005", "SKU-005", 1);
@@ -182,8 +181,8 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         await using var database = await sqlServer.CreateDatabaseAsync();
         var raceObserver = new IdempotencyRaceObserver(synchronizedLookupCount: 2);
         using var factory = CreateFactory(database.ConnectionString, raceObserver);
-        using var firstClient = factory.CreateClient();
-        using var secondClient = factory.CreateClient();
+        using var firstClient = factory.CreateAuthenticatedClient();
+        using var secondClient = factory.CreateAuthenticatedClient();
         var key = Guid.NewGuid();
 
         var responses = await Task.WhenAll(
@@ -207,8 +206,8 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         await using var database = await sqlServer.CreateDatabaseAsync();
         var raceObserver = new IdempotencyRaceObserver(synchronizedLookupCount: 2);
         using var factory = CreateFactory(database.ConnectionString, raceObserver);
-        using var firstClient = factory.CreateClient();
-        using var secondClient = factory.CreateClient();
+        using var firstClient = factory.CreateAuthenticatedClient();
+        using var secondClient = factory.CreateAuthenticatedClient();
         var key = Guid.NewGuid();
 
         var responses = await Task.WhenAll(
@@ -234,7 +233,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         await using var database = await sqlServer.CreateDatabaseAsync();
         await ExecuteAsync(database.ConnectionString, uniqueObjectSql, _ => { });
         using (var seedFactory = CreateFactory(database.ConnectionString))
-        using (var seedClient = seedFactory.CreateClient())
+        using (var seedClient = seedFactory.CreateAuthenticatedClient())
         using (var seedResponse = await PostOrderAsync(
             seedClient,
             Guid.NewGuid(),
@@ -270,7 +269,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
     {
         await using var database = await sqlServer.CreateDatabaseAsync();
         using var factory = CreateFactory(database.ConnectionString);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateAuthenticatedClient();
         var key = Guid.NewGuid();
 
         using var firstResponse = await PostOrderAsync(client, key, "CUST-009", "SKU-009", 1);
@@ -293,7 +292,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
     {
         await using var database = await sqlServer.CreateDatabaseAsync();
         using var factory = CreateFactory(database.ConnectionString);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateAuthenticatedClient();
         using var request = CreateOrderRequestMessage(Guid.NewGuid(), "CUST-010", "SKU-010", 1);
         request.Headers.TryAddWithoutValidation("traceparent", new string('a', 513));
 
@@ -311,7 +310,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         OrderResponse created;
 
         using (var firstFactory = CreateFactory(database.ConnectionString))
-        using (var firstClient = firstFactory.CreateClient())
+        using (var firstClient = firstFactory.CreateAuthenticatedClient())
         using (var firstResponse = await PostOrderAsync(firstClient, key, "CUST-007", "SKU-007", 7))
         {
             Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
@@ -319,7 +318,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         }
 
         using var restartedFactory = CreateFactory(database.ConnectionString);
-        using var restartedClient = restartedFactory.CreateClient();
+        using var restartedClient = restartedFactory.CreateAuthenticatedClient();
         using var getResponse = await restartedClient.GetAsync($"/api/v1/orders/{created.Id}");
         using var replayResponse = await PostOrderAsync(restartedClient, key, "CUST-007", "SKU-007", 7);
 
@@ -338,7 +337,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
     {
         await using var database = await sqlServer.CreateDatabaseAsync();
         using var factory = CreateFactory(database.ConnectionString);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateAuthenticatedClient();
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/orders")
         {
             Content = JsonContent.Create(new CreateOrderRequest("CUST-008", "SKU-008", 1))
@@ -354,26 +353,9 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         Assert.Equal(0, await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.Orders"));
     }
 
-    private static WebApplicationFactory<Program> CreateFactory(
+    private static OrderSqlJwtBearerWebApplicationFactory CreateFactory(
         string connectionString,
-        IdempotencyRaceObserver? raceObserver = null) =>
-        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
-        {
-            builder.UseEnvironment("Testing");
-            builder.ConfigureAppConfiguration((_, configuration) =>
-                configuration.AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["ConnectionStrings:CloudOrders"] = connectionString
-                }));
-            if (raceObserver is not null)
-            {
-                builder.ConfigureServices(services =>
-                    services.ConfigureDbContext<CloudOrdersDbContext>(options =>
-                        options.AddInterceptors(
-                            raceObserver.CommandInterceptor,
-                            raceObserver.TransactionInterceptor)));
-            }
-        });
+        IdempotencyRaceObserver? raceObserver = null) => new(connectionString, raceObserver);
 
     private static async Task<HttpResponseMessage> PostOrderAsync(
         HttpClient client,

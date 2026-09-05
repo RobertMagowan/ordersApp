@@ -18,5 +18,9 @@ internal sealed class IdempotencyRecordEntity
 
     public DateTimeOffset ExpiresAt { get; set; }
 
+    public Guid? ActorCustomerProfileId { get; set; }
+
+    public Guid? TargetCustomerProfileId { get; set; }
+
     public OrderEntity? Order { get; set; }
 }

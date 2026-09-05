@@ -1,0 +1,17 @@
+{
+  "evidenceSchemaVersion": "1.0",
+  "kind": "RECONCILIATION",
+  "status": "HISTORICAL_UNVERIFIED",
+  "recordedAt": "2026-09-05T00:00:00Z",
+  "bindings": {
+    "commit": "fbc68a9f0e02923880c8a06162a8d7cda2afac38"
+  },
+  "observations": {
+    "mode": "READ_ONLY",
+    "committedStateMutated": false,
+    "liveCloudCalls": false,
+    "cloudSnapshotSource": "An explicitly injected read-only GitHub/Azure provider is required for cloud reconciliation.",
+    "contradictions": [],
+    "nextActionIfContradicted": "STATE_RECONCILIATION_REQUIRED"
+  }
+}

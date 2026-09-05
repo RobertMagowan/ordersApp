@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudorders.example/delivery/state.schema.json",
+  "type": "object",
+  "required": ["workflowVersion", "stateSchemaVersion", "configurationVersion", "workflowLifecycleOwner", "cutover", "sprintPlanSource", "sprintPlanRevision", "currentSprint"],
+  "properties": {
+    "workflowVersion": { "type": "string", "const": "1.0" },
+    "stateSchemaVersion": { "type": "string", "const": "1.0" },
+    "configurationVersion": { "type": "string", "const": "1.0" },
+    "workflowLifecycleOwner": { "type": "string", "const": "sprint-orchestrator" },
+    "cutover": {
+      "type": "object",
+      "required": ["status", "blockers"],
+      "properties": {
+        "status": { "enum": ["CUTOVER_BLOCKED", "WORKFLOW_CUTOVER_COMPLETE"] },
+        "blockers": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      },
+      "additionalProperties": false
+    },
+    "sprintPlanSource": { "type": "string" },
+    "sprintPlanRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "currentSprint": {
+      "type": "object",
+      "required": ["id", "name", "workItems"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "workItems": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/workItem" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "gate": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["PENDING", "PASS", "FAIL", "NOT_APPLICABLE", "STALE", "HISTORICAL_UNVERIFIED", "BLOCKED"] }
+      },
+      "additionalProperties": false
+    },
+    "evidenceBinding": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "workflowRun": { "type": "integer", "minimum": 1 },
+        "environment": { "enum": ["development", "test", "production"] },
+        "artifact": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["CURRENT", "STALE", "HISTORICAL_UNVERIFIED", "SUPERSEDED"] }
+      },
+      "additionalProperties": false
+    },
+    "workItem": {
+      "type": "object",
+      "required": ["id", "name", "risk", "lifecycle", "stage", "evidenceBindings", "retryCounters", "blockers", "gates"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "risk": { "enum": ["low", "standard", "high"] },
+        "lifecycle": { "enum": ["TODO", "IN_PROGRESS", "PR_OPEN", "MERGED", "DEV_DEPLOYED", "QA_DEPLOYED", "RELEASED", "CANCELLED", "SUPERSEDED"] },
+        "stage": { "enum": ["PLANNING", "IMPLEMENTATION", "LOCAL_VALIDATION", "INDEPENDENT_REVIEW", "PROMOTION", "DEPLOYMENT", "QA", "BLOCKED"] },
+        "evidenceBindings": { "type": "array", "items": { "$ref": "#/$defs/evidenceBinding" } },
+        "retryCounters": {
+          "type": "object",
+          "required": ["command", "deployment"],
+          "properties": {
+            "command": { "type": "integer", "minimum": 0 },
+            "deployment": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["status", "reason"],
+            "properties": {
+              "status": { "enum": ["OPEN", "RESOLVED", "HUMAN_DECISION_REQUIRED"] },
+              "reason": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "gates": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/gate" }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

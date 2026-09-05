@@ -22,6 +22,24 @@ param targetPort int
 @description('Enable the API liveness probe.')
 param enableLivenessProbe bool
 
+@description('Whether to pass the non-production External ID configuration to the API container.')
+param externalIdentityEnabled bool = false
+
+@secure()
+param externalIdentityAuthority string = ''
+
+@secure()
+param externalIdentityValidIssuer string = ''
+
+@secure()
+param externalIdentityTenantId string = ''
+
+@secure()
+param externalIdentityAudience string = ''
+
+@secure()
+param externalIdentityAllowedClientIds string = ''
+
 @description('Minimum number of always-on replicas.')
 param minReplicas int
 
@@ -34,6 +52,29 @@ param tags object
 @description('Non-secret managed-identity Azure SQL connection string. Empty leaves the bootstrap API unchanged.')
 param sqlConnectionString string = ''
 
+var externalIdentityEnvironment = externalIdentityEnabled ? [
+  {
+    name: 'ExternalIdentity__Authority'
+    value: externalIdentityAuthority
+  }
+  {
+    name: 'ExternalIdentity__ValidIssuer'
+    value: externalIdentityValidIssuer
+  }
+  {
+    name: 'ExternalIdentity__TenantId'
+    value: externalIdentityTenantId
+  }
+  {
+    name: 'ExternalIdentity__Audience'
+    value: externalIdentityAudience
+  }
+  {
+    name: 'ExternalIdentity__AllowedClientIds__0'
+    value: externalIdentityAllowedClientIds
+  }
+] : []
+
 var containers = [
   {
     name: 'api'
@@ -42,12 +83,12 @@ var containers = [
       cpu: '0.25'
       memory: '0.5Gi'
     }
-    env: empty(sqlConnectionString) ? [] : [
+    env: concat(empty(sqlConnectionString) ? [] : [
       {
         name: 'ConnectionStrings__CloudOrders'
         value: sqlConnectionString
       }
-    ]
+    ], externalIdentityEnvironment)
     probes: enableLivenessProbe ? [
       {
         type: 'Liveness'

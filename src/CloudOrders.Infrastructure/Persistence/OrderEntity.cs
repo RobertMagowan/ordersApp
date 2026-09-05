@@ -18,5 +18,7 @@ internal sealed class OrderEntity
 
     public DateTimeOffset UpdatedAt { get; set; }
 
+    public Guid? CustomerProfileId { get; set; }
+
     public byte[] RowVersion { get; set; } = [];
 }
