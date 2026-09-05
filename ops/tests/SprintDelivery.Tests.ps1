@@ -594,6 +594,7 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
                 }
                 Baselines = @{ preMigration = $true; postMigration = $true }
                 SelfTestsPassed = $true
+                SelfTestEvidenceAvailable = $true
                 Reconciliation = @{ kind = 'STATE_RECONCILIATION_AGREES'; contradictions = @() }
             }
         }
@@ -636,12 +637,60 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
         ($result.blockers -join "`n") | Should Match 'CI status is FAIL'
     }
 
+    It 'reports unavailable self-test proof without claiming a passing test failed' {
+        $inputs = Get-CutoverInputs
+        $inputs.SelfTestsPassed = $true
+        $inputs.SelfTestEvidenceAvailable = $false
+
+        $result = Set-WorkflowCutover -State (Get-CutoverFixture) -Config $config @inputs
+
+        $result.status | Should Be 'CUTOVER_BLOCKED'
+        ($result.blockers -join "`n") | Should Match 'SELF_TEST_EVIDENCE_UNAVAILABLE'
+        ($result.blockers -join "`n") | Should Not Match 'self-tests did not pass'
+    }
+
     It 'blocks cutover if the preserved product worktree snapshot is incomplete' {
         $inputs = Get-CutoverInputs
         $inputs.WorktreeSnapshot.isPreserved = $false
 
         $result = Set-WorkflowCutover -State (Get-CutoverFixture) -Config $config @inputs
 
+        $result.status | Should Be 'CUTOVER_BLOCKED'
+        ($result.blockers -join "`n") | Should Match 'product worktree'
+    }
+
+    It 'resumes from committed preserved-worktree evidence when a fresh clone has no local product worktree' {
+        $evidence = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/evidence/cutover-validation.json')
+
+        $snapshot = Resolve-PreservedProductWorktreeSnapshot -RepositoryRoot $repositoryRoot -CutoverEvidence $evidence -WorktreeProvider { @() }
+        $inputs = Get-CutoverInputs
+        $inputs.WorktreeSnapshot = $snapshot
+
+        $result = Set-WorkflowCutover -State (Get-CutoverFixture) -Config $config @inputs
+
+        $snapshot.isPreserved | Should Be $true
+        $snapshot.localWorktreePresent | Should Be $false
+        $snapshot.featureBranch | Should Be 'feature/sprint4-identity-design'
+        $snapshot.productHead | Should Be '5c0e1ab136f477127ce194426742a27d704d20d4'
+        $result.status | Should Be 'WORKFLOW_CUTOVER_COMPLETE'
+    }
+
+    It 'blocks cutover when a locally present preserved worktree head differs from committed evidence' {
+        $evidence = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/evidence/cutover-validation.json')
+        $records = @([pscustomobject]@{
+            path = 'C:/repos/OrderApp/.worktrees/feature-sprint4-identity-design'
+            branch = 'feature/sprint4-identity-design'
+            head = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        })
+
+        $snapshot = Resolve-PreservedProductWorktreeSnapshot -RepositoryRoot $repositoryRoot -CutoverEvidence $evidence -WorktreeProvider { $records }
+        $inputs = Get-CutoverInputs
+        $inputs.WorktreeSnapshot = $snapshot
+
+        $result = Set-WorkflowCutover -State (Get-CutoverFixture) -Config $config @inputs
+
+        $snapshot.isPreserved | Should Be $false
+        $snapshot.validationError | Should Be 'PRESERVED_PRODUCT_WORKTREE_HEAD_MISMATCH'
         $result.status | Should Be 'CUTOVER_BLOCKED'
         ($result.blockers -join "`n") | Should Match 'product worktree'
     }

@@ -499,6 +499,77 @@ function Test-WorkflowLifecycleOwner {
     return $true
 }
 
+function Get-LocalWorktreeRecords {
+    [OutputType([object[]])]
+    param([Parameter(Mandatory)][string] $RepositoryRoot)
+
+    $records = [System.Collections.Generic.List[object]]::new()
+    $current = $null
+    foreach ($line in @(& git -C $RepositoryRoot worktree list --porcelain)) {
+        if ($line -like 'worktree *') {
+            if ($null -ne $current) {
+                $records.Add([pscustomobject]$current)
+            }
+            $current = @{ path = $line.Substring(9); branch = $null; head = $null }
+        }
+        elseif ($null -ne $current -and $line -like 'HEAD *') {
+            $current.head = $line.Substring(5)
+        }
+        elseif ($null -ne $current -and $line -like 'branch refs/heads/*') {
+            $current.branch = $line.Substring(18)
+        }
+    }
+
+    if ($null -ne $current) {
+        $records.Add([pscustomobject]$current)
+    }
+
+    return @($records)
+}
+
+function Resolve-PreservedProductWorktreeSnapshot {
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string] $RepositoryRoot,
+        [Parameter(Mandatory)] $CutoverEvidence,
+        [scriptblock] $WorktreeProvider
+    )
+
+    $observations = Get-DeliveryMemberValue -InputObject $CutoverEvidence -Name 'observations'
+    $preserved = Get-DeliveryMemberValue -InputObject $observations -Name 'preservedProductWorktree'
+    $sourceWorktree = Get-DeliveryMemberValue -InputObject $preserved -Name 'path'
+    $featureBranch = Get-DeliveryMemberValue -InputObject $preserved -Name 'branch'
+    $productHead = Get-DeliveryMemberValue -InputObject $preserved -Name 'commit'
+    $snapshot = [ordered]@{
+        isPreserved = -not ([string]::IsNullOrWhiteSpace($sourceWorktree) -or [string]::IsNullOrWhiteSpace($featureBranch) -or [string]::IsNullOrWhiteSpace($productHead))
+        sourceWorktree = $sourceWorktree
+        featureBranch = $featureBranch
+        productHead = $productHead
+        localWorktreePresent = $false
+        validationError = $null
+    }
+
+    if (-not $snapshot.isPreserved) {
+        $snapshot.validationError = 'PRESERVED_PRODUCT_WORKTREE_EVIDENCE_UNAVAILABLE'
+        return [pscustomobject]$snapshot
+    }
+
+    $worktrees = if ($null -ne $WorktreeProvider) { @(& $WorktreeProvider) } else { Get-LocalWorktreeRecords -RepositoryRoot $RepositoryRoot }
+    $localWorktree = @($worktrees | Where-Object { (Get-DeliveryMemberValue -InputObject $_ -Name 'branch') -ceq $featureBranch }) | Select-Object -First 1
+    if ($null -eq $localWorktree) {
+        return [pscustomobject]$snapshot
+    }
+
+    $snapshot.localWorktreePresent = $true
+    $localHead = Get-DeliveryMemberValue -InputObject $localWorktree -Name 'head'
+    if ([string]::IsNullOrWhiteSpace($localHead) -or $localHead -cne $productHead) {
+        $snapshot.isPreserved = $false
+        $snapshot.validationError = 'PRESERVED_PRODUCT_WORKTREE_HEAD_MISMATCH'
+    }
+
+    return [pscustomobject]$snapshot
+}
+
 function Set-WorkflowCutover {
     [OutputType([pscustomobject])]
     param(
@@ -507,6 +578,7 @@ function Set-WorkflowCutover {
         [Parameter(Mandatory)] $WorktreeSnapshot,
         [Parameter(Mandatory)] $Baselines,
         [Parameter(Mandatory)][bool] $SelfTestsPassed,
+        [bool] $SelfTestEvidenceAvailable = $false,
         [Parameter(Mandatory)] $Reconciliation,
         [bool] $AuthoritativeDeploymentEvidenceAvailable = $true
     )
@@ -532,7 +604,10 @@ function Set-WorkflowCutover {
         $blockers.Add('CI status is FAIL after local validation.')
     }
     if (-not $SelfTestsPassed) {
-        $blockers.Add('Delivery workflow self-tests did not pass.')
+        $blockers.Add('SELF_TESTS_FAILED')
+    }
+    elseif (-not $SelfTestEvidenceAvailable) {
+        $blockers.Add('SELF_TEST_EVIDENCE_UNAVAILABLE')
     }
     if (-not $AuthoritativeDeploymentEvidenceAvailable) {
         $blockers.Add('AUTHORITATIVE_AZURE_DEPLOYMENT_SNAPSHOT_UNAVAILABLE')
@@ -577,19 +652,12 @@ if ($MyInvocation.InvocationName -ne '.') {
 
     $cutover = $null
     if ($Reconcile) {
-        $worktreeOutput = @(& git -C $repositoryRoot worktree list --porcelain)
-        $preservedBranch = 'feature/sprint4-identity-design'
-        $preservedIndex = [Array]::IndexOf($worktreeOutput, "branch refs/heads/$preservedBranch")
-        $preservedPath = if ($preservedIndex -gt 0 -and $worktreeOutput[$preservedIndex - 2] -like 'worktree *') { $worktreeOutput[$preservedIndex - 2].Substring(9) } else { $null }
-        $cutover = Set-WorkflowCutover -State $state -Config $config -WorktreeSnapshot @{
-            isPreserved = -not [string]::IsNullOrWhiteSpace($preservedPath)
-            sourceWorktree = $preservedPath
-            featureBranch = $preservedBranch
-            productHead = '5c0e1ab136f477127ce194426742a27d704d20d4'
-        } -Baselines @{
+        $cutoverEvidence = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/evidence/cutover-validation.json')
+        $worktreeSnapshot = Resolve-PreservedProductWorktreeSnapshot -RepositoryRoot $repositoryRoot -CutoverEvidence $cutoverEvidence
+        $cutover = Set-WorkflowCutover -State $state -Config $config -WorktreeSnapshot $worktreeSnapshot -Baselines @{
             preMigration = Test-Path -LiteralPath (Join-Path $repositoryRoot 'delivery/evidence/pre-migration-baseline.json')
             postMigration = $false
-        } -SelfTestsPassed $false -Reconciliation $reconciliation -AuthoritativeDeploymentEvidenceAvailable ($null -ne $snapshot.azure)
+        } -SelfTestsPassed $true -SelfTestEvidenceAvailable $false -Reconciliation $reconciliation -AuthoritativeDeploymentEvidenceAvailable ($null -ne $snapshot.azure)
     }
 
     [pscustomobject]@{
