@@ -576,6 +576,14 @@ Describe 'Sprint delivery CI policy' -Tag 'ci-policy' {
         $template | Should Match '(?i)gate status'
         $template | Should Match '(?i)does not advance lifecycle state'
     }
+
+    It 'bounds standard CI tests and captures a hang diagnostic' {
+        $ciWorkflow = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot '.github/workflows/ci.yml')
+
+        $ciWorkflow | Should Match '(?m)^\s{4}timeout-minutes:\s+30\s*$'
+        $ciWorkflow | Should Match '--blame-hang-timeout\s+10m'
+        $ciWorkflow | Should Match '--blame-hang-dump-type\s+mini'
+    }
 }
 
 Describe 'Sprint delivery migration cutover' -Tag 'migration' {
