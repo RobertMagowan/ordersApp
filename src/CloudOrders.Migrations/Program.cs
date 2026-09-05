@@ -89,7 +89,7 @@ try
 }
 catch (Exception exception)
 {
-    Console.Error.WriteLine($"SQL migration failed: category={GetFailureCategory(exception)}.");
+    Console.Error.WriteLine($"SQL migration failed: category={GetFailureCategory(exception)}; exception={exception.GetType().Name}.");
     return 1;
 }
 
