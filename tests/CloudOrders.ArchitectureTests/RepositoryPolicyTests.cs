@@ -97,6 +97,9 @@ public sealed class RepositoryPolicyTests
         var workflow = File.ReadAllText(Path.Combine(repositoryRoot, ".github", "workflows", "branch-policy.yml"));
 
         Assert.Contains("pull_request_target:", workflow, StringComparison.Ordinal);
+        Assert.Contains("Reject modification to protected enforcement workflows", workflow, StringComparison.Ordinal);
+        Assert.Contains(".github/workflows/branch-policy.yml", workflow, StringComparison.Ordinal);
+        Assert.Contains(".github/workflows/deploy.yml", workflow, StringComparison.Ordinal);
         Assert.Contains("push:", workflow, StringComparison.Ordinal);
         Assert.Contains("Enforce merge-commit promotion lineage", workflow, StringComparison.Ordinal);
         Assert.Contains("fetch-depth: 0", workflow, StringComparison.Ordinal);

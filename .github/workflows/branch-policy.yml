@@ -22,6 +22,18 @@ jobs:
     if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
+      - name: Reject modification to protected enforcement workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          CHANGED_FILES="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename')"
+          if grep -Fxq -e '.github/workflows/branch-policy.yml' -e '.github/workflows/deploy.yml' <<< "$CHANGED_FILES"; then
+            echo "Protected enforcement workflows cannot be changed by a pull request." >&2
+            exit 1
+          fi
+
       - name: Validate promotion path
         env:
           BASE: ${{ github.event.pull_request.base.ref }}
