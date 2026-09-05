@@ -103,6 +103,7 @@ public sealed class RepositoryPolicyTests
         Assert.Contains(".github/workflows/deploy.yml", workflow, StringComparison.Ordinal);
         Assert.Contains("push:", workflow, StringComparison.Ordinal);
         Assert.Contains("Enforce merge-commit promotion lineage", workflow, StringComparison.Ordinal);
+        Assert.Contains("actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2", workflow, StringComparison.Ordinal);
         Assert.Contains("fetch-depth: 0", workflow, StringComparison.Ordinal);
         Assert.Contains("github.event.before", workflow, StringComparison.Ordinal);
         Assert.Contains("GH_TOKEN: ${{ github.token }}", workflow, StringComparison.Ordinal);
