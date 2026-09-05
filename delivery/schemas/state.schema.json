@@ -2,11 +2,21 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://cloudorders.example/delivery/state.schema.json",
   "type": "object",
-  "required": ["workflowVersion", "stateSchemaVersion", "configurationVersion", "sprintPlanSource", "sprintPlanRevision", "currentSprint"],
+  "required": ["workflowVersion", "stateSchemaVersion", "configurationVersion", "workflowLifecycleOwner", "cutover", "sprintPlanSource", "sprintPlanRevision", "currentSprint"],
   "properties": {
     "workflowVersion": { "type": "string", "const": "1.0" },
     "stateSchemaVersion": { "type": "string", "const": "1.0" },
     "configurationVersion": { "type": "string", "const": "1.0" },
+    "workflowLifecycleOwner": { "type": "string", "const": "sprint-orchestrator" },
+    "cutover": {
+      "type": "object",
+      "required": ["status", "blockers"],
+      "properties": {
+        "status": { "enum": ["CUTOVER_BLOCKED", "WORKFLOW_CUTOVER_COMPLETE"] },
+        "blockers": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      },
+      "additionalProperties": false
+    },
     "sprintPlanSource": { "type": "string" },
     "sprintPlanRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "currentSprint": {

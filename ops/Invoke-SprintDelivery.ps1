@@ -288,7 +288,7 @@ function Test-SprintDeliveryState {
         [Parameter(Mandatory)] $Config
     )
 
-    foreach ($name in 'workflowVersion', 'stateSchemaVersion', 'configurationVersion', 'currentSprint') {
+    foreach ($name in 'workflowVersion', 'stateSchemaVersion', 'configurationVersion', 'workflowLifecycleOwner', 'cutover', 'currentSprint') {
         if (-not (Test-DeliveryMemberExists -InputObject $State -Name $name)) {
             throw "State is missing '$name'."
         }
@@ -304,6 +304,17 @@ function Test-SprintDeliveryState {
 
     if ((Get-DeliveryMemberValue -InputObject $State -Name 'configurationVersion') -ne (Get-DeliveryMemberValue -InputObject $Config -Name 'configurationVersion')) {
         throw 'State configurationVersion does not match configuration.'
+    }
+
+    Test-WorkflowLifecycleOwner -State $State -ExpectedOwner 'sprint-orchestrator' | Out-Null
+    $cutover = Get-DeliveryMemberValue -InputObject $State -Name 'cutover'
+    $cutoverStatus = Get-DeliveryMemberValue -InputObject $cutover -Name 'status'
+    $cutoverBlockers = Get-DeliveryMemberValue -InputObject $cutover -Name 'blockers'
+    if ($cutoverStatus -notin @('CUTOVER_BLOCKED', 'WORKFLOW_CUTOVER_COMPLETE') -or $cutoverBlockers -is [string] -or $null -eq $cutoverBlockers) {
+        throw 'State has an invalid cutover record.'
+    }
+    if ($cutoverStatus -eq 'WORKFLOW_CUTOVER_COMPLETE' -and @($cutoverBlockers).Count -gt 0) {
+        throw 'State cannot declare a completed cutover while blockers remain.'
     }
 
     $vocabulary = Get-DeliveryMemberValue -InputObject $Config -Name 'vocabulary'
@@ -474,6 +485,84 @@ function Get-NextDeliveryAction {
     }
 }
 
+function Test-WorkflowLifecycleOwner {
+    param(
+        [Parameter(Mandatory)] $State,
+        [Parameter(Mandatory)][string] $ExpectedOwner
+    )
+
+    $owner = Get-DeliveryMemberValue -InputObject $State -Name 'workflowLifecycleOwner'
+    if ([string]::IsNullOrWhiteSpace($owner) -or $owner -cne $ExpectedOwner) {
+        throw "Competing workflow lifecycle owner '$owner' was found; expected '$ExpectedOwner'."
+    }
+
+    return $true
+}
+
+function Set-WorkflowCutover {
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] $State,
+        [Parameter(Mandatory)] $Config,
+        [Parameter(Mandatory)] $WorktreeSnapshot,
+        [Parameter(Mandatory)] $Baselines,
+        [Parameter(Mandatory)][bool] $SelfTestsPassed,
+        [Parameter(Mandatory)] $Reconciliation,
+        [bool] $AuthoritativeDeploymentEvidenceAvailable = $true
+    )
+
+    Test-SprintDeliveryState -State $State -Config $Config | Out-Null
+    Test-WorkflowLifecycleOwner -State $State -ExpectedOwner 'sprint-orchestrator' | Out-Null
+
+    $blockers = [System.Collections.Generic.List[string]]::new()
+    if ((Get-DeliveryMemberValue -InputObject $WorktreeSnapshot -Name 'isPreserved') -ne $true -or
+        [string]::IsNullOrWhiteSpace((Get-DeliveryMemberValue -InputObject $WorktreeSnapshot -Name 'sourceWorktree')) -or
+        [string]::IsNullOrWhiteSpace((Get-DeliveryMemberValue -InputObject $WorktreeSnapshot -Name 'featureBranch')) -or
+        [string]::IsNullOrWhiteSpace((Get-DeliveryMemberValue -InputObject $WorktreeSnapshot -Name 'productHead'))) {
+        $blockers.Add('Preserved product worktree snapshot is incomplete.')
+    }
+
+    if ((Get-DeliveryMemberValue -InputObject $Baselines -Name 'preMigration') -ne $true) {
+        $blockers.Add('Pre-migration baseline is unavailable.')
+    }
+    if ((Get-DeliveryMemberValue -InputObject $Baselines -Name 'postMigration') -ne $true) {
+        $blockers.Add('Post-migration baseline is unavailable.')
+    }
+    if ((Get-DeliveryMemberValue -InputObject $Baselines -Name 'ci') -eq 'FAIL') {
+        $blockers.Add('CI status is FAIL after local validation.')
+    }
+    if (-not $SelfTestsPassed) {
+        $blockers.Add('Delivery workflow self-tests did not pass.')
+    }
+    if (-not $AuthoritativeDeploymentEvidenceAvailable) {
+        $blockers.Add('AUTHORITATIVE_AZURE_DEPLOYMENT_SNAPSHOT_UNAVAILABLE')
+    }
+
+    $reconciliationKind = Get-DeliveryMemberValue -InputObject $Reconciliation -Name 'kind'
+    if ($reconciliationKind -ne 'STATE_RECONCILIATION_AGREES') {
+        $contradictions = @(Get-DeliveryMemberValue -InputObject $Reconciliation -Name 'contradictions')
+        if ($contradictions.Count -eq 0) {
+            $blockers.Add("Reconciliation result is '$reconciliationKind'.")
+        }
+        foreach ($contradiction in $contradictions) {
+            $kind = Get-DeliveryMemberValue -InputObject $contradiction -Name 'kind'
+            $blockers.Add("Reconciliation contradiction: $kind")
+        }
+    }
+
+    $derivedState = Copy-DeliveryObject -InputObject $State
+    $derivedCutover = Get-DeliveryMemberValue -InputObject $derivedState -Name 'cutover'
+    $derivedCutover.status = if ($blockers.Count -eq 0) { 'WORKFLOW_CUTOVER_COMPLETE' } else { 'CUTOVER_BLOCKED' }
+    $derivedCutover.blockers = @($blockers)
+
+    return [pscustomobject]@{
+        status = $derivedCutover.status
+        blockers = @($blockers)
+        state = $derivedState
+        sideEffect = $false
+    }
+}
+
 if ($MyInvocation.InvocationName -ne '.') {
     $repositoryRoot = Split-Path -Parent $PSScriptRoot
     $config = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/config.json')
@@ -486,10 +575,28 @@ if ($MyInvocation.InvocationName -ne '.') {
         $reconciliation = Compare-DeliveryState -State $state -Snapshot $snapshot
     }
 
+    $cutover = $null
+    if ($Reconcile) {
+        $worktreeOutput = @(& git -C $repositoryRoot worktree list --porcelain)
+        $preservedBranch = 'feature/sprint4-identity-design'
+        $preservedIndex = [Array]::IndexOf($worktreeOutput, "branch refs/heads/$preservedBranch")
+        $preservedPath = if ($preservedIndex -gt 0 -and $worktreeOutput[$preservedIndex - 2] -like 'worktree *') { $worktreeOutput[$preservedIndex - 2].Substring(9) } else { $null }
+        $cutover = Set-WorkflowCutover -State $state -Config $config -WorktreeSnapshot @{
+            isPreserved = -not [string]::IsNullOrWhiteSpace($preservedPath)
+            sourceWorktree = $preservedPath
+            featureBranch = $preservedBranch
+            productHead = '5c0e1ab136f477127ce194426742a27d704d20d4'
+        } -Baselines @{
+            preMigration = Test-Path -LiteralPath (Join-Path $repositoryRoot 'delivery/evidence/pre-migration-baseline.json')
+            postMigration = $false
+        } -SelfTestsPassed $false -Reconciliation $reconciliation -AuthoritativeDeploymentEvidenceAvailable ($null -ne $snapshot.azure)
+    }
+
     [pscustomobject]@{
         mode = if ($WhatIf) { 'WHAT_IF' } else { 'READ_ONLY' }
         sprint = (Get-DeliveryMemberValue -InputObject (Get-DeliveryMemberValue -InputObject $state -Name 'currentSprint') -Name 'id')
         action = $action
         reconciliation = $reconciliation
+        cutover = $cutover
     } | ConvertTo-Json -Depth 8
 }

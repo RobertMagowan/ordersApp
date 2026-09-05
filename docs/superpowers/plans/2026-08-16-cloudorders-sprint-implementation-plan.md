@@ -29,6 +29,8 @@
 
 ## Delivery Status and Effort Model
 
+> **Workflow migration note (2026-09-05):** Sprint 4A execution state is now governed by `delivery/state.json` and the repository-native sprint-delivery workflow. This roadmap remains the delivery roadmap; the more specific Sprint 4 plan and versioned contracts remain the requirements authority. See `docs/evidence/delivery-workflow-migration.md` for the cutover status.
+
 Estimates assume one focused developer. Remaining-sprint estimates explicitly include implementation, focused automated tests, Azure development deployment, three independent development-verification days, and one to two QA days in Azure `test`. Defect remediation, waiting for external access/approvals/DNS/quota, and Azure incidents are excluded and re-estimated when discovered.
 
 | Sprint | Delivery | Status | Estimated effort |

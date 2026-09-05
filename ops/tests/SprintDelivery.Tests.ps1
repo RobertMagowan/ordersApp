@@ -573,3 +573,109 @@ Describe 'Sprint delivery CI policy' -Tag 'ci-policy' {
         $template | Should Match '(?i)does not advance lifecycle state'
     }
 }
+
+Describe 'Sprint delivery migration cutover' -Tag 'migration' {
+    BeforeAll {
+        $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        . (Join-Path $repositoryRoot 'ops/Invoke-SprintDelivery.ps1')
+        $config = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/config.json')
+
+        function Get-CutoverFixture {
+            return Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/state.json')
+        }
+
+        function Get-CutoverInputs {
+            return @{
+                WorktreeSnapshot = @{
+                    isPreserved = $true
+                    sourceWorktree = 'C:/repos/OrderApp/.worktrees/feature-sprint4-identity-design'
+                    featureBranch = 'feature/sprint4-identity-design'
+                    productHead = '5c0e1ab136f477127ce194426742a27d704d20d4'
+                }
+                Baselines = @{ preMigration = $true; postMigration = $true }
+                SelfTestsPassed = $true
+                Reconciliation = @{ kind = 'STATE_RECONCILIATION_AGREES'; contradictions = @() }
+            }
+        }
+    }
+
+    It 'allows cutover only when every required read-only proof is supplied' {
+        $inputs = Get-CutoverInputs
+        $result = Set-WorkflowCutover -State (Get-CutoverFixture) -Config $config @inputs
+
+        $result.status | Should Be 'WORKFLOW_CUTOVER_COMPLETE'
+        $result.blockers.Count | Should Be 0
+        $result.sideEffect | Should Be $false
+    }
+
+    It 'blocks cutover when a reconciliation contradiction remains' {
+        $inputs = Get-CutoverInputs
+        $inputs.Reconciliation = @{ kind = 'STATE_RECONCILIATION_REQUIRED'; contradictions = @(@{ kind = 'AUTHORITATIVE_DEPLOYMENT_SNAPSHOT_UNAVAILABLE' }) }
+
+        $result = Set-WorkflowCutover -State (Get-CutoverFixture) -Config $config @inputs
+
+        $result.status | Should Be 'CUTOVER_BLOCKED'
+        ($result.blockers -join "`n") | Should Match 'AUTHORITATIVE_DEPLOYMENT_SNAPSHOT_UNAVAILABLE'
+    }
+
+    It 'blocks cutover when the Azure deployment authority was unavailable despite an otherwise agreeing snapshot' {
+        $inputs = Get-CutoverInputs
+        $result = Set-WorkflowCutover -State (Get-CutoverFixture) -Config $config @inputs -AuthoritativeDeploymentEvidenceAvailable $false
+
+        $result.status | Should Be 'CUTOVER_BLOCKED'
+        ($result.blockers -join "`n") | Should Match 'AUTHORITATIVE_AZURE_DEPLOYMENT_SNAPSHOT_UNAVAILABLE'
+    }
+
+    It 'blocks cutover when developer evidence passes but CI subsequently fails' {
+        $inputs = Get-CutoverInputs
+        $inputs.Baselines = @{ preMigration = $true; postMigration = $true; ci = 'FAIL' }
+
+        $result = Set-WorkflowCutover -State (Get-CutoverFixture) -Config $config @inputs
+
+        $result.status | Should Be 'CUTOVER_BLOCKED'
+        ($result.blockers -join "`n") | Should Match 'CI status is FAIL'
+    }
+
+    It 'blocks cutover if the preserved product worktree snapshot is incomplete' {
+        $inputs = Get-CutoverInputs
+        $inputs.WorktreeSnapshot.isPreserved = $false
+
+        $result = Set-WorkflowCutover -State (Get-CutoverFixture) -Config $config @inputs
+
+        $result.status | Should Be 'CUTOVER_BLOCKED'
+        ($result.blockers -join "`n") | Should Match 'product worktree'
+    }
+
+    It 'keeps D1 as a human decision without escalating it to a model action' {
+        $inputs = Get-CutoverInputs
+        $result = Set-WorkflowCutover -State (Get-CutoverFixture) -Config $config @inputs
+
+        $d1 = $result.state.currentSprint.workItems | Where-Object { $_.id -eq '4A-7-D1' }
+        $d1.blockers[0].status | Should Be 'HUMAN_DECISION_REQUIRED'
+        ($result.blockers -join "`n") | Should Not Match 'D1'
+    }
+
+    It 'rejects an incompatible state version before evaluating cutover' {
+        $state = Get-CutoverFixture
+        $state.stateSchemaVersion = '99.0'
+        $inputs = Get-CutoverInputs
+
+        { Set-WorkflowCutover -State $state -Config $config @inputs } | Should Throw
+    }
+
+    It 'recognizes one lifecycle owner and rejects a competing owner' {
+        $state = Get-CutoverFixture
+        (Test-WorkflowLifecycleOwner -State $state -ExpectedOwner 'sprint-orchestrator') | Should Be $true
+
+        $state.workflowLifecycleOwner = 'another-orchestrator'
+        { Test-WorkflowLifecycleOwner -State $state -ExpectedOwner 'sprint-orchestrator' } | Should Throw
+    }
+
+    It 'rejects a state that declares a completed cutover with unresolved blockers' {
+        $state = Get-CutoverFixture
+        $state.cutover.status = 'WORKFLOW_CUTOVER_COMPLETE'
+        $state.cutover.blockers = @('AUTHORITATIVE_AZURE_DEPLOYMENT_SNAPSHOT_UNAVAILABLE')
+
+        { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
+    }
+}
