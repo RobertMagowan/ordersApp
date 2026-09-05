@@ -13,18 +13,23 @@ on:
       - master
 
 permissions:
+  checks: write
   contents: read
   pull-requests: read
 
 jobs:
   branch-policy:
-    name: Enforce promotion source branch
+    name: Validate promotion source branch (trusted)
     if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
-      - name: Reject modification to protected enforcement workflows
+      - name: Reject modification to protected enforcement workflows and validate trusted promotion path
+        id: promotion_path
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          HEAD: ${{ github.event.pull_request.head.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
@@ -34,11 +39,7 @@ jobs:
             exit 1
           fi
 
-      - name: Validate promotion path
-        env:
-          BASE: ${{ github.event.pull_request.base.ref }}
-          HEAD: ${{ github.event.pull_request.head.ref }}
-        run: |
+          # Validate promotion path after confirming the enforcement files are unmodified.
           case "$BASE" in
             development)
               [[ "$HEAD" == feature/* ]] || {
@@ -64,6 +65,29 @@ jobs:
               ;;
           esac
 
+      - name: Publish required check on pull request head
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          OUTCOME: ${{ steps.promotion_path.outcome }}
+        run: |
+          set -euo pipefail
+          CONCLUSION=success
+          if [[ "$OUTCOME" != success ]]; then
+            CONCLUSION=failure
+          fi
+
+          gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs" \
+            -f name='Enforce promotion source branch' \
+            -f head_sha="$HEAD_SHA" \
+            -f status=completed \
+            -f conclusion="$CONCLUSION" \
+            -f output[title]='Promotion source branch validation' \
+            -f output[summary]="Trusted validation completed with $CONCLUSION." >/dev/null
+
+          [[ "$CONCLUSION" == success ]]
+
   promotion-lineage:
     name: Enforce merge-commit promotion lineage
     if: github.event_name == 'push'
@@ -77,6 +101,7 @@ jobs:
         env:
           BRANCH: ${{ github.ref_name }}
           BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
         run: |
           read -r -a PARENTS <<< "$(git show -s --format=%P "$SHA")"
