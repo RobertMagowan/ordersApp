@@ -60,6 +60,18 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
         Assert.Contains("SQL migration failed:", result.StandardError);
     }
 
+    [Fact]
+    public async Task NamedMigrationRunnerReportsASafeSelectorFailureCategory()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+
+        var result = await RunRunnerAsync(database.ConnectionString, "MissingMigration");
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("category=MIGRATION_SELECTOR_INVALID", result.StandardError, StringComparison.Ordinal);
+        Assert.DoesNotContain(database.ConnectionString, result.StandardError, StringComparison.Ordinal);
+    }
+
     private static async Task<MigrationRunResult> RunRunnerAsync(string? connectionString, string? migration = null)
     {
         var runnerProject = Path.Combine(RepositoryRoot(), "src", "CloudOrders.Migrations", "CloudOrders.Migrations.csproj");
