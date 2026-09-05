@@ -2,7 +2,8 @@
 param(
     [switch] $WhatIf,
     [switch] $Reconcile,
-    [string] $ReconciliationSnapshotPath
+    [string] $ReconciliationSnapshotPath,
+    [string] $CutoverEvidencePath
 )
 
 Set-StrictMode -Version Latest
@@ -620,6 +621,48 @@ function Resolve-PreservedProductWorktreeSnapshot {
     return [pscustomobject]$snapshot
 }
 
+function Get-CutoverProofStatus {
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] $CutoverEvidence,
+        [Parameter(Mandatory)] $Snapshot
+    )
+
+    $observations = Get-DeliveryMemberValue -InputObject $CutoverEvidence -Name 'observations'
+    $baseline = $null
+    $selfTests = $null
+    $developmentRun = $null
+    if ($null -ne $observations) {
+        $baseline = Get-DeliveryMemberValue -InputObject $observations -Name 'postMigrationBaseline'
+        if ($null -ne $baseline) {
+            $selfTests = Get-DeliveryMemberValue -InputObject $baseline -Name 'workflowSelfTests'
+        }
+
+        $github = Get-DeliveryMemberValue -InputObject $observations -Name 'github'
+        if ($null -ne $github) {
+            $developmentRun = Get-DeliveryMemberValue -InputObject $github -Name 'developmentRun'
+        }
+    }
+    $expectedCommit = if ($null -ne $developmentRun) { Get-DeliveryMemberValue -InputObject $developmentRun -Name 'commit' } else { $null }
+    $expectedRun = if ($null -ne $developmentRun) { Get-DeliveryMemberValue -InputObject $developmentRun -Name 'number' } else { $null }
+    $deployments = @(Get-DeliveryMemberValue -InputObject $Snapshot -Name 'deployments')
+    $matchingDeployment = @($deployments | Where-Object {
+        (Get-DeliveryMemberValue -InputObject $_ -Name 'commit') -ceq $expectedCommit -and
+        (Get-DeliveryMemberValue -InputObject $_ -Name 'workflowRun') -eq $expectedRun -and
+        (Get-DeliveryMemberValue -InputObject $_ -Name 'environment') -eq 'development' -and
+        -not [string]::IsNullOrWhiteSpace((Get-DeliveryMemberValue -InputObject $_ -Name 'artifact'))
+    })
+
+    $baselineStatus = if ($null -ne $baseline) { Get-DeliveryMemberValue -InputObject $baseline -Name 'status' } else { $null }
+
+    return [pscustomobject]@{
+        postMigrationBaseline = $baselineStatus -in @('PASS', 'PASS_WITH_ENVIRONMENT_FAILURE')
+        selfTestsPassed = $null -ne $selfTests -and (Get-DeliveryMemberValue -InputObject $selfTests -Name 'status') -eq 'PASS' -and (Get-DeliveryMemberValue -InputObject $selfTests -Name 'failed') -eq 0
+        selfTestEvidenceAvailable = $null -ne $selfTests
+        authoritativeDeploymentEvidenceAvailable = $matchingDeployment.Count -gt 0
+    }
+}
+
 function Set-WorkflowCutover {
     [OutputType([pscustomobject])]
     param(
@@ -693,7 +736,6 @@ if ($MyInvocation.InvocationName -ne '.') {
     $config = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/config.json')
     $state = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/state.json')
     Test-SprintDeliveryState -State $state -Config $config | Out-Null
-    $action = Get-NextDeliveryAction -State $state -Config $config
     $reconciliation = $null
     if ($Reconcile) {
         $snapshotInput = if ([string]::IsNullOrWhiteSpace($ReconciliationSnapshotPath)) { $null } else { Read-DeliveryJson -Path $ReconciliationSnapshotPath }
@@ -708,13 +750,18 @@ if ($MyInvocation.InvocationName -ne '.') {
 
     $cutover = $null
     if ($Reconcile) {
-        $cutoverEvidence = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/evidence/cutover-validation.json')
+        $resolvedCutoverEvidencePath = if ([string]::IsNullOrWhiteSpace($CutoverEvidencePath)) { Join-Path $repositoryRoot 'delivery/evidence/cutover-validation.json' } else { $CutoverEvidencePath }
+        $cutoverEvidence = Read-DeliveryJson -Path $resolvedCutoverEvidencePath
         $worktreeSnapshot = Resolve-PreservedProductWorktreeSnapshot -RepositoryRoot $repositoryRoot -CutoverEvidence $cutoverEvidence
+        $proof = Get-CutoverProofStatus -CutoverEvidence $cutoverEvidence -Snapshot $snapshot
         $cutover = Set-WorkflowCutover -State $state -Config $config -WorktreeSnapshot $worktreeSnapshot -Baselines @{
             preMigration = Test-Path -LiteralPath (Join-Path $repositoryRoot 'delivery/evidence/pre-migration-baseline.json')
-            postMigration = $false
-        } -SelfTestsPassed $true -SelfTestEvidenceAvailable $false -Reconciliation $reconciliation -AuthoritativeDeploymentEvidenceAvailable ($null -ne $snapshot.azure)
+            postMigration = $proof.postMigrationBaseline
+        } -SelfTestsPassed $proof.selfTestsPassed -SelfTestEvidenceAvailable $proof.selfTestEvidenceAvailable -Reconciliation $reconciliation -AuthoritativeDeploymentEvidenceAvailable $proof.authoritativeDeploymentEvidenceAvailable
     }
+
+    $actionState = if ($null -ne $cutover) { $cutover.state } else { $state }
+    $action = Get-NextDeliveryAction -State $actionState -Config $config
 
     [pscustomobject]@{
         mode = if ($WhatIf) { 'WHAT_IF' } else { 'READ_ONLY' }

@@ -14,10 +14,10 @@ Do not infer completion from a label. Git is authoritative for commits and workt
 The default reconciliation deliberately has no cloud credentials and therefore fails closed when live deployment proof is unavailable. A caller may supply a sanitized, read-only JSON snapshot with `github` and `azure` objects (including immutable deployment `artifact` values):
 
 ```powershell
-pwsh -File ops/Invoke-SprintDelivery.ps1 -Reconcile -WhatIf -ReconciliationSnapshotPath <snapshot.json>
+pwsh -File ops/Invoke-SprintDelivery.ps1 -Reconcile -WhatIf -ReconciliationSnapshotPath <snapshot.json> -CutoverEvidencePath <cutover-evidence.json>
 ```
 
-The command reads the snapshot only; it never authenticates, deploys, or writes lifecycle state. A cutover remains blocked unless that snapshot agrees with state and all baseline evidence is available.
+`-CutoverEvidencePath` is optional and defaults to `delivery/evidence/cutover-validation.json`; it exists so the same read-only path can be exercised with fixtures. The command reads both inputs only; it never authenticates, deploys, or writes lifecycle state. A cutover remains blocked unless the snapshot agrees with state, matches the recorded development run with a non-empty immutable artifact, and the cutover evidence records a passing post-migration baseline and workflow self-tests.
 
 ## Evidence and staleness
 

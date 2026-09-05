@@ -783,4 +783,18 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
         $LASTEXITCODE | Should Be 0
         ($output -join "`n") | Should Match 'CUTOVER_BLOCKED'
     }
+
+    It 'derives cutover completion from committed baseline proof and matching immutable deployment evidence' {
+        $powerShellHost = if ($env:OS -eq 'Windows_NT') { 'powershell' } else { 'pwsh' }
+        $snapshotPath = Join-Path $repositoryRoot 'ops/tests/fixtures/agreeing-cutover-snapshot.json'
+        $evidencePath = Join-Path $repositoryRoot 'ops/tests/fixtures/completed-cutover-evidence.json'
+
+        $output = & $powerShellHost -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repositoryRoot 'ops/Invoke-SprintDelivery.ps1') -Reconcile -WhatIf -ReconciliationSnapshotPath $snapshotPath -CutoverEvidencePath $evidencePath
+        $result = ($output -join "`n") | ConvertFrom-Json
+
+        $LASTEXITCODE | Should Be 0
+        $result.cutover.status | Should Be 'WORKFLOW_CUTOVER_COMPLETE'
+        $result.action.kind | Should Be 'WORK_ITEM_READY'
+        $result.action.workItemId | Should Be '4A-4'
+    }
 }
