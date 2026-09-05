@@ -31,21 +31,18 @@ public sealed class DeploymentWorkflowPolicyTests
     }
 
     [Fact]
-    public void DeploymentWorkflowRejectsPushesWithoutProtectedMergeLineage()
+    public void DeploymentWorkflowHasNoIndependentPromotionLineageGate()
     {
         var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
         var workflow = File.ReadAllText(workflowPath);
 
-        Assert.Contains("name: Check out protected commit", workflow, StringComparison.Ordinal);
-        Assert.Contains("fetch-depth: 0", workflow, StringComparison.Ordinal);
-        Assert.Contains("name: Reject a protected push without merge lineage", workflow, StringComparison.Ordinal);
-        Assert.DoesNotContain("if: github.event_name == 'push'\n        uses: actions/checkout", workflow, StringComparison.Ordinal);
-        Assert.Contains("Expected a two-parent merge commit", workflow, StringComparison.Ordinal);
-        Assert.Contains("github.event.before", workflow, StringComparison.Ordinal);
-        Assert.Contains("if [[ \"$GITHUB_EVENT_NAME\" == push ]]", workflow, StringComparison.Ordinal);
-        Assert.Contains("merged $SOURCE_BRANCH PR into $BRANCH", workflow, StringComparison.Ordinal);
-        Assert.Contains("if [[ \"$GITHUB_EVENT_NAME\" != push ]]", workflow, StringComparison.Ordinal);
-        Assert.Contains("The non-target merge parent must come from $SOURCE_BRANCH", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("pull-requests: read", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("name: Check out protected commit", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("name: Reject a protected push without merge lineage", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("Expected a two-parent merge commit", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("github.event.before", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("gh api", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("git merge-base --is-ancestor", workflow, StringComparison.Ordinal);
     }
 
     [Fact]
