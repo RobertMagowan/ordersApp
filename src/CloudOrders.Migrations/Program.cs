@@ -89,7 +89,8 @@ try
 }
 catch (Exception exception)
 {
-    Console.Error.WriteLine($"SQL migration failed: category={GetFailureCategory(exception)}; exception={exception.GetType().Name}.");
+    Console.Error.WriteLine(
+        $"SQL migration failed: category={GetFailureCategory(exception)}; exception={exception.GetType().Name}; detail={GetSafeFailureDetail(exception, connectionString)}.");
     return 1;
 }
 
@@ -100,4 +101,10 @@ static string GetFailureCategory(Exception exception) => exception switch
     InvalidOperationException { Message: var message } when message.StartsWith("Migration-only release", StringComparison.Ordinal) => "MIGRATION_STATE_CONFLICT",
     SqlException => "SQL_CONNECTION_OR_AUTHORIZATION",
     _ => "UNEXPECTED"
+};
+
+static string GetSafeFailureDetail(Exception exception, string connectionString) => exception switch
+{
+    InvalidOperationException => exception.Message.Replace(connectionString, "[REDACTED]", StringComparison.Ordinal),
+    _ => "Unavailable"
 };
