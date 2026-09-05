@@ -12,7 +12,7 @@
 - `src/CloudOrders.OutboxPublisher` and `src/CloudOrders.OrderProcessor` will be isolated Azure Functions.
 - `tests/` contains unit, integration, end-to-end, bUnit, Playwright, and NBomber tests.
 - `infra/`, `local/`, `ops/`, and `.github/workflows/` contain Bicep, local emulators, operations, and CI/CD. `infra/main.bicep` composes the focused AVM-backed modules under `infra/modules/`; pinned versions are recorded in `infra/avm-versions.md`.
-- Git promotion is `feature/*` → `development` → `test` → `master`; all new feature branches must use the `feature/` prefix. Protected-branch changes require a pull request, required checks, and conversation resolution. Because this is a single-developer repository, zero independent approvals are required; the administrator remains responsible for reviewing and merging.
+- Git promotion is `feature/*` → `development` → `test` → `master`; all new feature branches must use the `feature/` prefix. Protected-branch changes require a pull request, required checks, and conversation resolution. Merge every protected-branch PR using GitHub's **Create a merge commit** option; GitHub is configured with squash and rebase merges disabled. The trusted PR-path check and the deployment gate both reject a protected push without two-parent merge lineage. Enforcement workflow files are locked against pull-request modification; changes require an explicit administrator break-glass exception and fresh review. Because this is a single-developer repository, zero independent approvals are required; the administrator remains responsible for reviewing and merging.
 
 ## Build, Test, and Development Commands
 
@@ -44,7 +44,7 @@ Treat every task as a development release increment: do not start the next task 
 
 ## Commits and Pull Requests
 
-Use imperative Conventional Commit-style subjects, for example `feat: add transactional outbox`. A sprint should contain several focused commits where natural boundaries exist (tests, implementation, integration, packaging, and evidence); do not squash away useful review history during development. Pull requests must describe the sprint gate, link the relevant issue/plan, list test commands and manual evidence, call out migrations or Azure changes, and include screenshots for UI changes. Infrastructure PRs must include Bicep validation/what-if output. `.github/workflows/bicep-validation.yml` builds and lints the composition root plus all environment parameter overlays without Azure credentials. The promotion path is enforced by `.github/workflows/branch-policy.yml`; do not bypass it with direct pushes.
+Use imperative Conventional Commit-style subjects, for example `feat: add transactional outbox`. A sprint should contain several focused commits where natural boundaries exist (tests, implementation, integration, packaging, and evidence); do not squash away useful review history during development. Pull requests must describe the sprint gate, link the relevant issue/plan, list test commands and manual evidence, call out migrations or Azure changes, and include screenshots for UI changes. Infrastructure PRs must include Bicep validation/what-if output. `.github/workflows/bicep-validation.yml` builds and lints the composition root plus all environment parameter overlays without Azure credentials. `.github/workflows/branch-policy.yml` validates both the authorised PR path and, after merge, a two-parent merge-commit lineage; do not bypass it with direct pushes.
 
 ## Security and Decision Gates
 

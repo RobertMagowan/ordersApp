@@ -90,6 +90,32 @@ public sealed class RepositoryPolicyTests
         Assert.DoesNotContain(productionSource, source => source.Contains("PolicyTest", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void PromotionPolicyRequiresMergeCommitLineageOnProtectedBranches()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(repositoryRoot, ".github", "workflows", "branch-policy.yml"));
+
+        Assert.Contains("pull_request_target:", workflow, StringComparison.Ordinal);
+        Assert.Contains("checks: write", workflow, StringComparison.Ordinal);
+        Assert.Contains("Reject modification to protected enforcement workflows", workflow, StringComparison.Ordinal);
+        Assert.Contains(".github/workflows/branch-policy.yml", workflow, StringComparison.Ordinal);
+        Assert.Contains(".github/workflows/deploy.yml", workflow, StringComparison.Ordinal);
+        Assert.Contains("push:", workflow, StringComparison.Ordinal);
+        Assert.Contains("Enforce merge-commit promotion lineage", workflow, StringComparison.Ordinal);
+        Assert.Contains("fetch-depth: 0", workflow, StringComparison.Ordinal);
+        Assert.Contains("github.event.before", workflow, StringComparison.Ordinal);
+        Assert.Contains("GH_TOKEN: ${{ github.token }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("Publish required check on pull request head", workflow, StringComparison.Ordinal);
+        Assert.Contains("head_sha", workflow, StringComparison.Ordinal);
+        Assert.Contains("Expected a two-parent merge commit", workflow, StringComparison.Ordinal);
+        Assert.Contains("development) SOURCE_BRANCH='feature-pr'", workflow, StringComparison.Ordinal);
+        Assert.Contains("test) SOURCE_BRANCH='development'", workflow, StringComparison.Ordinal);
+        Assert.Contains("master) SOURCE_BRANCH='test'", workflow, StringComparison.Ordinal);
+        Assert.Contains("git merge-base --is-ancestor", workflow, StringComparison.Ordinal);
+        Assert.Contains("merged feature/* PR into development", workflow, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

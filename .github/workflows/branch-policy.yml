@@ -1,25 +1,45 @@
 name: Promotion policy
 
 on:
-  pull_request:
+  pull_request_target:
+    branches:
+      - development
+      - test
+      - master
+  push:
     branches:
       - development
       - test
       - master
 
 permissions:
+  checks: write
   contents: read
+  pull-requests: read
 
 jobs:
   branch-policy:
-    name: Enforce promotion source branch
+    name: Validate promotion source branch (trusted)
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
-      - name: Validate promotion path
+      - name: Reject modification to protected enforcement workflows and validate trusted promotion path
+        id: promotion_path
+        continue-on-error: true
         env:
+          GH_TOKEN: ${{ github.token }}
           BASE: ${{ github.event.pull_request.base.ref }}
           HEAD: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          set -euo pipefail
+          CHANGED_FILES="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename')"
+          if grep -Fxq -e '.github/workflows/branch-policy.yml' -e '.github/workflows/deploy.yml' <<< "$CHANGED_FILES"; then
+            echo "Protected enforcement workflows cannot be changed by a pull request." >&2
+            exit 1
+          fi
+
+          # Validate promotion path after confirming the enforcement files are unmodified.
           case "$BASE" in
             development)
               [[ "$HEAD" == feature/* ]] || {
@@ -44,3 +64,83 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Publish required check on pull request head
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          OUTCOME: ${{ steps.promotion_path.outcome }}
+        run: |
+          set -euo pipefail
+          CONCLUSION=success
+          if [[ "$OUTCOME" != success ]]; then
+            CONCLUSION=failure
+          fi
+
+          gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs" \
+            -f name='Enforce promotion source branch' \
+            -f head_sha="$HEAD_SHA" \
+            -f status=completed \
+            -f conclusion="$CONCLUSION" \
+            -f output[title]='Promotion source branch validation' \
+            -f output[summary]="Trusted validation completed with $CONCLUSION." >/dev/null
+
+          [[ "$CONCLUSION" == success ]]
+
+  promotion-lineage:
+    name: Enforce merge-commit promotion lineage
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e450e93e7972aefb72875c24a893d1c7e # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Validate protected-branch merge lineage
+        env:
+          BRANCH: ${{ github.ref_name }}
+          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          read -r -a PARENTS <<< "$(git show -s --format=%P "$SHA")"
+          if [[ "${#PARENTS[@]}" -ne 2 ]]; then
+            echo "Expected a two-parent merge commit on $BRANCH; got ${#PARENTS[@]} parent(s)." >&2
+            exit 1
+          fi
+
+          if [[ "${PARENTS[0]}" == "$BEFORE" ]]; then
+            SOURCE_PARENT="${PARENTS[1]}"
+          elif [[ "${PARENTS[1]}" == "$BEFORE" ]]; then
+            SOURCE_PARENT="${PARENTS[0]}"
+          else
+            echo "Expected the previous $BRANCH tip to be a merge parent." >&2
+            exit 1
+          fi
+
+          case "$BRANCH" in
+            development) SOURCE_BRANCH='feature-pr' ;;
+            test) SOURCE_BRANCH='development' ;;
+            master) SOURCE_BRANCH='test' ;;
+            *)
+              echo "Unsupported protected branch: $BRANCH" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ "$SOURCE_BRANCH" == 'feature-pr' ]]; then
+            MATCHING_PULL_REQUESTS="$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" --jq '[.[] | select(.merged_at != null and .base.ref == "development" and (.head.ref | startswith("feature/")))] | length')"
+            if [[ "$MATCHING_PULL_REQUESTS" -lt 1 ]]; then
+              echo "The merge commit must belong to a merged feature/* PR into development." >&2
+              exit 1
+            fi
+
+            exit 0
+          fi
+
+          git fetch --no-tags origin "$SOURCE_BRANCH"
+          if ! git merge-base --is-ancestor "$SOURCE_PARENT" "origin/$SOURCE_BRANCH"; then
+            echo "The non-target merge parent must come from $SOURCE_BRANCH." >&2
+            exit 1
+          fi

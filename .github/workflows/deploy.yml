@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: deploy-${{ github.ref_name }}
@@ -45,6 +46,71 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Check out protected commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Reject a protected push without merge lineage
+        env:
+          BEFORE: ${{ github.event.before }}
+          BRANCH: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          read -r -a PARENTS <<< "$(git show -s --format=%P "$SHA")"
+          if [[ "${#PARENTS[@]}" -ne 2 ]]; then
+            echo "Expected a two-parent merge commit on $BRANCH; got ${#PARENTS[@]} parent(s)." >&2
+            exit 1
+          fi
+
+          if [[ "$GITHUB_EVENT_NAME" == push && "${PARENTS[0]}" == "$BEFORE" ]]; then
+            SOURCE_PARENT="${PARENTS[1]}"
+          elif [[ "$GITHUB_EVENT_NAME" == push && "${PARENTS[1]}" == "$BEFORE" ]]; then
+            SOURCE_PARENT="${PARENTS[0]}"
+          elif [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            echo "Expected the previous $BRANCH tip to be a merge parent." >&2
+            exit 1
+          fi
+
+          case "$BRANCH" in
+            development)
+              MATCHING_PULL_REQUESTS="$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" --jq '[.[] | select(.merged_at != null and .base.ref == "development" and (.head.ref | startswith("feature/")))] | length')"
+              if [[ "$MATCHING_PULL_REQUESTS" -lt 1 ]]; then
+                echo "The merge commit must belong to a merged feature/* PR into development." >&2
+                exit 1
+              fi
+              ;;
+            test) SOURCE_BRANCH='development' ;;
+            master) SOURCE_BRANCH='test' ;;
+            *)
+              echo "Unsupported protected branch: $BRANCH" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ "$BRANCH" == development ]]; then
+            exit 0
+          fi
+
+          MATCHING_PULL_REQUESTS="$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" --jq "[.[] | select(.merged_at != null and .base.ref == \"$BRANCH\" and .head.ref == \"$SOURCE_BRANCH\")] | length")"
+          if [[ "$MATCHING_PULL_REQUESTS" -lt 1 ]]; then
+            echo "The merge commit must belong to a merged $SOURCE_BRANCH PR into $BRANCH." >&2
+            exit 1
+          fi
+
+          if [[ "$GITHUB_EVENT_NAME" != push ]]; then
+            exit 0
+          fi
+
+          git fetch --no-tags origin "$SOURCE_BRANCH"
+          if ! git merge-base --is-ancestor "$SOURCE_PARENT" "origin/$SOURCE_BRANCH"; then
+            echo "The non-target merge parent must come from $SOURCE_BRANCH." >&2
+            exit 1
+          fi
 
       - name: Check out Sprint 4A E1 manifest
         if: github.event_name == 'push' && (github.ref_name == 'development' || github.ref_name == 'test')
