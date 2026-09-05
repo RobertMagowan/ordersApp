@@ -1,4 +1,5 @@
 using CloudOrders.Infrastructure.Persistence;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -88,6 +89,15 @@ try
 }
 catch (Exception exception)
 {
-    Console.Error.WriteLine($"SQL migration failed: {exception.GetType().Name}.");
+    Console.Error.WriteLine($"SQL migration failed: category={GetFailureCategory(exception)}.");
     return 1;
 }
+
+static string GetFailureCategory(Exception exception) => exception switch
+{
+    InvalidOperationException { Message: var message } when message.StartsWith("Migration selector", StringComparison.Ordinal) => "MIGRATION_SELECTOR_INVALID",
+    InvalidOperationException { Message: var message } when message.StartsWith("Named SQL migration", StringComparison.Ordinal) => "MIGRATION_STATE_CONFLICT",
+    InvalidOperationException { Message: var message } when message.StartsWith("Migration-only release", StringComparison.Ordinal) => "MIGRATION_STATE_CONFLICT",
+    SqlException => "SQL_CONNECTION_OR_AUTHORIZATION",
+    _ => "UNEXPECTED"
+};
