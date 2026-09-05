@@ -249,12 +249,14 @@ public sealed class DeploymentWorkflowPolicyTests
     }
 
     [Fact]
-    public void Sprint4AE1WorkflowConstrictsTheProtectedPushToTheNamedMigration()
+    public void Sprint4AE1WorkflowConstrictsProtectedBranchDispatchesToTheNamedMigration()
     {
         var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml"));
 
-        const string protectedPushPredicate = "github.event_name == 'push' && (github.ref_name == 'development' || github.ref_name == 'test')";
-        Assert.Contains($"if: {protectedPushPredicate}", workflow, StringComparison.Ordinal);
+        const string protectedBranchPredicate = "github.ref_name == 'development' || github.ref_name == 'test'";
+        Assert.Contains($"if: {protectedBranchPredicate}", workflow, StringComparison.Ordinal);
+        Assert.Contains("[[ ( \"$GITHUB_REF_NAME\" == development || \"$GITHUB_REF_NAME\" == test ) ]] || exit 0", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("[[ \"$GITHUB_EVENT_NAME\" == push", workflow, StringComparison.Ordinal);
         Assert.Contains("expected = {\"migration\": \"AddCustomerProfileOwnershipExpand\", \"deployApi\": False}", workflow, StringComparison.Ordinal);
         Assert.Contains("if manifest != expected:", workflow, StringComparison.Ordinal);
         Assert.Contains("MIGRATION: ${{ needs.validate_promotion_ref.outputs.migration }}", workflow, StringComparison.Ordinal);
@@ -262,6 +264,7 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("EXECUTION_ARGS=$(az containerapp job execution show", workflow, StringComparison.Ordinal);
         Assert.Contains("expected = [\"--migration\", sys.argv[1]]", workflow, StringComparison.Ordinal);
         Assert.Contains("if json.loads(sys.argv[2]) != expected:", workflow, StringComparison.Ordinal);
+        Assert.Contains("E1 migration execution $EXECUTION completed with status $STATUS.", workflow, StringComparison.Ordinal);
 
         var normalJobs = new[] { "preview_foundation", "prepare_release", "preview_sql", "bootstrap_sql", "run_migration", "deploy_release" };
         Assert.All(normalJobs, job => Assert.Contains($"  {job}:", workflow, StringComparison.Ordinal));
