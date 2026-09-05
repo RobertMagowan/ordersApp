@@ -216,4 +216,41 @@ Describe 'Sprint delivery completion' -Tag 'completion' {
         $action.workItemId | Should Be '4A-7-D1'
         $action.reason | Should Match 'External ID tenant'
     }
+
+    It 'selects the earliest candidate before evaluating later blocked work' {
+        $state = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/state.json')
+
+        $action = Get-NextDeliveryAction -State $state -Config $config
+
+        $action.kind | Should Be 'WORK_ITEM_READY'
+        $action.workItemId | Should Be '4A-4'
+    }
+
+    It 'rejects a persisted state with an unsupported state schema version' {
+        $state = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/state.json')
+        $state.stateSchemaVersion = '99.0'
+
+        { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
+    }
+
+    It 'rejects invalid persisted evidence bindings and retry counters' {
+        $state = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/state.json')
+        $item = $state.currentSprint.workItems[0]
+        $item.evidenceBindings[0].status = 'UNKNOWN'
+
+        { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
+
+        $state = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/state.json')
+        $state.currentSprint.workItems[0].retryCounters.command = 3
+
+        { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
+    }
+
+    It 'rejects an invalid persisted D1 blocker status' {
+        $state = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/state.json')
+        $d1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-7-D1' }
+        $d1.blockers[0].status = 'NOT_A_BLOCKER_STATUS'
+
+        { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
+    }
 }
