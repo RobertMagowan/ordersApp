@@ -17,7 +17,7 @@
         "evidenceBindings": [{ "commit": "fbc68a9f0e02923880c8a06162a8d7cda2afac38", "status": "HISTORICAL_UNVERIFIED" }],
         "retryCounters": { "command": 0, "deployment": 0 },
         "blockers": [],
-        "gates": { "codeReview": { "status": "PASS" }, "ci": { "status": "PASS" }, "devValidation": { "status": "HISTORICAL_UNVERIFIED" } }
+        "gates": { "codeReview": { "status": "HISTORICAL_UNVERIFIED" }, "ci": { "status": "HISTORICAL_UNVERIFIED" }, "devValidation": { "status": "HISTORICAL_UNVERIFIED" } }
       },
       {
         "id": "4A-2",
@@ -28,7 +28,7 @@
         "evidenceBindings": [{ "commit": "fbc68a9f0e02923880c8a06162a8d7cda2afac38", "status": "HISTORICAL_UNVERIFIED" }],
         "retryCounters": { "command": 0, "deployment": 0 },
         "blockers": [],
-        "gates": { "codeReview": { "status": "PASS" }, "ci": { "status": "PASS" }, "devValidation": { "status": "HISTORICAL_UNVERIFIED" }, "independentReview": { "status": "HISTORICAL_UNVERIFIED" } }
+        "gates": { "codeReview": { "status": "HISTORICAL_UNVERIFIED" }, "ci": { "status": "HISTORICAL_UNVERIFIED" }, "devValidation": { "status": "HISTORICAL_UNVERIFIED" }, "independentReview": { "status": "HISTORICAL_UNVERIFIED" } }
       },
       {
         "id": "4A-3",
@@ -39,7 +39,7 @@
         "evidenceBindings": [{ "commit": "fbc68a9f0e02923880c8a06162a8d7cda2afac38", "status": "HISTORICAL_UNVERIFIED" }],
         "retryCounters": { "command": 0, "deployment": 0 },
         "blockers": [],
-        "gates": { "codeReview": { "status": "PASS" }, "ci": { "status": "PASS" }, "devValidation": { "status": "HISTORICAL_UNVERIFIED" }, "independentReview": { "status": "HISTORICAL_UNVERIFIED" }, "qaValidation": { "status": "PENDING" } }
+        "gates": { "codeReview": { "status": "HISTORICAL_UNVERIFIED" }, "ci": { "status": "HISTORICAL_UNVERIFIED" }, "devValidation": { "status": "HISTORICAL_UNVERIFIED" }, "independentReview": { "status": "HISTORICAL_UNVERIFIED" }, "qaValidation": { "status": "PENDING" } }
       },
       {
         "id": "4A-E1",
@@ -50,7 +50,7 @@
         "evidenceBindings": [{ "commit": "fbc68a9f0e02923880c8a06162a8d7cda2afac38", "workflowRun": 33457927112, "environment": "development", "status": "HISTORICAL_UNVERIFIED" }],
         "retryCounters": { "command": 0, "deployment": 0 },
         "blockers": [],
-        "gates": { "codeReview": { "status": "PASS" }, "ci": { "status": "PASS" }, "devValidation": { "status": "PASS" }, "independentReview": { "status": "HISTORICAL_UNVERIFIED" }, "qaValidation": { "status": "PENDING" } }
+        "gates": { "codeReview": { "status": "HISTORICAL_UNVERIFIED" }, "ci": { "status": "HISTORICAL_UNVERIFIED" }, "devValidation": { "status": "HISTORICAL_UNVERIFIED" }, "independentReview": { "status": "HISTORICAL_UNVERIFIED" }, "qaValidation": { "status": "PENDING" } }
       },
       {
         "id": "4A-4",
@@ -83,7 +83,7 @@
         "evidenceBindings": [{ "commit": "fbc68a9f0e02923880c8a06162a8d7cda2afac38", "status": "HISTORICAL_UNVERIFIED" }],
         "retryCounters": { "command": 0, "deployment": 0 },
         "blockers": [],
-        "gates": { "codeReview": { "status": "PASS" }, "ci": { "status": "PASS" }, "devValidation": { "status": "HISTORICAL_UNVERIFIED" }, "independentReview": { "status": "HISTORICAL_UNVERIFIED" }, "qaValidation": { "status": "PENDING" } }
+        "gates": { "codeReview": { "status": "HISTORICAL_UNVERIFIED" }, "ci": { "status": "HISTORICAL_UNVERIFIED" }, "devValidation": { "status": "HISTORICAL_UNVERIFIED" }, "independentReview": { "status": "HISTORICAL_UNVERIFIED" }, "qaValidation": { "status": "PENDING" } }
       },
       {
         "id": "4A-7-D1",
