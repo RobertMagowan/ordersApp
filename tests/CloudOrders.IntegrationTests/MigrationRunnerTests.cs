@@ -70,6 +70,7 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("category=MIGRATION_SELECTOR_INVALID", result.StandardError, StringComparison.Ordinal);
         Assert.Contains("exception=InvalidOperationException", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("detail=Migration selector must resolve to exactly one known migration.", result.StandardError, StringComparison.Ordinal);
         Assert.DoesNotContain(database.ConnectionString, result.StandardError, StringComparison.Ordinal);
     }
 
