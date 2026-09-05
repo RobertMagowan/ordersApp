@@ -1,12 +1,10 @@
 {
   "evidenceSchemaVersion": "1.0",
   "kind": "CUTOVER_VALIDATION",
-  "status": "HISTORICAL_UNVERIFIED",
-  "recordedAt": "2026-09-05T00:00:00Z",
+  "status": "CURRENT",
+  "recordedAt": "2026-09-05T08:46:50Z",
   "bindings": {
-    "commit": "fbc68a9f0e02923880c8a06162a8d7cda2afac38",
-    "workflowRun": 33457927112,
-    "environment": "development"
+    "commit": "4b9b946ca12562900684fe5d2d7106d7f38d08e7"
   },
   "observations": {
     "readOnlyReconciliation": true,
@@ -26,10 +24,48 @@
       "branch": "feature/sprint4-identity-design",
       "commit": "5c0e1ab136f477127ce194426742a27d704d20d4"
     },
-    "unresolvedAuthorities": [
-      "Azure deployment/artifact snapshot was not available to this read-only migration.",
-      "The post-migration repository baseline is owned by Task 7."
-    ],
-    "cutoverResult": "CUTOVER_BLOCKED"
+    "authoritativeDevelopmentDeployment": {
+      "workflowRun": 33457927112,
+      "commit": "fbc68a9f0e02923880c8a06162a8d7cda2afac38",
+      "environment": "development",
+      "artifact": "cloudordersd583431devacr.azurecr.io/cloudorders-migrations@sha256:dbce8f8c093c7781796dd35e785dc7703b906e394aef7d76920632f20a6fd87e",
+      "jobExecution": "cloudorders-dev-migrations-mefmiwa",
+      "migration": "AddCustomerProfileOwnershipExpand",
+      "status": "SUCCESS"
+    },
+    "postMigrationBaseline": {
+      "targetCommit": "4b9b946ca12562900684fe5d2d7106d7f38d08e7",
+      "status": "PASS_WITH_ENVIRONMENT_FAILURE",
+      "commands": {
+        "restore": "PASS",
+        "format": "PASS",
+        "releaseBuild": { "status": "PASS", "warnings": 0, "errors": 0 },
+        "bicepLint": "PASS",
+        "bicepBuild": "PASS",
+        "developmentParameters": "PASS",
+        "testParameters": "PASS",
+        "productionParameters": "PASS",
+        "diffCheck": "PASS"
+      },
+      "solutionTests": {
+        "architecture": { "passed": 24, "failed": 0, "total": 24 },
+        "unit": { "passed": 13, "failed": 0, "total": 13 },
+        "integration": { "passed": 73, "failed": 0, "total": 73, "docker": "AVAILABLE" }
+      },
+      "workflowSelfTests": {
+        "status": "PASS",
+        "passed": 54,
+        "failed": 0,
+        "host": "Windows PowerShell 5.1 / Pester 3.4"
+      },
+      "environmentFailures": [
+        {
+          "command": "pwsh -File ops/Test-SprintDelivery.ps1",
+          "reason": "PowerShell 7 is not installed in this local environment; the repository-supported Windows PowerShell command passed the same 54 tests."
+        }
+      ]
+    },
+    "cutoverResult": "WORKFLOW_CUTOVER_COMPLETE",
+    "nextAction": "Resume Sprint 4A work item 4A-4 (Owner-aware authorization)."
   }
 }

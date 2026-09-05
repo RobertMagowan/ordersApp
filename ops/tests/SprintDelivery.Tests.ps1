@@ -745,6 +745,8 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
 
     It 'does not resume product work while the workflow cutover remains blocked' {
         $state = Get-CutoverFixture
+        $state.cutover.status = 'CUTOVER_BLOCKED'
+        $state.cutover.blockers = @('POST_MIGRATION_BASELINE_PENDING')
 
         $action = Get-NextDeliveryAction -State $state -Config $config
 

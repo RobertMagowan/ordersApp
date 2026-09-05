@@ -4,11 +4,8 @@
   "configurationVersion": "1.0",
   "workflowLifecycleOwner": "sprint-orchestrator",
   "cutover": {
-    "status": "CUTOVER_BLOCKED",
-    "blockers": [
-      "AUTHORITATIVE_AZURE_DEPLOYMENT_SNAPSHOT_UNAVAILABLE",
-      "POST_MIGRATION_BASELINE_PENDING"
-    ]
+    "status": "WORKFLOW_CUTOVER_COMPLETE",
+    "blockers": []
   },
   "sprintPlanSource": "docs/superpowers/plans/2026-08-27-sprint-4-external-id-authorization.md",
   "sprintPlanRevision": "fbc68a9f0e02923880c8a06162a8d7cda2afac38",
