@@ -1,0 +1,14 @@
+{
+  "github": { "pullRequests": [] },
+  "azure": {
+    "deployments": [
+      {
+        "commit": "fbc68a9f0e02923880c8a06162a8d7cda2afac38",
+        "workflowRun": 33457927112,
+        "environment": "development",
+        "artifact": "example.invalid/cloudorders-migrations@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "migrations": []
+  }
+}

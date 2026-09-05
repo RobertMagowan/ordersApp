@@ -22,6 +22,7 @@ jobs:
   verify:
     name: Restore, format, build, and test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -41,7 +42,7 @@ jobs:
         run: dotnet build --configuration Release --no-restore
 
       - name: Test Release
-        run: dotnet test --configuration Release --no-build --no-restore --logger "trx;LogFileName=test-results.trx"
+        run: dotnet test --configuration Release --no-build --no-restore --blame-hang-timeout 10m --blame-hang-dump-type mini --logger "trx;LogFileName=test-results.trx"
 
       - name: Upload test results
         if: always()

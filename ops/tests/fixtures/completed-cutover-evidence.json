@@ -1,0 +1,31 @@
+{
+  "evidenceSchemaVersion": "1.0",
+  "kind": "CUTOVER_VALIDATION",
+  "status": "CURRENT",
+  "recordedAt": "2026-09-05T00:00:00Z",
+  "bindings": {
+    "commit": "6be5c69861c6ff00ee31541f57d692e5a884e05c"
+  },
+  "observations": {
+    "github": {
+      "developmentRun": {
+        "number": 33457927112,
+        "commit": "fbc68a9f0e02923880c8a06162a8d7cda2afac38",
+        "status": "SUCCESS"
+      }
+    },
+    "preservedProductWorktree": {
+      "path": "C:/repos/OrderApp/.worktrees/feature-sprint4-identity-design",
+      "branch": "feature/sprint4-identity-design",
+      "commit": "5c0e1ab136f477127ce194426742a27d704d20d4"
+    },
+    "postMigrationBaseline": {
+      "status": "PASS",
+      "workflowSelfTests": {
+        "status": "PASS",
+        "passed": 54,
+        "failed": 0
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudorders.example/delivery/config.schema.json",
+  "type": "object",
+  "required": ["workflowVersion", "configurationVersion", "vocabulary", "branchPromotion", "canonicalCommands", "requiredGatesByRisk", "modelRoles", "retryLimits", "humanDecisionStatus"],
+  "properties": {
+    "workflowVersion": { "type": "string", "const": "1.0" },
+    "configurationVersion": { "type": "string", "const": "1.0" },
+    "vocabulary": { "type": "object" },
+    "branchPromotion": { "type": "array", "minItems": 3 },
+    "canonicalCommands": { "type": "object" },
+    "requiredGatesByRisk": { "type": "object" },
+    "modelRoles": { "type": "object" },
+    "retryLimits": { "type": "object" },
+    "humanDecisionStatus": { "const": "HUMAN_DECISION_REQUIRED" }
+  },
+  "additionalProperties": false
+}

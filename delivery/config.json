@@ -1,0 +1,37 @@
+{
+  "workflowVersion": "1.0",
+  "configurationVersion": "1.0",
+  "vocabulary": {
+    "lifecycle": ["TODO", "IN_PROGRESS", "PR_OPEN", "MERGED", "DEV_DEPLOYED", "QA_DEPLOYED", "RELEASED", "CANCELLED", "SUPERSEDED"],
+    "stage": ["PLANNING", "IMPLEMENTATION", "LOCAL_VALIDATION", "INDEPENDENT_REVIEW", "PROMOTION", "DEPLOYMENT", "QA", "BLOCKED"],
+    "gateStatus": ["PENDING", "PASS", "FAIL", "NOT_APPLICABLE", "STALE", "HISTORICAL_UNVERIFIED", "BLOCKED"],
+    "blockerStatus": ["OPEN", "RESOLVED", "HUMAN_DECISION_REQUIRED"]
+  },
+  "branchPromotion": [
+    { "from": "feature/*", "to": "development", "environment": "development" },
+    { "from": "development", "to": "test", "environment": "test" },
+    { "from": "test", "to": "master", "environment": "production" }
+  ],
+  "canonicalCommands": {
+    "contracts": "Invoke-Pester ops/tests/SprintDelivery.Tests.ps1 -Tag contracts",
+    "workflowTests": "pwsh -File ops/Test-SprintDelivery.ps1",
+    "reconcile": "pwsh -File ops/Invoke-SprintDelivery.ps1 -Reconcile -WhatIf",
+    "restore": "dotnet restore CloudOrders.slnx",
+    "format": "dotnet format CloudOrders.slnx --verify-no-changes --no-restore"
+  },
+  "requiredGatesByRisk": {
+    "low": ["codeReview", "ci", "devValidation"],
+    "standard": ["codeReview", "ci", "devValidation", "independentReview"],
+    "high": ["codeReview", "ci", "devValidation", "independentReview", "qaValidation"]
+  },
+  "modelRoles": {
+    "default_model": "logical-default-reasoning-role",
+    "strong_model": "logical-escalation-review-role"
+  },
+  "retryLimits": {
+    "command": 2,
+    "deployment": 1,
+    "requiresDistinctHypothesis": true
+  },
+  "humanDecisionStatus": "HUMAN_DECISION_REQUIRED"
+}
