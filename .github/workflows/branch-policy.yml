@@ -14,12 +14,14 @@ jobs:
   branch-policy:
     name: Enforce promotion source branch
     runs-on: ubuntu-latest
+    env:
+      BASE: ${{ github.event.pull_request.base.ref }}
+      HEAD: ${{ github.event.pull_request.head.ref }}
     steps:
-      - name: Validate promotion path
-        env:
-          BASE: ${{ github.event.pull_request.base.ref }}
-          HEAD: ${{ github.event.pull_request.head.ref }}
+      - name: Validate promotion source branch
+        shell: bash
         run: |
+          set -euo pipefail
           case "$BASE" in
             development)
               [[ "$HEAD" == feature/* ]] || {

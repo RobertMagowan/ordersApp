@@ -90,6 +90,31 @@ public sealed class RepositoryPolicyTests
         Assert.DoesNotContain(productionSource, source => source.Contains("PolicyTest", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void PromotionPolicyAcceptsOnlyTheThreePullRequestPromotionPaths()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(repositoryRoot, ".github", "workflows", "branch-policy.yml"));
+
+        Assert.Contains("pull_request:", workflow, StringComparison.Ordinal);
+        Assert.Contains("      - development", workflow, StringComparison.Ordinal);
+        Assert.Contains("      - test", workflow, StringComparison.Ordinal);
+        Assert.Contains("      - master", workflow, StringComparison.Ordinal);
+        Assert.Contains("contents: read", workflow, StringComparison.Ordinal);
+        Assert.Contains("name: Enforce promotion source branch", workflow, StringComparison.Ordinal);
+        Assert.Contains("development)", workflow, StringComparison.Ordinal);
+        Assert.Contains("[[ \"$HEAD\" == feature/* ]]", workflow, StringComparison.Ordinal);
+        Assert.Contains("test)", workflow, StringComparison.Ordinal);
+        Assert.Contains("[[ \"$HEAD\" == development ]]", workflow, StringComparison.Ordinal);
+        Assert.Contains("master)", workflow, StringComparison.Ordinal);
+        Assert.Contains("[[ \"$HEAD\" == test ]]", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("pull_request_target:", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("push:", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("checks: write", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("gh api", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("two-parent merge", workflow, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

@@ -47,7 +47,7 @@ jobs:
           esac
 
       - name: Check out Sprint 4A E1 manifest
-        if: github.event_name == 'push' && (github.ref_name == 'development' || github.ref_name == 'test')
+        if: github.ref_name == 'development' || github.ref_name == 'test'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Validate Sprint 4A E1 migration-only manifest
@@ -57,7 +57,7 @@ jobs:
           set -euo pipefail
           echo "migration_only=false" >> "$GITHUB_OUTPUT"
           echo "migration=" >> "$GITHUB_OUTPUT"
-          [[ "$GITHUB_EVENT_NAME" == push && ( "$GITHUB_REF_NAME" == development || "$GITHUB_REF_NAME" == test ) ]] || exit 0
+          [[ ( "$GITHUB_REF_NAME" == development || "$GITHUB_REF_NAME" == test ) ]] || exit 0
 
           MANIFEST='ops/releases/sprint-4a-e1-migration-only.json'
           [[ -f "$MANIFEST" ]] || exit 0
@@ -738,6 +738,7 @@ jobs:
             sleep 10
           done
           [[ "$STATUS" == Succeeded ]] || { echo "Migration Job did not complete within five minutes." >&2; exit 1; }
+          echo "E1 migration execution $EXECUTION completed with status $STATUS."
 
           AFTER_REVISION=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.latestRevisionName --output tsv)
           AFTER_TRAFFIC=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.traffic --output json)
