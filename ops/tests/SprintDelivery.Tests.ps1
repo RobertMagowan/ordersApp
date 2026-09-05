@@ -428,11 +428,19 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
         $before = @{}
         foreach ($path in $paths) { $before[$path] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash }
 
-        $output = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repositoryRoot 'ops/Invoke-SprintDelivery.ps1') -Reconcile -WhatIf
+        $powerShellHost = if ($env:OS -eq 'Windows_NT') { 'powershell' } else { 'pwsh' }
+        $output = & $powerShellHost -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repositoryRoot 'ops/Invoke-SprintDelivery.ps1') -Reconcile -WhatIf
 
         $LASTEXITCODE | Should Be 0
         ($output -join "`n") | Should Match 'WHAT_IF'
         foreach ($path in $paths) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash | Should Be $before[$path] }
+    }
+
+    It 'uses an operating-system appropriate PowerShell host for child validation' {
+        $testSource = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'ops/tests/SprintDelivery.Tests.ps1')
+
+        $testSource | Should Match '(?s)\$powerShellHost\s*=\s*if\s*\(\$env:OS\s*-eq\s*''Windows_NT''\)\s*\{\s*''powershell''\s*\}\s*else\s*\{\s*''pwsh''\s*\}'
+        $testSource | Should Match '&\s+\$powerShellHost\s+-NoProfile\s+-ExecutionPolicy\s+Bypass\s+-File'
     }
 }
 
