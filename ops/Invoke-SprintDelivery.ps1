@@ -143,6 +143,31 @@ function Invalidate-DependentEvidence {
     return $derivedState
 }
 
+function Get-CanonicalSideEffectIdentity {
+    param(
+        [Parameter(Mandatory)][ValidateSet('deployment', 'migration')][string] $Kind,
+        [Parameter(Mandatory)] $Binding
+    )
+
+    $commit = Get-DeliveryMemberValue -InputObject $Binding -Name 'commit'
+    $workflowRun = Get-DeliveryMemberValue -InputObject $Binding -Name 'workflowRun'
+    if ([string]::IsNullOrWhiteSpace($commit) -or $commit -notmatch '^[0-9a-f]{7,40}$' -or
+        $null -eq $workflowRun -or -not (Test-DeliveryIntegerInRange -Value $workflowRun -Minimum 1 -Maximum ([long]::MaxValue))) {
+        return $null
+    }
+
+    if ($Kind -eq 'migration') {
+        return "migration:${commit}:$workflowRun"
+    }
+
+    $environment = Get-DeliveryMemberValue -InputObject $Binding -Name 'environment'
+    if ($environment -notin @('development', 'test', 'production')) {
+        return $null
+    }
+
+    return "deployment:${environment}:${commit}:$workflowRun"
+}
+
 function Compare-DeliveryState {
     [OutputType([pscustomobject])]
     param(
@@ -158,15 +183,32 @@ function Compare-DeliveryState {
     foreach ($workItem in @(Get-DeliveryMemberValue -InputObject (Get-DeliveryMemberValue -InputObject $State -Name 'currentSprint') -Name 'workItems')) {
         $workItemId = Get-DeliveryMemberValue -InputObject $workItem -Name 'id'
         foreach ($binding in @(Get-DeliveryMemberValue -InputObject $workItem -Name 'evidenceBindings')) {
-            if ((Get-DeliveryMemberValue -InputObject $binding -Name 'status') -ne 'CURRENT' -or
-                $null -eq (Get-DeliveryMemberValue -InputObject $binding -Name 'environment')) {
+            if ((Get-DeliveryMemberValue -InputObject $binding -Name 'status') -ne 'CURRENT') {
+                continue
+            }
+
+            $environment = Get-DeliveryMemberValue -InputObject $binding -Name 'environment'
+            $workflowRun = Get-DeliveryMemberValue -InputObject $binding -Name 'workflowRun'
+            if ($null -eq $environment -and $null -eq $workflowRun) {
                 continue
             }
 
             $sameEnvironment = @($deployments | Where-Object {
-                (Get-DeliveryMemberValue -InputObject $_ -Name 'environment') -eq (Get-DeliveryMemberValue -InputObject $binding -Name 'environment')
+                $null -ne $environment -and (Get-DeliveryMemberValue -InputObject $_ -Name 'environment') -eq $environment
             })
             if ($sameEnvironment.Count -eq 0) {
+                $derivedState = Invalidate-DependentEvidence -State $derivedState -WorkItemId $workItemId -Reason 'No authoritative deployment snapshot was supplied for current cloud evidence.'
+                $contradictions += [pscustomobject]@{
+                    workItemId = $workItemId
+                    kind = 'AUTHORITATIVE_DEPLOYMENT_SNAPSHOT_UNAVAILABLE'
+                    expected = [pscustomobject]@{
+                        commit = Get-DeliveryMemberValue -InputObject $binding -Name 'commit'
+                        workflowRun = Get-DeliveryMemberValue -InputObject $binding -Name 'workflowRun'
+                        environment = Get-DeliveryMemberValue -InputObject $binding -Name 'environment'
+                        artifact = Get-DeliveryMemberValue -InputObject $binding -Name 'artifact'
+                    }
+                    actual = @()
+                }
                 continue
             }
 
@@ -205,15 +247,15 @@ function Compare-DeliveryState {
 
 function Assert-SideEffectNotDuplicate {
     param(
-        [Parameter(Mandatory)][string] $Kind,
+        [Parameter(Mandatory)][ValidateSet('deployment', 'migration')][string] $Kind,
         [Parameter(Mandatory)][string] $Identity,
         [Parameter(Mandatory)] $State
     )
 
     foreach ($workItem in @(Get-DeliveryMemberValue -InputObject (Get-DeliveryMemberValue -InputObject $State -Name 'currentSprint') -Name 'workItems')) {
         foreach ($binding in @(Get-DeliveryMemberValue -InputObject $workItem -Name 'evidenceBindings')) {
-            if ((Get-DeliveryMemberValue -InputObject $binding -Name 'kind') -eq $Kind -and
-                (Get-DeliveryMemberValue -InputObject $binding -Name 'identity') -ceq $Identity) {
+            $recordedIdentity = Get-CanonicalSideEffectIdentity -Kind $Kind -Binding $binding
+            if ($null -ne $recordedIdentity -and $recordedIdentity -ceq $Identity) {
                 throw "Side effect '$Kind' with identity '$Identity' is already recorded and cannot be invoked."
             }
         }

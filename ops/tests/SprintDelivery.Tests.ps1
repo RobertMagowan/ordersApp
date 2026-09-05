@@ -295,6 +295,29 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
         $result.contradictions.Count | Should Be 0
     }
 
+    It 'fails closed and invalidates current cloud evidence when no Azure deployment snapshot is available' {
+        $state = Get-ReconciliationFixture
+        $result = Compare-DeliveryState -State $state -Snapshot @{ deployments = @() }
+        $derivedItem = $result.state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+
+        $result.kind | Should Be 'STATE_RECONCILIATION_REQUIRED'
+        $result.contradictions[0].kind | Should Be 'AUTHORITATIVE_DEPLOYMENT_SNAPSHOT_UNAVAILABLE'
+        $derivedItem.gates.devValidation.status | Should Be 'STALE'
+        $derivedItem.evidenceBindings[0].status | Should Be 'STALE'
+    }
+
+    It 'fails closed for current workflow evidence even when an environment is not recorded' {
+        $state = Get-ReconciliationFixture
+        $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+        $e1.evidenceBindings[0].PSObject.Properties.Remove('environment')
+
+        $result = Compare-DeliveryState -State $state -Snapshot @{ deployments = @() }
+        $derivedItem = $result.state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+
+        $result.kind | Should Be 'STATE_RECONCILIATION_REQUIRED'
+        $derivedItem.evidenceBindings[0].status | Should Be 'STALE'
+    }
+
     It 'invalidates only dependent evidence without mutating the input state' {
         $state = Get-ReconciliationFixture
         $result = Invalidate-DependentEvidence -State $state -WorkItemId '4A-E1' -Reason 'Azure deployment commit differs.'
@@ -307,22 +330,32 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
         ($state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }).gates.devValidation.status | Should Be 'PASS'
     }
 
-    It 'refuses a duplicate migration identity before a side effect can be invoked' {
+    It 'refuses a schema-valid duplicate migration identity before a side effect can be invoked' {
         $state = Get-ReconciliationFixture
-        $state.currentSprint.workItems[0].evidenceBindings = @(@{ kind = 'migration'; identity = 'E1:fbc68a9'; status = 'CURRENT' })
+        $state.currentSprint.workItems[0].evidenceBindings = @(@{ commit = 'fbc68a9f0e02923880c8a06162a8d7cda2afac38'; workflowRun = 33457927112; status = 'CURRENT' })
 
         $failure = $null
-        try { Assert-SideEffectNotDuplicate -Kind 'migration' -Identity 'E1:fbc68a9' -State $state } catch { $failure = $_.Exception.Message }
+        try { Assert-SideEffectNotDuplicate -Kind 'migration' -Identity 'migration:fbc68a9f0e02923880c8a06162a8d7cda2afac38:33457927112' -State $state } catch { $failure = $_.Exception.Message }
 
         $failure | Should Match 'already recorded'
     }
 
-    It 'refuses a stale deployment identity before a side effect can be invoked' {
+    It 'refuses the existing schema-valid E1 deployment identity before a side effect can be invoked' {
         $state = Get-ReconciliationFixture
-        $state.currentSprint.workItems[0].evidenceBindings = @(@{ kind = 'deployment'; identity = 'development:fbc68a9'; status = 'STALE' })
 
         $failure = $null
-        try { Assert-SideEffectNotDuplicate -Kind 'deployment' -Identity 'development:fbc68a9' -State $state } catch { $failure = $_.Exception.Message }
+        try { Assert-SideEffectNotDuplicate -Kind 'deployment' -Identity 'deployment:development:fbc68a9f0e02923880c8a06162a8d7cda2afac38:33457927112' -State $state } catch { $failure = $_.Exception.Message }
+
+        $failure | Should Match 'already recorded'
+    }
+
+    It 'refuses a stale schema-valid deployment identity before a side effect can be invoked' {
+        $state = Get-ReconciliationFixture
+        $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+        $e1.evidenceBindings[0].status = 'STALE'
+
+        $failure = $null
+        try { Assert-SideEffectNotDuplicate -Kind 'deployment' -Identity 'deployment:development:fbc68a9f0e02923880c8a06162a8d7cda2afac38:33457927112' -State $state } catch { $failure = $_.Exception.Message }
 
         $failure | Should Match 'already recorded'
     }
