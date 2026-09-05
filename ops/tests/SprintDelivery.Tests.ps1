@@ -435,3 +435,72 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
         foreach ($path in $paths) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash | Should Be $before[$path] }
     }
 }
+
+Describe 'Sprint delivery skill policy' -Tag 'skill-policy' {
+    BeforeAll {
+        $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        $skillNames = @(
+            'sprint-orchestrator',
+            'task-planning',
+            'task-implementation',
+            'automated-testing',
+            'failure-resolution',
+            'environment-validation',
+            'qa'
+        )
+        $skillPaths = $skillNames | ForEach-Object {
+            Join-Path $repositoryRoot ".agents/skills/$_/SKILL.md"
+        }
+    }
+
+    It 'provides every focused delivery role with explicit inputs and outputs' {
+        foreach ($skillPath in $skillPaths) {
+            Test-Path -LiteralPath $skillPath | Should Be $true
+            $content = Get-Content -Raw -LiteralPath $skillPath
+            $content | Should Match '(?im)^## Inputs$'
+            $content | Should Match '(?im)^## Outputs$'
+            $content | Should Match 'Invoke-SprintDelivery\.ps1'
+        }
+    }
+
+    It 'reserves lifecycle advancement for the sprint orchestrator' {
+        foreach ($skillPath in $skillPaths) {
+            $content = Get-Content -Raw -LiteralPath $skillPath
+            $isOrchestrator = $skillPath -match 'sprint-orchestrator'
+
+            if ($isOrchestrator) {
+                $content | Should Match '(?i)advance lifecycle state'
+            }
+            else {
+                $content | Should Match '(?i)must not advance lifecycle state'
+            }
+        }
+    }
+
+    It 'keeps skills free of environment-specific identifiers, model names, and secrets' {
+        $disallowedPatterns = @(
+            '(?i)tenant\s*id',
+            '(?i)subscription\s*id',
+            '(?i)(api[_ -]?key|client[_ -]?secret|connection\s*string|password|token)\s*[:=]',
+            '(?i)gpt-[0-9]',
+            '(?i)claude-[0-9]',
+            '(?i)environment\s*(id|name|value)\s*[:=]'
+        )
+
+        foreach ($skillPath in $skillPaths) {
+            $content = Get-Content -Raw -LiteralPath $skillPath
+            foreach ($pattern in $disallowedPatterns) {
+                $content | Should Not Match $pattern
+            }
+        }
+    }
+
+    It 'links the repository guide to the runbook without embedding its workflow details' {
+        $agentsPath = Join-Path $repositoryRoot 'AGENTS.md'
+        $agents = Get-Content -Raw -LiteralPath $agentsPath
+
+        $agents | Should Match 'docs/operations/sprint-delivery-workflow\.md'
+        $agents | Should Not Match 'Fresh-session resume'
+        $agents | Should Not Match 'CUTOVER_BLOCKED'
+    }
+}
