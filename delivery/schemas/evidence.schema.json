@@ -18,6 +18,9 @@
         "artifact": { "type": "string" }
       },
       "additionalProperties": false
+    },
+    "observations": {
+      "type": "object"
     }
   },
   "additionalProperties": false

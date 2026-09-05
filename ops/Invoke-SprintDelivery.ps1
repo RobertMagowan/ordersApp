@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [switch] $WhatIf
+    [switch] $WhatIf,
+    [switch] $Reconcile
 )
 
 Set-StrictMode -Version Latest
@@ -64,6 +65,161 @@ function Read-DeliveryJson {
     }
 
     return $json | ConvertFrom-Json
+}
+
+function Copy-DeliveryObject {
+    param([Parameter(Mandatory)] $InputObject)
+
+    $json = $InputObject | ConvertTo-Json -Depth 64
+    $convertFromJson = Get-Command ConvertFrom-Json
+    if ($convertFromJson.Parameters.ContainsKey('AsHashtable')) {
+        return $json | ConvertFrom-Json -AsHashtable
+    }
+
+    return $json | ConvertFrom-Json
+}
+
+function Get-AuthoritativeSnapshot {
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string] $RepositoryRoot,
+        [scriptblock] $GitSnapshotProvider,
+        [scriptblock] $GitHubSnapshotProvider,
+        [scriptblock] $AzureSnapshotProvider
+    )
+
+    $git = if ($null -ne $GitSnapshotProvider) {
+        & $GitSnapshotProvider $RepositoryRoot
+    }
+    else {
+        [pscustomobject]@{
+            head = (& git -C $RepositoryRoot rev-parse HEAD).Trim()
+            branch = (& git -C $RepositoryRoot branch --show-current).Trim()
+            status = @(& git -C $RepositoryRoot status --porcelain)
+            worktrees = @(& git -C $RepositoryRoot worktree list --porcelain)
+        }
+    }
+
+    # Cloud evidence is deliberately provider-injected. This command never authenticates
+    # to or mutates GitHub/Azure; callers may supply an explicitly read-only provider.
+    $github = if ($null -ne $GitHubSnapshotProvider) { & $GitHubSnapshotProvider } else { $null }
+    $azure = if ($null -ne $AzureSnapshotProvider) { & $AzureSnapshotProvider } else { $null }
+
+    return [pscustomobject]@{
+        git = $git
+        github = $github
+        azure = $azure
+        deployments = if ($null -ne $azure -and $null -ne (Get-DeliveryMemberValue -InputObject $azure -Name 'deployments')) { @(Get-DeliveryMemberValue -InputObject $azure -Name 'deployments') } else { @() }
+        migrations = if ($null -ne $azure -and $null -ne (Get-DeliveryMemberValue -InputObject $azure -Name 'migrations')) { @(Get-DeliveryMemberValue -InputObject $azure -Name 'migrations') } else { @() }
+        sideEffect = $false
+    }
+}
+
+function Invalidate-DependentEvidence {
+    param(
+        [Parameter(Mandatory)] $State,
+        [Parameter(Mandatory)][string] $WorkItemId,
+        [Parameter(Mandatory)][string] $Reason
+    )
+
+    $derivedState = Copy-DeliveryObject -InputObject $State
+    $workItem = @(Get-DeliveryMemberValue -InputObject (Get-DeliveryMemberValue -InputObject $derivedState -Name 'currentSprint') -Name 'workItems') |
+        Where-Object { (Get-DeliveryMemberValue -InputObject $_ -Name 'id') -eq $WorkItemId } |
+        Select-Object -First 1
+    if ($null -eq $workItem) {
+        throw "Cannot invalidate evidence for unknown work item '$WorkItemId'."
+    }
+
+    foreach ($binding in @(Get-DeliveryMemberValue -InputObject $workItem -Name 'evidenceBindings')) {
+        $binding.status = 'STALE'
+    }
+
+    $gates = Get-DeliveryMemberValue -InputObject $workItem -Name 'gates'
+    $devValidation = Get-DeliveryMemberValue -InputObject $gates -Name 'devValidation'
+    if ($null -ne $devValidation) {
+        $devValidation.status = 'STALE'
+    }
+
+    return $derivedState
+}
+
+function Compare-DeliveryState {
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] $State,
+        [Parameter(Mandatory)] $Snapshot
+    )
+
+    $derivedState = Copy-DeliveryObject -InputObject $State
+    $contradictions = @()
+    $deploymentValue = Get-DeliveryMemberValue -InputObject $Snapshot -Name 'deployments'
+    $deployments = if ($null -eq $deploymentValue) { @() } else { @($deploymentValue) }
+
+    foreach ($workItem in @(Get-DeliveryMemberValue -InputObject (Get-DeliveryMemberValue -InputObject $State -Name 'currentSprint') -Name 'workItems')) {
+        $workItemId = Get-DeliveryMemberValue -InputObject $workItem -Name 'id'
+        foreach ($binding in @(Get-DeliveryMemberValue -InputObject $workItem -Name 'evidenceBindings')) {
+            if ((Get-DeliveryMemberValue -InputObject $binding -Name 'status') -ne 'CURRENT' -or
+                $null -eq (Get-DeliveryMemberValue -InputObject $binding -Name 'environment')) {
+                continue
+            }
+
+            $sameEnvironment = @($deployments | Where-Object {
+                (Get-DeliveryMemberValue -InputObject $_ -Name 'environment') -eq (Get-DeliveryMemberValue -InputObject $binding -Name 'environment')
+            })
+            if ($sameEnvironment.Count -eq 0) {
+                continue
+            }
+
+            $exactMatch = @($sameEnvironment | Where-Object {
+                (Get-DeliveryMemberValue -InputObject $_ -Name 'commit') -eq (Get-DeliveryMemberValue -InputObject $binding -Name 'commit') -and
+                (Get-DeliveryMemberValue -InputObject $_ -Name 'workflowRun') -eq (Get-DeliveryMemberValue -InputObject $binding -Name 'workflowRun') -and
+                (Get-DeliveryMemberValue -InputObject $_ -Name 'environment') -eq (Get-DeliveryMemberValue -InputObject $binding -Name 'environment') -and
+                (Get-DeliveryMemberValue -InputObject $_ -Name 'artifact') -eq (Get-DeliveryMemberValue -InputObject $binding -Name 'artifact')
+            })
+            if ($exactMatch.Count -gt 0) {
+                continue
+            }
+
+            $derivedState = Invalidate-DependentEvidence -State $derivedState -WorkItemId $workItemId -Reason 'Immutable deployment identifiers differ from the authoritative snapshot.'
+            $contradictions += [pscustomobject]@{
+                workItemId = $workItemId
+                kind = 'DEPLOYMENT_EVIDENCE_MISMATCH'
+                expected = [pscustomobject]@{
+                    commit = Get-DeliveryMemberValue -InputObject $binding -Name 'commit'
+                    workflowRun = Get-DeliveryMemberValue -InputObject $binding -Name 'workflowRun'
+                    environment = Get-DeliveryMemberValue -InputObject $binding -Name 'environment'
+                    artifact = Get-DeliveryMemberValue -InputObject $binding -Name 'artifact'
+                }
+                actual = $sameEnvironment
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        kind = if ($contradictions.Count -gt 0) { 'STATE_RECONCILIATION_REQUIRED' } else { 'STATE_RECONCILIATION_AGREES' }
+        state = $derivedState
+        contradictions = $contradictions
+        sideEffect = $false
+    }
+}
+
+function Assert-SideEffectNotDuplicate {
+    param(
+        [Parameter(Mandatory)][string] $Kind,
+        [Parameter(Mandatory)][string] $Identity,
+        [Parameter(Mandatory)] $State
+    )
+
+    foreach ($workItem in @(Get-DeliveryMemberValue -InputObject (Get-DeliveryMemberValue -InputObject $State -Name 'currentSprint') -Name 'workItems')) {
+        foreach ($binding in @(Get-DeliveryMemberValue -InputObject $workItem -Name 'evidenceBindings')) {
+            if ((Get-DeliveryMemberValue -InputObject $binding -Name 'kind') -eq $Kind -and
+                (Get-DeliveryMemberValue -InputObject $binding -Name 'identity') -ceq $Identity) {
+                throw "Side effect '$Kind' with identity '$Identity' is already recorded and cannot be invoked."
+            }
+        }
+    }
+
+    return $true
 }
 
 function Test-SprintDeliveryState {
@@ -264,10 +420,16 @@ if ($MyInvocation.InvocationName -ne '.') {
     $state = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/state.json')
     Test-SprintDeliveryState -State $state -Config $config | Out-Null
     $action = Get-NextDeliveryAction -State $state -Config $config
+    $reconciliation = $null
+    if ($Reconcile) {
+        $snapshot = Get-AuthoritativeSnapshot -RepositoryRoot $repositoryRoot
+        $reconciliation = Compare-DeliveryState -State $state -Snapshot $snapshot
+    }
 
     [pscustomobject]@{
         mode = if ($WhatIf) { 'WHAT_IF' } else { 'READ_ONLY' }
         sprint = (Get-DeliveryMemberValue -InputObject (Get-DeliveryMemberValue -InputObject $state -Name 'currentSprint') -Name 'id')
         action = $action
+        reconciliation = $reconciliation
     } | ConvertTo-Json -Depth 8
 }

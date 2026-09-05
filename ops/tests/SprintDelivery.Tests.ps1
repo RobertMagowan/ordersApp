@@ -254,3 +254,106 @@ Describe 'Sprint delivery completion' -Tag 'completion' {
         { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
     }
 }
+
+Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
+    BeforeAll {
+        $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        . (Join-Path $repositoryRoot 'ops/Invoke-SprintDelivery.ps1')
+        $config = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/config.json')
+
+        function Get-ReconciliationFixture {
+            $state = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/state.json')
+            $item = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+            $item.evidenceBindings[0].status = 'CURRENT'
+            $item.gates.devValidation.status = 'PASS'
+            return $state
+        }
+    }
+
+    It 'marks deployment evidence stale in a derived state when its immutable commit differs' {
+        $state = Get-ReconciliationFixture
+        $snapshot = @{ deployments = @(@{ commit = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; workflowRun = 33457927112; environment = 'development' }) }
+
+        $result = Compare-DeliveryState -State $state -Snapshot $snapshot
+        $derivedItem = $result.state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+        $originalItem = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+
+        $result.kind | Should Be 'STATE_RECONCILIATION_REQUIRED'
+        $derivedItem.gates.devValidation.status | Should Be 'STALE'
+        $derivedItem.evidenceBindings[0].status | Should Be 'STALE'
+        $originalItem.gates.devValidation.status | Should Be 'PASS'
+        $originalItem.evidenceBindings[0].status | Should Be 'CURRENT'
+    }
+
+    It 'returns no contradiction when an injected deployment snapshot matches every immutable identifier' {
+        $state = Get-ReconciliationFixture
+        $snapshot = @{ deployments = @(@{ commit = 'fbc68a9f0e02923880c8a06162a8d7cda2afac38'; workflowRun = 33457927112; environment = 'development' }) }
+
+        $result = Compare-DeliveryState -State $state -Snapshot $snapshot
+
+        $result.kind | Should Be 'STATE_RECONCILIATION_AGREES'
+        $result.contradictions.Count | Should Be 0
+    }
+
+    It 'invalidates only dependent evidence without mutating the input state' {
+        $state = Get-ReconciliationFixture
+        $result = Invalidate-DependentEvidence -State $state -WorkItemId '4A-E1' -Reason 'Azure deployment commit differs.'
+        $derivedItem = $result.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+        $unrelatedItem = $result.currentSprint.workItems | Where-Object { $_.id -eq '4A-4' }
+
+        $derivedItem.gates.devValidation.status | Should Be 'STALE'
+        $derivedItem.evidenceBindings[0].status | Should Be 'STALE'
+        $unrelatedItem.gates.devValidation.status | Should Be 'PENDING'
+        ($state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }).gates.devValidation.status | Should Be 'PASS'
+    }
+
+    It 'refuses a duplicate migration identity before a side effect can be invoked' {
+        $state = Get-ReconciliationFixture
+        $state.currentSprint.workItems[0].evidenceBindings = @(@{ kind = 'migration'; identity = 'E1:fbc68a9'; status = 'CURRENT' })
+
+        $failure = $null
+        try { Assert-SideEffectNotDuplicate -Kind 'migration' -Identity 'E1:fbc68a9' -State $state } catch { $failure = $_.Exception.Message }
+
+        $failure | Should Match 'already recorded'
+    }
+
+    It 'refuses a stale deployment identity before a side effect can be invoked' {
+        $state = Get-ReconciliationFixture
+        $state.currentSprint.workItems[0].evidenceBindings = @(@{ kind = 'deployment'; identity = 'development:fbc68a9'; status = 'STALE' })
+
+        $failure = $null
+        try { Assert-SideEffectNotDuplicate -Kind 'deployment' -Identity 'development:fbc68a9' -State $state } catch { $failure = $_.Exception.Message }
+
+        $failure | Should Match 'already recorded'
+    }
+
+    It 'uses injected authoritative providers without requiring live GitHub or Azure access' {
+        $snapshot = Get-AuthoritativeSnapshot -RepositoryRoot $repositoryRoot -GitSnapshotProvider {
+            param($root)
+            @{ head = 'fbc68a9f0e02923880c8a06162a8d7cda2afac38'; branch = 'development'; status = @(); worktrees = @() }
+        } -GitHubSnapshotProvider { @{ pullRequests = @() } } -AzureSnapshotProvider {
+            @{ deployments = @(); migrations = @() }
+        }
+
+        $snapshot.git.head | Should Be 'fbc68a9f0e02923880c8a06162a8d7cda2afac38'
+        @($snapshot.github.pullRequests).Count | Should Be 0
+        @($snapshot.deployments).Count | Should Be 0
+        $snapshot.sideEffect | Should Be $false
+    }
+
+    It 'does not write files when reconciliation runs in WhatIf mode' {
+        $paths = @(
+            (Join-Path $repositoryRoot 'delivery/state.json'),
+            (Join-Path $repositoryRoot 'delivery/evidence/pre-migration-baseline.json'),
+            (Join-Path $repositoryRoot 'delivery/evidence/reconciliation.json')
+        ) | Where-Object { Test-Path -LiteralPath $_ }
+        $before = @{}
+        foreach ($path in $paths) { $before[$path] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash }
+
+        $output = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repositoryRoot 'ops/Invoke-SprintDelivery.ps1') -Reconcile -WhatIf
+
+        $LASTEXITCODE | Should Be 0
+        ($output -join "`n") | Should Match 'WHAT_IF'
+        foreach ($path in $paths) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash | Should Be $before[$path] }
+    }
+}
