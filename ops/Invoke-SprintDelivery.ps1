@@ -193,6 +193,24 @@ function Compare-DeliveryState {
                 continue
             }
 
+            $commit = Get-DeliveryMemberValue -InputObject $binding -Name 'commit'
+            if ($null -eq (Get-CanonicalSideEffectIdentity -Kind 'deployment' -Binding $binding)) {
+                $derivedState = Invalidate-DependentEvidence -State $derivedState -WorkItemId $workItemId -Reason 'Current deployment evidence is missing a canonical immutable identifier.'
+                $contradictions += [pscustomobject]@{
+                    workItemId = $workItemId
+                    kind = 'DEPLOYMENT_EVIDENCE_INCOMPLETE'
+                    expected = [pscustomobject]@{
+                        required = @('commit', 'environment', 'workflowRun')
+                    }
+                    actual = [pscustomobject]@{
+                        commit = $commit
+                        workflowRun = $workflowRun
+                        environment = $environment
+                    }
+                }
+                continue
+            }
+
             $sameEnvironment = @($deployments | Where-Object {
                 $null -ne $environment -and (Get-DeliveryMemberValue -InputObject $_ -Name 'environment') -eq $environment
             })

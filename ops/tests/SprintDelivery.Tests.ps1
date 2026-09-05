@@ -295,6 +295,51 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
         $result.contradictions.Count | Should Be 0
     }
 
+    It 'fails closed when current cloud evidence is missing its commit even if the snapshot is missing it too' {
+        $state = Get-ReconciliationFixture
+        $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+        $e1.evidenceBindings[0].PSObject.Properties.Remove('commit')
+        $snapshot = @{ deployments = @(@{ workflowRun = 33457927112; environment = 'development' }) }
+
+        $result = Compare-DeliveryState -State $state -Snapshot $snapshot
+        $derivedItem = $result.state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+
+        $result.kind | Should Be 'STATE_RECONCILIATION_REQUIRED'
+        $result.contradictions[0].kind | Should Be 'DEPLOYMENT_EVIDENCE_INCOMPLETE'
+        $derivedItem.gates.devValidation.status | Should Be 'STALE'
+        $derivedItem.evidenceBindings[0].status | Should Be 'STALE'
+    }
+
+    It 'fails closed when current cloud evidence is missing its environment even if the snapshot is missing it too' {
+        $state = Get-ReconciliationFixture
+        $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+        $e1.evidenceBindings[0].PSObject.Properties.Remove('environment')
+        $snapshot = @{ deployments = @(@{ commit = 'fbc68a9f0e02923880c8a06162a8d7cda2afac38'; workflowRun = 33457927112 }) }
+
+        $result = Compare-DeliveryState -State $state -Snapshot $snapshot
+        $derivedItem = $result.state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+
+        $result.kind | Should Be 'STATE_RECONCILIATION_REQUIRED'
+        $result.contradictions[0].kind | Should Be 'DEPLOYMENT_EVIDENCE_INCOMPLETE'
+        $derivedItem.gates.devValidation.status | Should Be 'STALE'
+        $derivedItem.evidenceBindings[0].status | Should Be 'STALE'
+    }
+
+    It 'fails closed when current cloud evidence is missing its workflow run even if the snapshot is missing it too' {
+        $state = Get-ReconciliationFixture
+        $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+        $e1.evidenceBindings[0].PSObject.Properties.Remove('workflowRun')
+        $snapshot = @{ deployments = @(@{ commit = 'fbc68a9f0e02923880c8a06162a8d7cda2afac38'; environment = 'development' }) }
+
+        $result = Compare-DeliveryState -State $state -Snapshot $snapshot
+        $derivedItem = $result.state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+
+        $result.kind | Should Be 'STATE_RECONCILIATION_REQUIRED'
+        $result.contradictions[0].kind | Should Be 'DEPLOYMENT_EVIDENCE_INCOMPLETE'
+        $derivedItem.gates.devValidation.status | Should Be 'STALE'
+        $derivedItem.evidenceBindings[0].status | Should Be 'STALE'
+    }
+
     It 'fails closed and invalidates current cloud evidence when no Azure deployment snapshot is available' {
         $state = Get-ReconciliationFixture
         $result = Compare-DeliveryState -State $state -Snapshot @{ deployments = @() }
