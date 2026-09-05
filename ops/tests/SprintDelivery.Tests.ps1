@@ -504,3 +504,64 @@ Describe 'Sprint delivery skill policy' -Tag 'skill-policy' {
         $agents | Should Not Match 'CUTOVER_BLOCKED'
     }
 }
+
+Describe 'Sprint delivery CI policy' -Tag 'ci-policy' {
+    BeforeAll {
+        $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        $workflowPath = Join-Path $repositoryRoot '.github/workflows/sprint-delivery-validation.yml'
+        $templatePath = Join-Path $repositoryRoot '.github/pull_request_template.md'
+    }
+
+    It 'uses a pull-request-only workflow for every delivery workflow input' {
+        Test-Path -LiteralPath $workflowPath | Should Be $true
+        $workflow = Get-Content -Raw -LiteralPath $workflowPath
+
+        $workflow | Should Match '(?m)^on:\s*$'
+        $workflow | Should Match '(?m)^\s{2}pull_request:\s*$'
+        $workflow | Should Match "(?m)^\s{6}- 'delivery/\*\*'"
+        $workflow | Should Match "(?m)^\s{6}- 'ops/\*\*'"
+        $workflow | Should Match "(?m)^\s{6}- '\.agents/skills/\*\*'"
+        $workflow | Should Match "(?m)^\s{6}- 'AGENTS\.md'"
+        $workflow | Should Match "(?m)^\s{6}- '\.github/workflows/\*\*'"
+        $workflow | Should Not Match '(?m)^\s{2}(push|workflow_dispatch|schedule):'
+    }
+
+    It 'uses pinned actions and a read-only delivery test command' {
+        $workflow = Get-Content -Raw -LiteralPath $workflowPath
+
+        $workflow | Should Match '(?m)^permissions:\s*$'
+        $workflow | Should Match '(?m)^\s{2}contents:\s+read\s*$'
+        $workflow | Should Not Match '(?m)^\s{2}(actions|checks|contents|deployments|id-token|issues|packages|pull-requests|statuses):\s+(write|read-all|write-all)\s*$'
+        $workflow | Should Match 'uses:\s+actions/checkout@[0-9a-f]{40}'
+        $workflow | Should Not Match 'uses:\s+[^\s@]+@(?:v?\d|main|master|latest)'
+        $workflow | Should Match 'Install-Module Pester'
+        $workflow | Should Match 'pwsh\s+-NoProfile\s+-ExecutionPolicy\s+Bypass\s+-File\s+ops/Test-SprintDelivery\.ps1'
+    }
+
+    It 'does not contain cloud, repository, environment, or evidence mutation commands' {
+        $workflow = Get-Content -Raw -LiteralPath $workflowPath
+        $prohibitedPatterns = @(
+            '(?i)azure/login',
+            '(?i)az\s+(login|deployment|group\s+create|containerapp|sql)',
+            '(?i)\b(deploy|provision|migrat(?:e|ion))\b',
+            '(?i)\bgh\s+(api|pr|workflow|run)',
+            '(?i)git\s+(push|merge|commit|checkout)',
+            '(?i)(upload-artifact|download-artifact)',
+            '(?i)(Set-Content|Add-Content|Out-File|New-Item|Copy-Item|Move-Item|Remove-Item)'
+        )
+
+        foreach ($pattern in $prohibitedPatterns) {
+            $workflow | Should Not Match $pattern
+        }
+    }
+
+    It 'asks pull requests to disclose delivery evidence and gate status without owning lifecycle state' {
+        Test-Path -LiteralPath $templatePath | Should Be $true
+        $template = Get-Content -Raw -LiteralPath $templatePath
+
+        $template | Should Match '(?i)delivery state'
+        $template | Should Match '(?i)evidence'
+        $template | Should Match '(?i)gate status'
+        $template | Should Match '(?i)does not advance lifecycle state'
+    }
+}
