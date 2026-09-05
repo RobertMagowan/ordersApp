@@ -1,8 +1,8 @@
 using CloudOrders.Infrastructure.Persistence;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
-using Microsoft.Data.SqlClient;
 
 string? targetMigration = null;
 if (args.Length > 0)
