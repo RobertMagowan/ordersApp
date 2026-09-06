@@ -191,6 +191,9 @@ function Compare-DeliveryState {
 
             $environment = Get-DeliveryMemberValue -InputObject $binding -Name 'environment'
             $workflowRun = Get-DeliveryMemberValue -InputObject $binding -Name 'workflowRun'
+            if ($null -eq $environment -and $null -eq $workflowRun) {
+                continue
+            }
 
             $commit = Get-DeliveryMemberValue -InputObject $binding -Name 'commit'
             if ($null -eq (Get-CanonicalSideEffectIdentity -Kind 'deployment' -Binding $binding)) {

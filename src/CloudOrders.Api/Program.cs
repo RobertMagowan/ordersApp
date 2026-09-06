@@ -189,6 +189,12 @@ app.MapPost("/api/v1/orders", async (
             errors["productSku"] = ["Product SKU is required."];
         }
 
+        var customerReference = request.CustomerReference?.Trim().ToUpperInvariant();
+        if (customerReference is not null && !IsValidCustomerReference(customerReference))
+        {
+            errors["customerReference"] = ["Customer reference must contain 1 to 64 letters, digits, hyphens, or underscores."];
+        }
+
         if (errors.Count > 0)
         {
             return OrderValidationProblem(httpContext, errors);
@@ -204,7 +210,7 @@ app.MapPost("/api/v1/orders", async (
 
         var actor = await currentCustomer.GetAsync(cancellationToken);
         var target = await customerProfiles.FindByReferenceAsync(
-            request.CustomerReference!.Trim().ToUpperInvariant(),
+            customerReference!,
             cancellationToken);
         if (target is null)
         {
@@ -304,6 +310,7 @@ app.MapGet("/api/v1/orders/{orderId:guid}", async (
         IHostEnvironment hostEnvironment,
         CancellationToken cancellationToken) =>
     {
+        var actor = await currentCustomer.GetAsync(cancellationToken);
         var ownedOrder = await handler.Handle(orderId, cancellationToken);
         if (ownedOrder is null)
         {
@@ -311,7 +318,7 @@ app.MapGet("/api/v1/orders/{orderId:guid}", async (
                 auditSink,
                 AuthorizationAuditAction.GetOrder,
                 AuthorizationAuditResult.NotFound,
-                null,
+                actor.Id,
                 null,
                 orderId,
                 AuthorizationCapability.OrdersRead,
@@ -321,7 +328,6 @@ app.MapGet("/api/v1/orders/{orderId:guid}", async (
             return ResourceNotFound(httpContext);
         }
 
-        var actor = await currentCustomer.GetAsync(cancellationToken);
         var authorization = await authorizationService.AuthorizeAsync(
             httpContext.User,
             new CustomerResource(actor.Id, ownedOrder.Owner.CustomerProfileId),
@@ -366,6 +372,10 @@ static IResult ResourceNotFound(HttpContext context) =>
         statusCode: StatusCodes.Status404NotFound,
         title: "The requested resource was not found.",
         extensions: ProblemExtensions(context, "resource_not_found"));
+
+static bool IsValidCustomerReference(string customerReference) =>
+    customerReference.Length is >= 1 and <= 64 &&
+    customerReference.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
 
 static bool TryParseIdempotencyKey(HttpContext context, out Guid idempotencyKey)
 {

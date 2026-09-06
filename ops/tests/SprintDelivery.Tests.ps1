@@ -419,6 +419,21 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
         $derivedItem.evidenceBindings[0].status | Should Be 'STALE'
     }
 
+    It 'does not treat current commit-only evidence as a cloud deployment' {
+        $state = Get-ReconciliationFixture
+        $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+        $e1.evidenceBindings = @(@{
+                commit = 'fbc68a9f0e02923880c8a06162a8d7cda2afac38'
+                status = 'CURRENT'
+            })
+
+        $result = Compare-DeliveryState -State $state -Snapshot @{ deployments = @() }
+        $derivedItem = $result.state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+
+        $result.kind | Should Be 'STATE_RECONCILIATION_AGREES'
+        $derivedItem.evidenceBindings[0].status | Should Be 'CURRENT'
+    }
+
     It 'invalidates only dependent evidence without mutating the input state' {
         $state = Get-ReconciliationFixture
         $result = Invalidate-DependentEvidence -State $state -WorkItemId '4A-E1' -Reason 'Azure deployment commit differs.'

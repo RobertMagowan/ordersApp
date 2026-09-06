@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using CloudOrders.Application.Identity;
 using CloudOrders.Contracts.Orders;
 
 namespace CloudOrders.IntegrationTests;
@@ -34,6 +35,20 @@ public sealed class OrderOwnershipIntegrationTests(SqlServerFixture sqlServer)
     }
 
     [Fact]
+    public async Task InvalidCustomerReferenceIsRejectedBeforeProfileLookup()
+    {
+        await using var database = await sqlServer.CreateDatabaseAsync();
+        using var factory = new OrderSqlJwtBearerWebApplicationFactory(database.ConnectionString);
+        using var alice = factory.CreateAuthenticatedClient(Alice);
+
+        using var response = await PostOrderAsync(alice, "CUST!");
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("validation_error", body.RootElement.GetProperty("errorCode").GetString());
+    }
+
+    [Fact]
     public async Task CustomerCannotReadAnotherCustomersOrderAndAdminCanReadIt()
     {
         await using var database = await sqlServer.CreateDatabaseAsync();
@@ -57,6 +72,25 @@ public sealed class OrderOwnershipIntegrationTests(SqlServerFixture sqlServer)
         Assert.Equal(HttpStatusCode.OK, adminResponse.StatusCode);
         Assert.Equal(created, await adminResponse.Content.ReadFromJsonAsync<OrderResponse>());
         Assert.Equal("no-store", adminResponse.Headers.CacheControl?.ToString());
+    }
+
+    [Fact]
+    public async Task MissingOrderAuditIsAttributedToTheAuthenticatedCustomer()
+    {
+        await using var database = await sqlServer.CreateDatabaseAsync();
+        var auditSink = new RecordingAuditSink();
+        using var factory = new OrderSqlJwtBearerWebApplicationFactory(database.ConnectionString, auditSink: auditSink);
+        using var alice = factory.CreateAuthenticatedClient(Alice);
+        var missingOrderId = Guid.NewGuid();
+
+        using var response = await alice.GetAsync($"/api/v1/orders/{missingOrderId}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Contains(auditSink.Events, auditEvent =>
+            auditEvent.Action is AuthorizationAuditAction.GetOrder &&
+            auditEvent.Result is AuthorizationAuditResult.NotFound &&
+            auditEvent.ActorCustomerProfileId == Alice.ProfileId &&
+            auditEvent.TargetOrderId == missingOrderId);
     }
 
     [Fact]
@@ -143,5 +177,16 @@ public sealed class OrderOwnershipIntegrationTests(SqlServerFixture sqlServer)
         Assert.NotEqual(
             firstBody.RootElement.GetProperty("traceId").GetString(),
             secondBody.RootElement.GetProperty("traceId").GetString());
+    }
+
+    private sealed class RecordingAuditSink : IAuthorizationAuditSink
+    {
+        public List<AuthorizationAuditEvent> Events { get; } = [];
+
+        public ValueTask WriteAsync(AuthorizationAuditEvent auditEvent, CancellationToken cancellationToken)
+        {
+            Events.Add(auditEvent);
+            return ValueTask.CompletedTask;
+        }
     }
 }
