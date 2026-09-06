@@ -3,7 +3,15 @@
   "kind": "SPRINT_4A_R1_RELEASE_RECONCILIATION",
   "status": "CURRENT",
   "recordedAt": "2026-09-06T21:50:17Z",
-  "bindings": {},
+  "bindings": {
+    "commit": "778ae7e08130d3429ff7120055adf1dbcd3efd6d",
+    "workflowRun": 34061359073,
+    "environment": "test",
+    "artifact": "cloudorderst583431testacr.azurecr.io/cloudorders-api@sha256:89c345369e75777b9879d67a170c8929360e41a9ba2c7b4565a95f7c893690fb"
+  },
+  "observations": {
+    "qaReport": "docs/evidence/sprint-4a/test-qa-r1.md"
+  },
   "readOnly": true,
   "currentSprint": {
     "id": "4A",

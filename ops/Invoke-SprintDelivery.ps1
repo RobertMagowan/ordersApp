@@ -471,6 +471,30 @@ function Test-SprintDeliveryState {
             }
         }
 
+        if ($lifecycle -eq 'QA_DEPLOYED') {
+            if ($stage -ne 'QA' -or $acceptanceStage -ne 'QA' -or $acceptanceStatus -ne 'PASS') {
+                throw "Work item '$((Get-DeliveryMemberValue -InputObject $workItem -Name 'id'))' lifecycle 'QA_DEPLOYED' requires QA-stage acceptance to pass."
+            }
+
+            Assert-TaskDone -WorkItem $workItem -Config $Config | Out-Null
+
+            $currentTestDeploymentEvidence = @($evidenceBindings | Where-Object {
+                (Get-DeliveryMemberValue -InputObject $_ -Name 'status') -eq 'CURRENT' -and
+                (Get-DeliveryMemberValue -InputObject $_ -Name 'environment') -eq 'test' -and
+                $null -ne (Get-DeliveryMemberValue -InputObject $_ -Name 'workflowRun') -and
+                -not [string]::IsNullOrWhiteSpace((Get-DeliveryMemberValue -InputObject $_ -Name 'artifact'))
+            })
+            if ($currentTestDeploymentEvidence.Count -eq 0) {
+                throw "Work item '$((Get-DeliveryMemberValue -InputObject $workItem -Name 'id'))' lifecycle 'QA_DEPLOYED' requires current immutable test deployment evidence."
+            }
+
+            if (@($blockers | Where-Object {
+                (Get-DeliveryMemberValue -InputObject $_ -Name 'status') -ne 'RESOLVED'
+            }).Count -gt 0) {
+                throw "Work item '$((Get-DeliveryMemberValue -InputObject $workItem -Name 'id'))' lifecycle 'QA_DEPLOYED' cannot retain unresolved blockers."
+            }
+        }
+
         $ciStatus = Get-DeliveryMemberValue -InputObject (Get-DeliveryMemberValue -InputObject $gates -Name 'ci') -Name 'status'
         if ($lifecycle -in @('MERGED', 'DEV_DEPLOYED', 'QA_DEPLOYED', 'RELEASED') -and $ciStatus -eq 'FAIL') {
             throw "Work item '$((Get-DeliveryMemberValue -InputObject $workItem -Name 'id'))' lifecycle conflicts with failed ci gate."

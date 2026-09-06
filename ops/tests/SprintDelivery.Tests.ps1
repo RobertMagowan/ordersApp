@@ -855,12 +855,16 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
 
     It 'keeps D1 as a human decision without escalating it to a model action' {
         $inputs = Get-CutoverInputs
-        $result = Set-WorkflowCutover -State (Get-CutoverFixture) -Config $config @inputs
-
-        $d1 = $result.state.currentSprint.workItems | Where-Object { $_.id -eq '4A-7-D1' }
+        $state = Get-CutoverFixture
+        $d1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-7-D1' }
         $d1.lifecycle = 'IN_PROGRESS'
         $d1.blockers[0].status = 'HUMAN_DECISION_REQUIRED'
         $d1.blockers[0].reason = 'External ID tenant and reset-or-mapped-backfill data-transition decision are required before D1 traffic.'
+
+        $result = Set-WorkflowCutover -State $state -Config $config @inputs
+
+        $d1 = $result.state.currentSprint.workItems | Where-Object { $_.id -eq '4A-7-D1' }
+        $d1.lifecycle | Should Be 'IN_PROGRESS'
         $d1.blockers[0].status | Should Be 'HUMAN_DECISION_REQUIRED'
         ($result.blockers -join "`n") | Should Not Match 'D1'
     }
@@ -944,6 +948,32 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
         $item.gates.independentReview.status = 'PASS'
         $item.gates.qaValidation.status = 'PASS'
         $item.evidenceBindings = @()
+
+        { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
+    }
+
+    It 'rejects QA deployed work without QA acceptance, required gates, current test evidence, and resolved blockers' {
+        $state = Get-CutoverFixture
+        $item = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-4' }
+        $item.gates.qaValidation.status = 'PENDING'
+
+        { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
+
+        $state = Get-CutoverFixture
+        $item = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-4' }
+        $item.acceptanceVerification.status = 'PENDING'
+
+        { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
+
+        $state = Get-CutoverFixture
+        $item = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-4' }
+        $item.evidenceBindings = @($item.evidenceBindings | Where-Object { $_.environment -ne 'test' })
+
+        { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
+
+        $state = Get-CutoverFixture
+        $item = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-4' }
+        $item.blockers = @([pscustomobject]@{ status = 'OPEN'; reason = 'A required QA action remains.' })
 
         { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
     }
