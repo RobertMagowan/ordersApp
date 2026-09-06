@@ -161,6 +161,25 @@ Describe 'Sprint delivery contracts' -Tag 'contracts' {
     }
 }
 
+function Remove-DeliveryTestMember {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)] $InputObject,
+        [Parameter(Mandatory)][string] $Name
+    )
+
+    if (-not $PSCmdlet.ShouldProcess($InputObject, "Remove member '$Name'")) {
+        return
+    }
+
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        $InputObject.Remove($Name)
+    }
+    else {
+        $InputObject.PSObject.Properties.Remove($Name)
+    }
+}
+
 Describe 'Sprint delivery completion' -Tag 'completion' {
     BeforeAll {
         $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -225,7 +244,7 @@ Describe 'Sprint delivery completion' -Tag 'completion' {
 
     It 'requires separate PR, review, and acceptance fields for every work item' {
         $state = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/state.json')
-        $state.currentSprint.workItems[0].PSObject.Properties.Remove('prLifecycle')
+        Remove-DeliveryTestMember -InputObject $state.currentSprint.workItems[0] -Name 'prLifecycle'
 
         { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
     }
@@ -325,7 +344,7 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
     It 'fails closed when current cloud evidence is missing its commit even if the snapshot is missing it too' {
         $state = Get-ReconciliationFixture
         $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
-        $e1.evidenceBindings[0].PSObject.Properties.Remove('commit')
+        Remove-DeliveryTestMember -InputObject $e1.evidenceBindings[0] -Name 'commit'
         $snapshot = @{ deployments = @(@{ workflowRun = 33457927112; environment = 'development' }) }
 
         $result = Compare-DeliveryState -State $state -Snapshot $snapshot
@@ -340,7 +359,7 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
     It 'fails closed when current cloud evidence is missing its environment even if the snapshot is missing it too' {
         $state = Get-ReconciliationFixture
         $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
-        $e1.evidenceBindings[0].PSObject.Properties.Remove('environment')
+        Remove-DeliveryTestMember -InputObject $e1.evidenceBindings[0] -Name 'environment'
         $snapshot = @{ deployments = @(@{ commit = 'fbc68a9f0e02923880c8a06162a8d7cda2afac38'; workflowRun = 33457927112 }) }
 
         $result = Compare-DeliveryState -State $state -Snapshot $snapshot
@@ -355,7 +374,7 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
     It 'fails closed when current cloud evidence is missing its workflow run even if the snapshot is missing it too' {
         $state = Get-ReconciliationFixture
         $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
-        $e1.evidenceBindings[0].PSObject.Properties.Remove('workflowRun')
+        Remove-DeliveryTestMember -InputObject $e1.evidenceBindings[0] -Name 'workflowRun'
         $snapshot = @{ deployments = @(@{ commit = 'fbc68a9f0e02923880c8a06162a8d7cda2afac38'; environment = 'development' }) }
 
         $result = Compare-DeliveryState -State $state -Snapshot $snapshot
@@ -398,6 +417,21 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
 
         $result.kind | Should Be 'STATE_RECONCILIATION_REQUIRED'
         $derivedItem.evidenceBindings[0].status | Should Be 'STALE'
+    }
+
+    It 'does not treat current commit-only evidence as a cloud deployment' {
+        $state = Get-ReconciliationFixture
+        $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+        $e1.evidenceBindings = @(@{
+                commit = 'fbc68a9f0e02923880c8a06162a8d7cda2afac38'
+                status = 'CURRENT'
+            })
+
+        $result = Compare-DeliveryState -State $state -Snapshot @{ deployments = @() }
+        $derivedItem = $result.state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+
+        $result.kind | Should Be 'STATE_RECONCILIATION_AGREES'
+        $derivedItem.evidenceBindings[0].status | Should Be 'CURRENT'
     }
 
     It 'invalidates only dependent evidence without mutating the input state' {

@@ -23,7 +23,7 @@ jobs:
 
       - name: Install required Pester version
         shell: pwsh
-        run: Install-Module Pester -RequiredVersion 3.4.0 -Scope CurrentUser -Force
+        run: Install-Module Pester -RequiredVersion 4.8.0 -Scope CurrentUser -Force
 
       - name: Run delivery workflow validation
         shell: pwsh

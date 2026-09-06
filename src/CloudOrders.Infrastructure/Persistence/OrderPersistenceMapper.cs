@@ -4,7 +4,7 @@ namespace CloudOrders.Infrastructure.Persistence;
 
 internal static class OrderPersistenceMapper
 {
-    public static OrderEntity ToEntity(Order order) =>
+    public static OrderEntity ToEntity(Order order, Guid? customerProfileId = null) =>
         new()
         {
             Id = order.Id,
@@ -13,7 +13,8 @@ internal static class OrderPersistenceMapper
             Quantity = order.Quantity,
             Status = order.Status,
             CreatedAt = order.CreatedAt,
-            UpdatedAt = order.UpdatedAt
+            UpdatedAt = order.UpdatedAt,
+            CustomerProfileId = customerProfileId
         };
 
     public static Order ToDomain(OrderEntity entity)

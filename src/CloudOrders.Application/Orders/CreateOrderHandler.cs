@@ -36,6 +36,8 @@ public sealed class CreateOrderHandler(
                 order.CreatedAt);
             var request = new IdempotentOrderRequest(
                 LegacySubjectId,
+                null,
+                null,
                 idempotencyKey,
                 IdempotencyRequestHasher.Compute(LegacySubjectId, order),
                 order,
@@ -43,6 +45,40 @@ public sealed class CreateOrderHandler(
                 response,
                 traceParent);
 
+            return await idempotentOrderStore.CreateAsync(request, cancellationToken);
+        }
+        catch (DomainValidationException exception)
+        {
+            return CreateOrderResult.ValidationError(exception.Message);
+        }
+    }
+
+    public async Task<CreateOrderResult> Handle(
+        CreateOrderCommand command,
+        Guid actorCustomerProfileId,
+        Guid targetCustomerProfileId,
+        Guid idempotencyKey,
+        string? traceParent,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var createdAt = timeProvider.GetUtcNow();
+            var order = Order.Create(Guid.NewGuid(), command.CustomerReference, command.ProductSku, command.Quantity, createdAt);
+            var response = OrderResponseMapper.ToResponse(order);
+            var integrationEvent = new OrderCreatedIntegrationEventV1(
+                Guid.NewGuid(), order.Id, order.CustomerReference, order.ProductSku, order.Quantity, order.CreatedAt);
+            var subjectId = $"profile:{actorCustomerProfileId:N}";
+            var request = new IdempotentOrderRequest(
+                subjectId,
+                actorCustomerProfileId,
+                targetCustomerProfileId,
+                idempotencyKey,
+                IdempotencyRequestHasher.Compute(actorCustomerProfileId, targetCustomerProfileId, order),
+                order,
+                integrationEvent,
+                response,
+                traceParent);
             return await idempotentOrderStore.CreateAsync(request, cancellationToken);
         }
         catch (DomainValidationException exception)

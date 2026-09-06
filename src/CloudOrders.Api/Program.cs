@@ -99,6 +99,13 @@ builder.Services.AddDbContextFactory<CloudOrdersDbContext>((serviceProvider, opt
 builder.Services.AddScoped<IOrderRepository, SqlOrderRepository>();
 builder.Services.AddScoped<IIdempotentOrderStore, SqlIdempotentOrderStore>();
 builder.Services.AddScoped<ICustomerProfileStore, SqlCustomerProfileStore>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<IAuthorizationAuditSink>(serviceProvider =>
+    new LoggerAuthorizationAuditSink(
+        serviceProvider.GetRequiredService<ILogger<LoggerAuthorizationAuditSink>>(),
+        serviceProvider.GetRequiredService<IHostEnvironment>().EnvironmentName));
+builder.Services.AddScoped<CurrentCustomerProfileAccessor>();
+builder.Services.AddSingleton<IAuthorizationHandler, CustomerResourceAuthorizationHandler>();
 builder.Services.AddSingleton<ICustomerReferenceGenerator, CustomerReferenceGenerator>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<CreateOrderHandler>();
@@ -164,6 +171,11 @@ app.MapPost("/api/v1/orders", async (
         CreateOrderRequest request,
         HttpContext httpContext,
         CreateOrderHandler handler,
+        CurrentCustomerProfileAccessor currentCustomer,
+        ICustomerProfileStore customerProfiles,
+        IAuthorizationService authorizationService,
+        IAuthorizationAuditSink auditSink,
+        IHostEnvironment hostEnvironment,
         CancellationToken cancellationToken) =>
     {
         var errors = new Dictionary<string, string[]>();
@@ -175,6 +187,12 @@ app.MapPost("/api/v1/orders", async (
         if (string.IsNullOrWhiteSpace(request.ProductSku))
         {
             errors["productSku"] = ["Product SKU is required."];
+        }
+
+        var customerReference = request.CustomerReference?.Trim().ToUpperInvariant();
+        if (customerReference is not null && !IsValidCustomerReference(customerReference))
+        {
+            errors["customerReference"] = ["Customer reference must contain 1 to 64 letters, digits, hyphens, or underscores."];
         }
 
         if (errors.Count > 0)
@@ -190,10 +208,64 @@ app.MapPost("/api/v1/orders", async (
                 extensions: ProblemExtensions(httpContext, "invalid_idempotency_key"));
         }
 
+        var actor = await currentCustomer.GetAsync(cancellationToken);
+        var target = await customerProfiles.FindByReferenceAsync(
+            customerReference!,
+            cancellationToken);
+        if (target is null)
+        {
+            await WriteAuthorizationAuditAsync(
+                auditSink,
+                AuthorizationAuditAction.CreateOrder,
+                AuthorizationAuditResult.NotFound,
+                actor.Id,
+                null,
+                null,
+                AuthorizationCapability.OrdersWrite,
+                httpContext,
+                hostEnvironment,
+                cancellationToken);
+            return ResourceNotFound(httpContext);
+        }
+
+        var authorization = await authorizationService.AuthorizeAsync(
+            httpContext.User,
+            new CustomerResource(actor.Id, target.Id),
+            new CustomerResourceRequirement());
+        if (!authorization.Succeeded)
+        {
+            await WriteAuthorizationAuditAsync(
+                auditSink,
+                AuthorizationAuditAction.CreateOrder,
+                AuthorizationAuditResult.Denied,
+                actor.Id,
+                target.Id,
+                null,
+                GetAuthorizationCapability(httpContext.User, actor.Id, target.Id, AuthorizationCapability.OrdersWrite),
+                httpContext,
+                hostEnvironment,
+                cancellationToken);
+            return ResourceNotFound(httpContext);
+        }
+
+        await WriteAuthorizationAuditAsync(
+            auditSink,
+            AuthorizationAuditAction.CreateOrder,
+            AuthorizationAuditResult.Allowed,
+            actor.Id,
+            target.Id,
+            null,
+            GetAuthorizationCapability(httpContext.User, actor.Id, target.Id, AuthorizationCapability.OrdersWrite),
+            httpContext,
+            hostEnvironment,
+            cancellationToken);
+
         var traceParent = Activity.Current?.Id;
 
         var result = await handler.Handle(
             new CreateOrderCommand(request.CustomerReference!, request.ProductSku!, request.Quantity),
+            actor.Id,
+            target.Id,
             idempotencyKey,
             traceParent,
             cancellationToken);
@@ -230,11 +302,55 @@ app.MapPost("/api/v1/orders", async (
 
 app.MapGet("/api/v1/orders/{orderId:guid}", async (
         Guid orderId,
+        HttpContext httpContext,
         GetOrderHandler handler,
+        CurrentCustomerProfileAccessor currentCustomer,
+        IAuthorizationService authorizationService,
+        IAuthorizationAuditSink auditSink,
+        IHostEnvironment hostEnvironment,
         CancellationToken cancellationToken) =>
     {
-        var response = await handler.Handle(orderId, cancellationToken);
-        return response is null ? Results.NotFound() : Results.Ok(response);
+        var ownedOrder = await handler.Handle(orderId, cancellationToken);
+        if (ownedOrder is null)
+        {
+            await WriteAuthorizationAuditAsync(
+                auditSink,
+                AuthorizationAuditAction.GetOrder,
+                AuthorizationAuditResult.NotFound,
+                null,
+                null,
+                orderId,
+                AuthorizationCapability.OrdersRead,
+                httpContext,
+                hostEnvironment,
+                cancellationToken);
+            return ResourceNotFound(httpContext);
+        }
+
+        var actor = await currentCustomer.GetAsync(cancellationToken);
+        var authorization = await authorizationService.AuthorizeAsync(
+            httpContext.User,
+            new CustomerResource(actor.Id, ownedOrder.Owner.CustomerProfileId),
+            new CustomerResourceRequirement());
+        var result = authorization.Succeeded ? AuthorizationAuditResult.Allowed : AuthorizationAuditResult.Denied;
+        await WriteAuthorizationAuditAsync(
+            auditSink,
+            AuthorizationAuditAction.GetOrder,
+            result,
+            actor.Id,
+            ownedOrder.Owner.CustomerProfileId,
+            orderId,
+            GetAuthorizationCapability(httpContext.User, actor.Id, ownedOrder.Owner.CustomerProfileId, AuthorizationCapability.OrdersRead),
+            httpContext,
+            hostEnvironment,
+            cancellationToken);
+        if (!authorization.Succeeded)
+        {
+            return ResourceNotFound(httpContext);
+        }
+
+        httpContext.Response.Headers.CacheControl = "no-store";
+        return Results.Ok(ownedOrder.Response);
     })
     .WithName("GetOrder")
     .WithTags("Orders")
@@ -251,6 +367,16 @@ static IResult OrderValidationProblem(HttpContext context, IDictionary<string, s
             ["errors"] = errors
         });
 
+static IResult ResourceNotFound(HttpContext context) =>
+    Results.Problem(
+        statusCode: StatusCodes.Status404NotFound,
+        title: "The requested resource was not found.",
+        extensions: ProblemExtensions(context, "resource_not_found"));
+
+static bool IsValidCustomerReference(string customerReference) =>
+    customerReference.Length is >= 1 and <= 64 &&
+    customerReference.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
+
 static bool TryParseIdempotencyKey(HttpContext context, out Guid idempotencyKey)
 {
     idempotencyKey = Guid.Empty;
@@ -264,6 +390,39 @@ static IDictionary<string, object?> ProblemExtensions(HttpContext context, strin
         ["errorCode"] = errorCode,
         ["traceId"] = context.TraceIdentifier
     };
+
+static ValueTask WriteAuthorizationAuditAsync(
+    IAuthorizationAuditSink auditSink,
+    AuthorizationAuditAction action,
+    AuthorizationAuditResult result,
+    Guid? actorCustomerProfileId,
+    Guid? targetCustomerProfileId,
+    Guid? targetOrderId,
+    AuthorizationCapability capability,
+    HttpContext context,
+    IHostEnvironment hostEnvironment,
+    CancellationToken cancellationToken) =>
+    auditSink.WriteAsync(
+        new AuthorizationAuditEvent(
+            action,
+            result,
+            actorCustomerProfileId,
+            targetCustomerProfileId,
+            targetOrderId,
+            capability,
+            Activity.Current?.Id ?? context.TraceIdentifier,
+            hostEnvironment.EnvironmentName),
+        cancellationToken);
+
+static AuthorizationCapability GetAuthorizationCapability(
+    System.Security.Claims.ClaimsPrincipal principal,
+    Guid actorCustomerProfileId,
+    Guid targetCustomerProfileId,
+    AuthorizationCapability routeCapability) =>
+    actorCustomerProfileId != targetCustomerProfileId
+        && principal.FindAll("roles").Any(role => string.Equals(role.Value, CloudOrdersPermissions.AdminRole, StringComparison.Ordinal))
+            ? AuthorizationCapability.UserAdmin
+            : routeCapability;
 
 static bool HasSingleExactClaim(System.Security.Claims.ClaimsPrincipal principal, string type, string expected) =>
     principal.FindAll(type).Select(claim => claim.Value).ToArray() is [var value]
