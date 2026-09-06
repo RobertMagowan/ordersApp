@@ -4,9 +4,9 @@
   "type": "object",
   "required": ["workflowVersion", "stateSchemaVersion", "configurationVersion", "workflowLifecycleOwner", "cutover", "sprintPlanSource", "sprintPlanRevision", "currentSprint"],
   "properties": {
-    "workflowVersion": { "type": "string", "const": "1.0" },
-    "stateSchemaVersion": { "type": "string", "const": "1.0" },
-    "configurationVersion": { "type": "string", "const": "1.0" },
+    "workflowVersion": { "type": "string", "const": "2.0" },
+    "stateSchemaVersion": { "type": "string", "const": "2.0" },
+    "configurationVersion": { "type": "string", "const": "2.0" },
     "workflowLifecycleOwner": { "type": "string", "const": "sprint-orchestrator" },
     "cutover": {
       "type": "object",
@@ -21,10 +21,11 @@
     "sprintPlanRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "currentSprint": {
       "type": "object",
-      "required": ["id", "name", "workItems"],
+      "required": ["id", "name", "requirementsAuthority", "workItems"],
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string" },
+        "requirementsAuthority": { "type": "array", "minItems": 1, "items": { "type": "string" } },
         "workItems": {
           "type": "array",
           "minItems": 1,
