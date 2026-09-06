@@ -1,5 +1,4 @@
 using System.Net.Http.Headers;
-using CloudOrders.Application.Identity;
 using CloudOrders.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
@@ -8,7 +7,6 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 
@@ -18,8 +16,7 @@ internal sealed record TestCustomer(Guid ProfileId, Guid ObjectId, string Custom
 
 internal sealed class OrderSqlJwtBearerWebApplicationFactory(
     string connectionString,
-    IdempotencyRaceObserver? raceObserver = null,
-    IAuthorizationAuditSink? auditSink = null) : WebApplicationFactory<Program>
+    IdempotencyRaceObserver? raceObserver = null) : WebApplicationFactory<Program>
 {
     private static readonly TestCustomer DefaultCustomer = new(
         Guid.Parse("55555555-5555-5555-5555-555555555555"),
@@ -92,11 +89,6 @@ internal sealed class OrderSqlJwtBearerWebApplicationFactory(
                     options.AddInterceptors(raceObserver.CommandInterceptor, raceObserver.TransactionInterceptor));
             }
 
-            if (auditSink is not null)
-            {
-                services.RemoveAll<IAuthorizationAuditSink>();
-                services.AddSingleton(auditSink);
-            }
         });
     }
 

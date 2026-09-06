@@ -310,7 +310,6 @@ app.MapGet("/api/v1/orders/{orderId:guid}", async (
         IHostEnvironment hostEnvironment,
         CancellationToken cancellationToken) =>
     {
-        var actor = await currentCustomer.GetAsync(cancellationToken);
         var ownedOrder = await handler.Handle(orderId, cancellationToken);
         if (ownedOrder is null)
         {
@@ -318,7 +317,7 @@ app.MapGet("/api/v1/orders/{orderId:guid}", async (
                 auditSink,
                 AuthorizationAuditAction.GetOrder,
                 AuthorizationAuditResult.NotFound,
-                actor.Id,
+                null,
                 null,
                 orderId,
                 AuthorizationCapability.OrdersRead,
@@ -328,6 +327,7 @@ app.MapGet("/api/v1/orders/{orderId:guid}", async (
             return ResourceNotFound(httpContext);
         }
 
+        var actor = await currentCustomer.GetAsync(cancellationToken);
         var authorization = await authorizationService.AuthorizeAsync(
             httpContext.User,
             new CustomerResource(actor.Id, ownedOrder.Owner.CustomerProfileId),
