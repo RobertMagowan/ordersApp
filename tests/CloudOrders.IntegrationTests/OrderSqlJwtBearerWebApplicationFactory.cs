@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Protocols;
@@ -11,19 +12,61 @@ using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 
 namespace CloudOrders.IntegrationTests;
 
+internal sealed record TestCustomer(Guid ProfileId, Guid ObjectId, string CustomerReference);
+
 internal sealed class OrderSqlJwtBearerWebApplicationFactory(
     string connectionString,
     IdempotencyRaceObserver? raceObserver = null) : WebApplicationFactory<Program>
 {
+    private static readonly TestCustomer DefaultCustomer = new(
+        Guid.Parse("55555555-5555-5555-5555-555555555555"),
+        Guid.Parse("44444444-4444-4444-4444-444444444444"),
+        "CUST-001");
     private readonly SignedJwtFactory tokens = new();
 
     internal HttpClient CreateAuthenticatedClient()
+        => CreateAuthenticatedClient(DefaultCustomer);
+
+    internal HttpClient CreateAuthenticatedClient(
+        TestCustomer customer,
+        string[]? roles = null,
+        string scope = "Orders.Read Orders.Write")
     {
+        SeedCustomerProfileAsync(customer).GetAwaiter().GetResult();
         var client = CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Bearer",
-            tokens.CreateToken(oid: Guid.NewGuid().ToString("D"), scope: "Orders.Read Orders.Write"));
+            tokens.CreateToken(
+                oid: customer.ObjectId.ToString("D"),
+                scope: scope,
+                roles: roles));
         return client;
+    }
+
+    private async Task SeedCustomerProfileAsync(TestCustomer customer)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            IF NOT EXISTS (SELECT 1 FROM dbo.CustomerProfiles WHERE Issuer = @issuer AND ObjectId = @objectId)
+            BEGIN
+                INSERT INTO dbo.CustomerProfiles (Id, CustomerReference, Issuer, ObjectId, ContactEmail, CreatedAt, UpdatedAt)
+                VALUES (@id, @customerReference, @issuer, @objectId, NULL, SYSUTCDATETIME(), SYSUTCDATETIME());
+            END
+            """;
+        command.Parameters.Add(new SqlParameter("@id", customer.ProfileId));
+        command.Parameters.Add(new SqlParameter("@customerReference", customer.CustomerReference));
+        command.Parameters.Add(new SqlParameter("@issuer", SignedJwtFactory.Issuer));
+        command.Parameters.Add(new SqlParameter("@objectId", customer.ObjectId));
+        try
+        {
+            await command.ExecuteNonQueryAsync();
+        }
+        catch (SqlException exception) when (exception.Number == 208)
+        {
+            // Readiness tests intentionally use an unmigrated database.
+        }
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -48,6 +91,7 @@ internal sealed class OrderSqlJwtBearerWebApplicationFactory(
                 services.ConfigureDbContext<CloudOrdersDbContext>(options =>
                     options.AddInterceptors(raceObserver.CommandInterceptor, raceObserver.TransactionInterceptor));
             }
+
         });
     }
 

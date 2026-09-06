@@ -161,6 +161,25 @@ Describe 'Sprint delivery contracts' -Tag 'contracts' {
     }
 }
 
+function Remove-DeliveryTestMember {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)] $InputObject,
+        [Parameter(Mandatory)][string] $Name
+    )
+
+    if (-not $PSCmdlet.ShouldProcess($InputObject, "Remove member '$Name'")) {
+        return
+    }
+
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        $InputObject.Remove($Name)
+    }
+    else {
+        $InputObject.PSObject.Properties.Remove($Name)
+    }
+}
+
 Describe 'Sprint delivery completion' -Tag 'completion' {
     BeforeAll {
         $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -225,7 +244,7 @@ Describe 'Sprint delivery completion' -Tag 'completion' {
 
     It 'requires separate PR, review, and acceptance fields for every work item' {
         $state = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/state.json')
-        $state.currentSprint.workItems[0].PSObject.Properties.Remove('prLifecycle')
+        Remove-DeliveryTestMember -InputObject $state.currentSprint.workItems[0] -Name 'prLifecycle'
 
         { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
     }
@@ -325,7 +344,7 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
     It 'fails closed when current cloud evidence is missing its commit even if the snapshot is missing it too' {
         $state = Get-ReconciliationFixture
         $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
-        $e1.evidenceBindings[0].PSObject.Properties.Remove('commit')
+        Remove-DeliveryTestMember -InputObject $e1.evidenceBindings[0] -Name 'commit'
         $snapshot = @{ deployments = @(@{ workflowRun = 33457927112; environment = 'development' }) }
 
         $result = Compare-DeliveryState -State $state -Snapshot $snapshot
@@ -340,7 +359,7 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
     It 'fails closed when current cloud evidence is missing its environment even if the snapshot is missing it too' {
         $state = Get-ReconciliationFixture
         $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
-        $e1.evidenceBindings[0].PSObject.Properties.Remove('environment')
+        Remove-DeliveryTestMember -InputObject $e1.evidenceBindings[0] -Name 'environment'
         $snapshot = @{ deployments = @(@{ commit = 'fbc68a9f0e02923880c8a06162a8d7cda2afac38'; workflowRun = 33457927112 }) }
 
         $result = Compare-DeliveryState -State $state -Snapshot $snapshot
@@ -355,7 +374,7 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
     It 'fails closed when current cloud evidence is missing its workflow run even if the snapshot is missing it too' {
         $state = Get-ReconciliationFixture
         $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
-        $e1.evidenceBindings[0].PSObject.Properties.Remove('workflowRun')
+        Remove-DeliveryTestMember -InputObject $e1.evidenceBindings[0] -Name 'workflowRun'
         $snapshot = @{ deployments = @(@{ commit = 'fbc68a9f0e02923880c8a06162a8d7cda2afac38'; environment = 'development' }) }
 
         $result = Compare-DeliveryState -State $state -Snapshot $snapshot
@@ -378,6 +397,16 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
         $derivedItem.evidenceBindings[0].status | Should Be 'STALE'
     }
 
+    It 'does not select a work item when completed-cutover reconciliation contradicts current evidence' {
+        $state = Get-ReconciliationFixture
+        $reconciliation = Compare-DeliveryState -State $state -Snapshot @{ deployments = @() }
+
+        $action = Get-ReconciledDeliveryAction -State $state -Config $config -Reconciliation $reconciliation
+
+        $action.kind | Should Be 'STATE_RECONCILIATION_REQUIRED'
+        $action.workItemId | Should Be $null
+    }
+
     It 'fails closed for current workflow evidence even when an environment is not recorded' {
         $state = Get-ReconciliationFixture
         $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
@@ -388,6 +417,21 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
 
         $result.kind | Should Be 'STATE_RECONCILIATION_REQUIRED'
         $derivedItem.evidenceBindings[0].status | Should Be 'STALE'
+    }
+
+    It 'does not treat current commit-only evidence as a cloud deployment' {
+        $state = Get-ReconciliationFixture
+        $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+        $e1.evidenceBindings = @(@{
+                commit = 'fbc68a9f0e02923880c8a06162a8d7cda2afac38'
+                status = 'CURRENT'
+            })
+
+        $result = Compare-DeliveryState -State $state -Snapshot @{ deployments = @() }
+        $derivedItem = $result.state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
+
+        $result.kind | Should Be 'STATE_RECONCILIATION_AGREES'
+        $derivedItem.evidenceBindings[0].status | Should Be 'CURRENT'
     }
 
     It 'invalidates only dependent evidence without mutating the input state' {
@@ -662,6 +706,26 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
         ($result.blockers -join "`n") | Should Match 'AUTHORITATIVE_AZURE_DEPLOYMENT_SNAPSHOT_UNAVAILABLE'
     }
 
+    It 'requires both expected and observed deployment identifiers before accepting deployment proof' {
+        $cutoverEvidence = [pscustomobject]@{
+            observations = [pscustomobject]@{
+                github = [pscustomobject]@{
+                    developmentRun = [pscustomobject]@{}
+                }
+            }
+        }
+        $snapshot = [pscustomobject]@{
+            deployments = @([pscustomobject]@{
+                environment = 'development'
+                artifact = 'example.invalid/cloudorders-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            })
+        }
+
+        $proof = Get-CutoverProofStatus -CutoverEvidence $cutoverEvidence -Snapshot $snapshot
+
+        $proof.authoritativeDeploymentEvidenceAvailable | Should Be $false
+    }
+
     It 'blocks cutover when developer evidence passes but CI subsequently fails' {
         $inputs = Get-CutoverInputs
         $inputs.Baselines = @{ preMigration = $true; postMigration = $true; ci = 'FAIL' }
@@ -785,6 +849,19 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
         $action.workItemId | Should Be $null
     }
 
+    It 'resumes a completed v2 cutover without re-certifying legacy cutover proof' {
+        $powerShellHost = if ($env:OS -eq 'Windows_NT') { 'powershell' } else { 'pwsh' }
+
+        $output = & $powerShellHost -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repositoryRoot 'ops/Invoke-SprintDelivery.ps1') -Reconcile -WhatIf
+        $result = ($output -join "`n") | ConvertFrom-Json
+
+        $LASTEXITCODE | Should Be 0
+        $result.cutover | Should BeNullOrEmpty
+        $result.reconciliation.kind | Should Be 'STATE_RECONCILIATION_AGREES'
+        $result.action.kind | Should Be 'WORK_ITEM_READY'
+        $result.action.workItemId | Should Be '4A-4'
+    }
+
     It 'requires an immutable deployment artifact for current deployment evidence' {
         $state = Get-CutoverFixture
         $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
@@ -814,10 +891,10 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
         $output = & $powerShellHost -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repositoryRoot 'ops/Invoke-SprintDelivery.ps1') -Reconcile -WhatIf -ReconciliationSnapshotPath $snapshotPath
 
         $LASTEXITCODE | Should Be 0
-        ($output -join "`n") | Should Match 'CUTOVER_BLOCKED'
+        ($output -join "`n") | Should Match 'WORK_ITEM_READY'
     }
 
-    It 'derives cutover completion from committed baseline proof and matching immutable deployment evidence' {
+    It 'does not re-certify completed cutover when supplied reconciliation evidence agrees' {
         $powerShellHost = if ($env:OS -eq 'Windows_NT') { 'powershell' } else { 'pwsh' }
         $snapshotPath = Join-Path $repositoryRoot 'ops/tests/fixtures/agreeing-cutover-snapshot.json'
         $evidencePath = Join-Path $repositoryRoot 'ops/tests/fixtures/completed-cutover-evidence.json'
@@ -826,7 +903,7 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
         $result = ($output -join "`n") | ConvertFrom-Json
 
         $LASTEXITCODE | Should Be 0
-        $result.cutover.status | Should Be 'WORKFLOW_CUTOVER_COMPLETE'
+        $result.cutover | Should BeNullOrEmpty
         $result.action.kind | Should Be 'WORK_ITEM_READY'
         $result.action.workItemId | Should Be '4A-4'
     }

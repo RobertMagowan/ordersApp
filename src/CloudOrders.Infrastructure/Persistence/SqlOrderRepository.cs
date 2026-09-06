@@ -13,12 +13,16 @@ public sealed class SqlOrderRepository(IDbContextFactory<CloudOrdersDbContext> c
         await context.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<Order?> GetAsync(Guid orderId, CancellationToken cancellationToken)
+    public async Task<OwnedOrder?> GetOwnedAsync(Guid orderId, CancellationToken cancellationToken)
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
         var entity = await context.Orders
             .AsNoTracking()
             .SingleOrDefaultAsync(order => order.Id == orderId, cancellationToken);
-        return entity is null ? null : OrderPersistenceMapper.ToDomain(entity);
+        return entity is null || entity.CustomerProfileId is not { } ownerId
+            ? null
+            : new OwnedOrder(
+                OrderPersistenceMapper.ToDomain(entity),
+                new OrderOwner(ownerId, entity.CustomerReference));
     }
 }

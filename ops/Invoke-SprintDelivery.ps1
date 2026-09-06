@@ -561,6 +561,25 @@ function Get-NextDeliveryAction {
     }
 }
 
+function Get-ReconciledDeliveryAction {
+    param(
+        [Parameter(Mandatory)] $State,
+        [Parameter(Mandatory)] $Config,
+        $Reconciliation
+    )
+
+    if ($null -ne $Reconciliation -and (Get-DeliveryMemberValue -InputObject $Reconciliation -Name 'kind') -eq 'STATE_RECONCILIATION_REQUIRED') {
+        return [pscustomobject]@{
+            kind = 'STATE_RECONCILIATION_REQUIRED'
+            workItemId = $null
+            reason = 'Authoritative state contradicts current evidence; reconcile before selecting work.'
+            sideEffect = $false
+        }
+    }
+
+    return Get-NextDeliveryAction -State $State -Config $Config
+}
+
 function Test-WorkflowLifecycleOwner {
     param(
         [Parameter(Mandatory)] $State,
@@ -670,13 +689,21 @@ function Get-CutoverProofStatus {
     }
     $expectedCommit = if ($null -ne $developmentRun) { Get-DeliveryMemberValue -InputObject $developmentRun -Name 'commit' } else { $null }
     $expectedRun = if ($null -ne $developmentRun) { Get-DeliveryMemberValue -InputObject $developmentRun -Name 'number' } else { $null }
+    $hasExpectedDeploymentIdentity = -not [string]::IsNullOrWhiteSpace([string]$expectedCommit) -and $null -ne $expectedRun
     $deployments = @(Get-DeliveryMemberValue -InputObject $Snapshot -Name 'deployments')
-    $matchingDeployment = @($deployments | Where-Object {
-        (Get-DeliveryMemberValue -InputObject $_ -Name 'commit') -ceq $expectedCommit -and
-        (Get-DeliveryMemberValue -InputObject $_ -Name 'workflowRun') -eq $expectedRun -and
-        (Get-DeliveryMemberValue -InputObject $_ -Name 'environment') -eq 'development' -and
-        -not [string]::IsNullOrWhiteSpace((Get-DeliveryMemberValue -InputObject $_ -Name 'artifact'))
-    })
+    $matchingDeployment = @()
+    if ($hasExpectedDeploymentIdentity) {
+        $matchingDeployment = @($deployments | Where-Object {
+            $actualCommit = Get-DeliveryMemberValue -InputObject $_ -Name 'commit'
+            $actualRun = Get-DeliveryMemberValue -InputObject $_ -Name 'workflowRun'
+            -not [string]::IsNullOrWhiteSpace([string]$actualCommit) -and
+            $null -ne $actualRun -and
+            $actualCommit -ceq $expectedCommit -and
+            $actualRun -eq $expectedRun -and
+            (Get-DeliveryMemberValue -InputObject $_ -Name 'environment') -eq 'development' -and
+            -not [string]::IsNullOrWhiteSpace((Get-DeliveryMemberValue -InputObject $_ -Name 'artifact'))
+        })
+    }
 
     $baselineStatus = if ($null -ne $baseline) { Get-DeliveryMemberValue -InputObject $baseline -Name 'status' } else { $null }
 
@@ -774,7 +801,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     }
 
     $cutover = $null
-    if ($Reconcile) {
+    if ($Reconcile -and (Get-DeliveryMemberValue -InputObject (Get-DeliveryMemberValue -InputObject $state -Name 'cutover') -Name 'status') -ne 'WORKFLOW_CUTOVER_COMPLETE') {
         $resolvedCutoverEvidencePath = if ([string]::IsNullOrWhiteSpace($CutoverEvidencePath)) { Join-Path $repositoryRoot 'delivery/evidence/cutover-validation.json' } else { $CutoverEvidencePath }
         $cutoverEvidence = Read-DeliveryJson -Path $resolvedCutoverEvidencePath
         $worktreeSnapshot = Resolve-PreservedProductWorktreeSnapshot -RepositoryRoot $repositoryRoot -CutoverEvidence $cutoverEvidence
@@ -786,7 +813,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     }
 
     $actionState = if ($null -ne $cutover) { $cutover.state } else { $state }
-    $action = Get-NextDeliveryAction -State $actionState -Config $config
+    $action = Get-ReconciledDeliveryAction -State $actionState -Config $config -Reconciliation $reconciliation
 
     [pscustomobject]@{
         mode = if ($WhatIf) { 'WHAT_IF' } else { 'READ_ONLY' }
