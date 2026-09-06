@@ -162,10 +162,15 @@ Describe 'Sprint delivery contracts' -Tag 'contracts' {
 }
 
 function Remove-DeliveryTestMember {
+    [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)] $InputObject,
         [Parameter(Mandatory)][string] $Name
     )
+
+    if (-not $PSCmdlet.ShouldProcess($InputObject, "Remove member '$Name'")) {
+        return
+    }
 
     if ($InputObject -is [System.Collections.IDictionary]) {
         $InputObject.Remove($Name)

@@ -338,7 +338,13 @@ app.MapGet("/api/v1/orders/{orderId:guid}", async (
             httpContext,
             hostEnvironment,
             cancellationToken);
-        return authorization.Succeeded ? Results.Ok(ownedOrder.Response) : ResourceNotFound(httpContext);
+        if (!authorization.Succeeded)
+        {
+            return ResourceNotFound(httpContext);
+        }
+
+        httpContext.Response.Headers.CacheControl = "no-store";
+        return Results.Ok(ownedOrder.Response);
     })
     .WithName("GetOrder")
     .WithTags("Orders")

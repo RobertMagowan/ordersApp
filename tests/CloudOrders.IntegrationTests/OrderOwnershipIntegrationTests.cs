@@ -56,6 +56,7 @@ public sealed class OrderOwnershipIntegrationTests(SqlServerFixture sqlServer)
         await AssertEquivalentSafeNotFoundAsync(foreignResponse, absentResponse);
         Assert.Equal(HttpStatusCode.OK, adminResponse.StatusCode);
         Assert.Equal(created, await adminResponse.Content.ReadFromJsonAsync<OrderResponse>());
+        Assert.Equal("no-store", adminResponse.Headers.CacheControl?.ToString());
     }
 
     [Fact]
