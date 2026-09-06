@@ -205,6 +205,24 @@ function Remove-DeliveryTestMember {
     }
 }
 
+function Set-DeliveryTestMember {
+    param(
+        [Parameter(Mandatory)] $InputObject,
+        [Parameter(Mandatory)][string] $Name,
+        [Parameter(Mandatory)] $Value
+    )
+
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        $InputObject[$Name] = $Value
+    }
+    elseif ($null -eq $InputObject.PSObject.Properties[$Name]) {
+        $InputObject | Add-Member -NotePropertyName $Name -NotePropertyValue $Value
+    }
+    else {
+        $InputObject.$Name = $Value
+    }
+}
+
 Describe 'Sprint delivery completion' -Tag 'completion' {
     BeforeAll {
         $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -350,7 +368,7 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
             }
             $item = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
             $item.evidenceBindings[0].status = 'CURRENT'
-            $item.evidenceBindings[0] | Add-Member -NotePropertyName artifact -NotePropertyValue 'example.invalid/cloudorders-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            Set-DeliveryTestMember -InputObject $item.evidenceBindings[0] -Name 'artifact' -Value 'example.invalid/cloudorders-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
             $item.gates.devValidation.status = 'PASS'
             return $state
         }
