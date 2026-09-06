@@ -1,6 +1,10 @@
 # Sprint Delivery Workflow Migration
 
-**Cutover result:** `WORKFLOW_CUTOVER_COMPLETE`. The repository workflow may resume Sprint 4A at work item `4A-4`; no external system was changed during cutover.
+**Cutover result:** `WORKFLOW_CUTOVER_COMPLETE` under workflow version 2.0. The repository workflow may resume Sprint 4A at work item `4A-4`; no external system was changed during cutover.
+
+## Version 2 replacement record
+
+The replacement baseline is [workflow-replacement-baseline.json](../../delivery/evidence/workflow-replacement-baseline.json). Version 2 separates work lifecycle from PR lifecycle, review status, orchestration stage, and acceptance verification. The state schema, evidence schema, PowerShell reconciliation, deterministic tests, repository guide, and this runbook were updated atomically. Historic evidence remains explicitly `HISTORICAL_UNVERIFIED`; it has not been relabelled as current proof. The operator must reconcile Git, GitHub, and Azure evidence before any next action.
 
 ## Repository and authority snapshot
 

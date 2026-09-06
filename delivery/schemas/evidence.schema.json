@@ -4,7 +4,7 @@
   "type": "object",
   "required": ["evidenceSchemaVersion", "kind", "status", "recordedAt", "bindings"],
   "properties": {
-    "evidenceSchemaVersion": { "type": "string", "const": "1.0" },
+    "evidenceSchemaVersion": { "type": "string", "enum": ["1.0", "2.0"] },
     "kind": { "type": "string" },
     "status": { "enum": ["CURRENT", "STALE", "HISTORICAL_UNVERIFIED", "SUPERSEDED"] },
     "recordedAt": { "type": "string", "format": "date-time" },
@@ -21,7 +21,12 @@
     },
     "observations": {
       "type": "object"
-    }
+    },
+    "readOnly": { "type": "boolean" },
+    "repository": { "type": "object" },
+    "currentSprint": { "type": "object" },
+    "deploymentEvidence": { "type": "array" },
+    "constraints": { "type": "array", "items": { "type": "string" } }
   },
   "additionalProperties": false
 }

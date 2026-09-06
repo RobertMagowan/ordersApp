@@ -9,7 +9,7 @@ pwsh -File ops/Test-SprintDelivery.ps1
 pwsh -File ops/Invoke-SprintDelivery.ps1 -Reconcile -WhatIf
 ```
 
-Do not infer completion from a label. Git is authoritative for commits and worktrees, GitHub for pull requests and checks, and cloud records for deployment and artifact facts. The orchestrator is the sole lifecycle writer; all role skills are read-only consumers of state.
+Do not infer completion from a label. Git is authoritative for commits and worktrees, GitHub for pull requests and checks, and cloud records for deployment and artifact facts. The orchestrator is the sole lifecycle writer; all role skills are read-only consumers of state. Workflow v2 records work lifecycle, PR lifecycle, review status, orchestration stage, and acceptance verification independently. A merged PR is therefore not evidence of development validation, and a completed implementation is not a review decision.
 
 The default reconciliation deliberately has no cloud credentials and therefore fails closed when live deployment proof is unavailable. A caller may supply a sanitized, read-only JSON snapshot with `github` and `azure` objects (including immutable deployment `artifact` values):
 
@@ -28,6 +28,8 @@ Classify an unavailable Docker daemon or equivalent unavailable local dependency
 ## Normal delivery path
 
 Use the selected task plan to keep planning, implementation, independent review, runtime validation, and QA separate. Implementation follows TDD and inspects affected persistent state directly. Record compact evidence before moving to another role. Retry commands only within the configured limit and with a new hypothesis. Repeated or unresolved failures require escalation with evidence, not improvisation.
+
+When `prLifecycle` is `READY_FOR_REVIEW`, a `PENDING`, `CHANGES_REQUESTED`, or `STALE` `reviewStatus` produces `HUMAN_REVIEW_REQUIRED`; it does not allow promotion. Human decisions remain distinct from review: destructive data work, privilege changes, or production actions return `HUMAN_DECISION_REQUIRED`.
 
 ## Cancellation and supersession
 

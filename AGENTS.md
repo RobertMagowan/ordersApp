@@ -55,3 +55,5 @@ For Sprint 4 External ID, put non-secret identity identifiers only in protected 
 ## Sprint Delivery Workflow
 
 Use the repository-native [sprint delivery workflow runbook](docs/operations/sprint-delivery-workflow.md) for resume, reconciliation, evidence, role handoffs, recovery, and human decision gates.
+
+The persisted v2 workflow keeps work lifecycle, PR lifecycle, review decision, orchestration stage, and acceptance verification separate. Start every resumed session with the read-only reconciliation command; do not infer one dimension from another or advance state from chat history.

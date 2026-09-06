@@ -4,8 +4,8 @@
   "type": "object",
   "required": ["workflowVersion", "configurationVersion", "vocabulary", "branchPromotion", "canonicalCommands", "requiredGatesByRisk", "modelRoles", "retryLimits", "humanDecisionStatus"],
   "properties": {
-    "workflowVersion": { "type": "string", "const": "1.0" },
-    "configurationVersion": { "type": "string", "const": "1.0" },
+    "workflowVersion": { "type": "string", "const": "2.0" },
+    "configurationVersion": { "type": "string", "const": "2.0" },
     "vocabulary": { "type": "object" },
     "branchPromotion": { "type": "array", "minItems": 3 },
     "canonicalCommands": { "type": "object" },
