@@ -689,13 +689,21 @@ function Get-CutoverProofStatus {
     }
     $expectedCommit = if ($null -ne $developmentRun) { Get-DeliveryMemberValue -InputObject $developmentRun -Name 'commit' } else { $null }
     $expectedRun = if ($null -ne $developmentRun) { Get-DeliveryMemberValue -InputObject $developmentRun -Name 'number' } else { $null }
+    $hasExpectedDeploymentIdentity = -not [string]::IsNullOrWhiteSpace([string]$expectedCommit) -and $null -ne $expectedRun
     $deployments = @(Get-DeliveryMemberValue -InputObject $Snapshot -Name 'deployments')
-    $matchingDeployment = @($deployments | Where-Object {
-        (Get-DeliveryMemberValue -InputObject $_ -Name 'commit') -ceq $expectedCommit -and
-        (Get-DeliveryMemberValue -InputObject $_ -Name 'workflowRun') -eq $expectedRun -and
-        (Get-DeliveryMemberValue -InputObject $_ -Name 'environment') -eq 'development' -and
-        -not [string]::IsNullOrWhiteSpace((Get-DeliveryMemberValue -InputObject $_ -Name 'artifact'))
-    })
+    $matchingDeployment = @()
+    if ($hasExpectedDeploymentIdentity) {
+        $matchingDeployment = @($deployments | Where-Object {
+            $actualCommit = Get-DeliveryMemberValue -InputObject $_ -Name 'commit'
+            $actualRun = Get-DeliveryMemberValue -InputObject $_ -Name 'workflowRun'
+            -not [string]::IsNullOrWhiteSpace([string]$actualCommit) -and
+            $null -ne $actualRun -and
+            $actualCommit -ceq $expectedCommit -and
+            $actualRun -eq $expectedRun -and
+            (Get-DeliveryMemberValue -InputObject $_ -Name 'environment') -eq 'development' -and
+            -not [string]::IsNullOrWhiteSpace((Get-DeliveryMemberValue -InputObject $_ -Name 'artifact'))
+        })
+    }
 
     $baselineStatus = if ($null -ne $baseline) { Get-DeliveryMemberValue -InputObject $baseline -Name 'status' } else { $null }
 
