@@ -378,6 +378,16 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
         $derivedItem.evidenceBindings[0].status | Should Be 'STALE'
     }
 
+    It 'does not select a work item when completed-cutover reconciliation contradicts current evidence' {
+        $state = Get-ReconciliationFixture
+        $reconciliation = Compare-DeliveryState -State $state -Snapshot @{ deployments = @() }
+
+        $action = Get-ReconciledDeliveryAction -State $state -Config $config -Reconciliation $reconciliation
+
+        $action.kind | Should Be 'STATE_RECONCILIATION_REQUIRED'
+        $action.workItemId | Should Be $null
+    }
+
     It 'fails closed for current workflow evidence even when an environment is not recorded' {
         $state = Get-ReconciliationFixture
         $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
@@ -785,6 +795,19 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
         $action.workItemId | Should Be $null
     }
 
+    It 'resumes a completed v2 cutover without re-certifying legacy cutover proof' {
+        $powerShellHost = if ($env:OS -eq 'Windows_NT') { 'powershell' } else { 'pwsh' }
+
+        $output = & $powerShellHost -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repositoryRoot 'ops/Invoke-SprintDelivery.ps1') -Reconcile -WhatIf
+        $result = ($output -join "`n") | ConvertFrom-Json
+
+        $LASTEXITCODE | Should Be 0
+        $result.cutover | Should BeNullOrEmpty
+        $result.reconciliation.kind | Should Be 'STATE_RECONCILIATION_AGREES'
+        $result.action.kind | Should Be 'WORK_ITEM_READY'
+        $result.action.workItemId | Should Be '4A-4'
+    }
+
     It 'requires an immutable deployment artifact for current deployment evidence' {
         $state = Get-CutoverFixture
         $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
@@ -814,10 +837,10 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
         $output = & $powerShellHost -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repositoryRoot 'ops/Invoke-SprintDelivery.ps1') -Reconcile -WhatIf -ReconciliationSnapshotPath $snapshotPath
 
         $LASTEXITCODE | Should Be 0
-        ($output -join "`n") | Should Match 'CUTOVER_BLOCKED'
+        ($output -join "`n") | Should Match 'WORK_ITEM_READY'
     }
 
-    It 'derives cutover completion from committed baseline proof and matching immutable deployment evidence' {
+    It 'does not re-certify completed cutover when supplied reconciliation evidence agrees' {
         $powerShellHost = if ($env:OS -eq 'Windows_NT') { 'powershell' } else { 'pwsh' }
         $snapshotPath = Join-Path $repositoryRoot 'ops/tests/fixtures/agreeing-cutover-snapshot.json'
         $evidencePath = Join-Path $repositoryRoot 'ops/tests/fixtures/completed-cutover-evidence.json'
@@ -826,7 +849,7 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
         $result = ($output -join "`n") | ConvertFrom-Json
 
         $LASTEXITCODE | Should Be 0
-        $result.cutover.status | Should Be 'WORKFLOW_CUTOVER_COMPLETE'
+        $result.cutover | Should BeNullOrEmpty
         $result.action.kind | Should Be 'WORK_ITEM_READY'
         $result.action.workItemId | Should Be '4A-4'
     }
