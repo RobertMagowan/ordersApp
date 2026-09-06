@@ -774,7 +774,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     }
 
     $cutover = $null
-    if ($Reconcile) {
+    if ($Reconcile -and (Get-DeliveryMemberValue -InputObject (Get-DeliveryMemberValue -InputObject $state -Name 'cutover') -Name 'status') -ne 'WORKFLOW_CUTOVER_COMPLETE') {
         $resolvedCutoverEvidencePath = if ([string]::IsNullOrWhiteSpace($CutoverEvidencePath)) { Join-Path $repositoryRoot 'delivery/evidence/cutover-validation.json' } else { $CutoverEvidencePath }
         $cutoverEvidence = Read-DeliveryJson -Path $resolvedCutoverEvidencePath
         $worktreeSnapshot = Resolve-PreservedProductWorktreeSnapshot -RepositoryRoot $repositoryRoot -CutoverEvidence $cutoverEvidence
