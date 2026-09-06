@@ -1,0 +1,40 @@
+{
+  "evidenceSchemaVersion": "2.0",
+  "kind": "SPRINT_4A_R1_RELEASE_RECONCILIATION",
+  "status": "CURRENT",
+  "recordedAt": "2026-09-06T21:50:17Z",
+  "bindings": {},
+  "readOnly": true,
+  "currentSprint": {
+    "id": "4A",
+    "completedWorkItems": ["4A-4", "4A-5", "4A-7-D1"]
+  },
+  "deploymentEvidence": [
+    {
+      "environment": "development",
+      "commit": "ef869617c585c5e51e484ad0d446da4bceddc176",
+      "workflowRun": 34047231704,
+      "artifact": "cloudordersd583431devacr.azurecr.io/cloudorders-api@sha256:893f126d57c370e80b66ff26f82d740252ecc7d418cb0e3f2664fe4aa538e657",
+      "revision": "cloudorders-dev-api--0000005",
+      "health": { "live": "PASS", "ready": "PASS" },
+      "authenticatedCurrentCustomer": "PASS",
+      "status": "PASS"
+    },
+    {
+      "environment": "test",
+      "commit": "778ae7e08130d3429ff7120055adf1dbcd3efd6d",
+      "workflowRun": 34061359073,
+      "artifact": "cloudorderst583431testacr.azurecr.io/cloudorders-api@sha256:89c345369e75777b9879d67a170c8929360e41a9ba2c7b4565a95f7c893690fb",
+      "revision": "cloudorders-test-api--0000003",
+      "health": { "live": "PASS", "ready": "PASS" },
+      "authenticatedCurrentCustomer": "PASS",
+      "independentQa": "PASS",
+      "status": "PASS"
+    }
+  ],
+  "constraints": [
+    "The approved reset transition completed before D1 traffic was restored in each non-production environment.",
+    "No production deployment occurred.",
+    "The next implementation scope is Sprint 4B; reconcile again before beginning it."
+  ]
+}

@@ -1,6 +1,6 @@
 # Sprint Delivery Workflow Migration
 
-**Cutover result:** `WORKFLOW_CUTOVER_COMPLETE` under workflow version 2.0. The repository workflow may resume Sprint 4A at work item `4A-4`; no external system was changed during cutover.
+**Historical cutover result:** `WORKFLOW_CUTOVER_COMPLETE` under workflow version 2.0. At cutover, the repository workflow could resume Sprint 4A at work item `4A-4`; no external system was changed during cutover. The current sprint status is recorded in `delivery/state.json` and the supersession record below.
 
 ## Version 2 replacement record
 
@@ -32,6 +32,6 @@ Keep protected promotions, CI, Bicep, and Azure workflows. Adapt plans and histo
 
 Independent review initially found one blocker and three high-severity defects: blocked cutover could resume product work, deployment evidence lacked artifact identity, released work could have no evidence, and the documented CLI could not consume sufficient cutover proof. Regression-first corrections in `6be5c69861c6ff00ee31541f57d692e5a884e05c` and `4b9b946ca12562900684fe5d2d7106d7f38d08e7` now fail closed and require matching immutable deployment evidence plus committed baseline/self-test proof. Two medium follow-ups remain non-blocking: adopting a full draft-2020-12 runtime schema engine and recording richer invalidation provenance across every dependent gate.
 
-## Next action
+## Supersession record
 
-Resume Sprint 4A at `4A-4` (owner-aware authorization), followed by `4A-5`. The later `4A-7-D1` item retains its existing `HUMAN_DECISION_REQUIRED` External ID/data-transition decision and must not be advanced implicitly.
+This cutover document is the historical workflow baseline. The later R1 reconciliation is recorded in [sprint-4a-r1-release.json](../../delivery/evidence/sprint-4a-r1-release.json): Tasks `4A-4`, `4A-5`, and `4A-7-D1` completed development and test validation, including immutable deployment evidence. The reset decision was executed before D1 traffic was restored in each non-production environment. No production deployment occurred. Reconcile the committed delivery state before beginning Sprint 4B.
