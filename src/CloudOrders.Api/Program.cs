@@ -99,6 +99,9 @@ builder.Services.AddDbContextFactory<CloudOrdersDbContext>((serviceProvider, opt
 builder.Services.AddScoped<IOrderRepository, SqlOrderRepository>();
 builder.Services.AddScoped<IIdempotentOrderStore, SqlIdempotentOrderStore>();
 builder.Services.AddScoped<ICustomerProfileStore, SqlCustomerProfileStore>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<CurrentCustomerProfileAccessor>();
+builder.Services.AddSingleton<IAuthorizationHandler, CustomerResourceAuthorizationHandler>();
 builder.Services.AddSingleton<ICustomerReferenceGenerator, CustomerReferenceGenerator>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<CreateOrderHandler>();
@@ -164,6 +167,9 @@ app.MapPost("/api/v1/orders", async (
         CreateOrderRequest request,
         HttpContext httpContext,
         CreateOrderHandler handler,
+        CurrentCustomerProfileAccessor currentCustomer,
+        ICustomerProfileStore customerProfiles,
+        IAuthorizationService authorizationService,
         CancellationToken cancellationToken) =>
     {
         var errors = new Dictionary<string, string[]>();
@@ -190,10 +196,28 @@ app.MapPost("/api/v1/orders", async (
                 extensions: ProblemExtensions(httpContext, "invalid_idempotency_key"));
         }
 
+        var actor = await currentCustomer.GetAsync(cancellationToken);
+        var target = await customerProfiles.FindByReferenceAsync(request.CustomerReference!, cancellationToken);
+        if (target is null)
+        {
+            return ResourceNotFound(httpContext);
+        }
+
+        var authorization = await authorizationService.AuthorizeAsync(
+            httpContext.User,
+            new CustomerResource(actor.Id, target.Id),
+            new CustomerResourceRequirement());
+        if (!authorization.Succeeded)
+        {
+            return ResourceNotFound(httpContext);
+        }
+
         var traceParent = Activity.Current?.Id;
 
         var result = await handler.Handle(
             new CreateOrderCommand(request.CustomerReference!, request.ProductSku!, request.Quantity),
+            actor.Id,
+            target.Id,
             idempotencyKey,
             traceParent,
             cancellationToken);
@@ -250,6 +274,12 @@ static IResult OrderValidationProblem(HttpContext context, IDictionary<string, s
         {
             ["errors"] = errors
         });
+
+static IResult ResourceNotFound(HttpContext context) =>
+    Results.Problem(
+        statusCode: StatusCodes.Status404NotFound,
+        title: "The requested resource was not found.",
+        extensions: ProblemExtensions(context, "resource_not_found"));
 
 static bool TryParseIdempotencyKey(HttpContext context, out Guid idempotencyKey)
 {
