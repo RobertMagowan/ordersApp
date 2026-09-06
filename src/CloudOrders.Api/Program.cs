@@ -6,6 +6,7 @@ using CloudOrders.Api.Identity;
 using CloudOrders.Application.Abstractions;
 using CloudOrders.Application.Identity;
 using CloudOrders.Application.Orders;
+using CloudOrders.Contracts.Identity;
 using CloudOrders.Contracts.Orders;
 using CloudOrders.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -166,6 +167,31 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
     .WithName("ReadyHealth")
     .WithTags("Health")
     .AllowAnonymous();
+
+app.MapGet("/api/v1/me", async (
+        CurrentCustomerProfileAccessor currentCustomer,
+        IAuthorizationAuditSink auditSink,
+        HttpContext httpContext,
+        IHostEnvironment hostEnvironment,
+        CancellationToken cancellationToken) =>
+    {
+        var profile = await currentCustomer.GetAsync(cancellationToken);
+        await WriteAuthorizationAuditAsync(
+            auditSink,
+            AuthorizationAuditAction.GetCurrentCustomer,
+            AuthorizationAuditResult.Allowed,
+            profile.Id,
+            profile.Id,
+            null,
+            AuthorizationCapability.OrdersRead,
+            httpContext,
+            hostEnvironment,
+            cancellationToken);
+        return TypedResults.Ok(new CurrentCustomerResponse(profile.CustomerReference));
+    })
+    .WithName("GetCurrentCustomer")
+    .WithTags("Identity")
+    .RequireAuthorization("OrdersRead");
 
 app.MapPost("/api/v1/orders", async (
         CreateOrderRequest request,

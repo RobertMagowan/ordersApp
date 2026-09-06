@@ -706,6 +706,26 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
         ($result.blockers -join "`n") | Should Match 'AUTHORITATIVE_AZURE_DEPLOYMENT_SNAPSHOT_UNAVAILABLE'
     }
 
+    It 'requires both expected and observed deployment identifiers before accepting deployment proof' {
+        $cutoverEvidence = [pscustomobject]@{
+            observations = [pscustomobject]@{
+                github = [pscustomobject]@{
+                    developmentRun = [pscustomobject]@{}
+                }
+            }
+        }
+        $snapshot = [pscustomobject]@{
+            deployments = @([pscustomobject]@{
+                environment = 'development'
+                artifact = 'example.invalid/cloudorders-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            })
+        }
+
+        $proof = Get-CutoverProofStatus -CutoverEvidence $cutoverEvidence -Snapshot $snapshot
+
+        $proof.authoritativeDeploymentEvidenceAvailable | Should Be $false
+    }
+
     It 'blocks cutover when developer evidence passes but CI subsequently fails' {
         $inputs = Get-CutoverInputs
         $inputs.Baselines = @{ preMigration = $true; postMigration = $true; ci = 'FAIL' }
