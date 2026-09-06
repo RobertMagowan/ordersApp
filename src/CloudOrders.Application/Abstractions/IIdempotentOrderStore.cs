@@ -13,6 +13,8 @@ public interface IIdempotentOrderStore
 
 public sealed record IdempotentOrderRequest(
     string SubjectId,
+    Guid? ActorCustomerProfileId,
+    Guid? TargetCustomerProfileId,
     Guid IdempotencyKey,
     byte[] RequestHash,
     Order Order,

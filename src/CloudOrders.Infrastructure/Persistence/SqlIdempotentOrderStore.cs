@@ -111,6 +111,8 @@ public sealed class SqlIdempotentOrderStore(
         new()
         {
             SubjectId = request.SubjectId,
+            ActorCustomerProfileId = request.ActorCustomerProfileId,
+            TargetCustomerProfileId = request.TargetCustomerProfileId,
             IdempotencyKey = request.IdempotencyKey,
             RequestHash = request.RequestHash,
             OrderId = request.Order.Id,
