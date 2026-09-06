@@ -345,19 +345,34 @@ function Test-SprintDeliveryState {
     }
 
     foreach ($workItem in @($workItems)) {
-        foreach ($name in 'id', 'name', 'risk', 'lifecycle', 'stage', 'evidenceBindings', 'retryCounters', 'gates', 'blockers') {
+        foreach ($name in 'id', 'name', 'risk', 'lifecycle', 'prLifecycle', 'reviewStatus', 'stage', 'acceptanceVerification', 'evidenceBindings', 'retryCounters', 'gates', 'blockers') {
             if (-not (Test-DeliveryMemberExists -InputObject $workItem -Name $name)) {
                 throw "Work item is missing '$name'."
             }
         }
 
         $lifecycle = Get-DeliveryMemberValue -InputObject $workItem -Name 'lifecycle'
+        $prLifecycle = Get-DeliveryMemberValue -InputObject $workItem -Name 'prLifecycle'
+        $reviewStatus = Get-DeliveryMemberValue -InputObject $workItem -Name 'reviewStatus'
         $stage = Get-DeliveryMemberValue -InputObject $workItem -Name 'stage'
         if ($lifecycle -notin @(Get-DeliveryMemberValue -InputObject $vocabulary -Name 'lifecycle')) {
             throw "Work item '$((Get-DeliveryMemberValue -InputObject $workItem -Name 'id'))' has invalid lifecycle '$lifecycle'."
         }
         if ($stage -notin @(Get-DeliveryMemberValue -InputObject $vocabulary -Name 'stage')) {
             throw "Work item '$((Get-DeliveryMemberValue -InputObject $workItem -Name 'id'))' has invalid stage '$stage'."
+        }
+        if ($prLifecycle -notin @(Get-DeliveryMemberValue -InputObject $vocabulary -Name 'prLifecycle')) {
+            throw "Work item '$((Get-DeliveryMemberValue -InputObject $workItem -Name 'id'))' has invalid PR lifecycle '$prLifecycle'."
+        }
+        if ($reviewStatus -notin @(Get-DeliveryMemberValue -InputObject $vocabulary -Name 'reviewStatus')) {
+            throw "Work item '$((Get-DeliveryMemberValue -InputObject $workItem -Name 'id'))' has invalid review status '$reviewStatus'."
+        }
+        $acceptanceVerification = Get-DeliveryMemberValue -InputObject $workItem -Name 'acceptanceVerification'
+        $acceptanceStage = Get-DeliveryMemberValue -InputObject $acceptanceVerification -Name 'stage'
+        $acceptanceStatus = Get-DeliveryMemberValue -InputObject $acceptanceVerification -Name 'status'
+        if ($acceptanceStage -notin @(Get-DeliveryMemberValue -InputObject $vocabulary -Name 'acceptanceVerificationStage') -or
+            $acceptanceStatus -notin @(Get-DeliveryMemberValue -InputObject $vocabulary -Name 'gateStatus')) {
+            throw "Work item '$((Get-DeliveryMemberValue -InputObject $workItem -Name 'id'))' has invalid acceptance verification."
         }
 
         $risk = Get-DeliveryMemberValue -InputObject $workItem -Name 'risk'
@@ -507,7 +522,7 @@ function Get-NextDeliveryAction {
     }
     $workItems = @(Get-DeliveryMemberValue -InputObject (Get-DeliveryMemberValue -InputObject $State -Name 'currentSprint') -Name 'workItems')
 
-    $nextItem = $workItems | Where-Object { (Get-DeliveryMemberValue -InputObject $_ -Name 'lifecycle') -in @('TODO', 'IN_PROGRESS', 'PR_OPEN') } | Select-Object -First 1
+    $nextItem = $workItems | Where-Object { (Get-DeliveryMemberValue -InputObject $_ -Name 'lifecycle') -in @('TODO', 'IN_PROGRESS') } | Select-Object -First 1
     if ($null -eq $nextItem) {
         return [pscustomobject]@{
             kind = 'NO_ACTION'
@@ -525,6 +540,16 @@ function Get-NextDeliveryAction {
                 reason = Get-DeliveryMemberValue -InputObject $blocker -Name 'reason'
                 sideEffect = $false
             }
+        }
+    }
+
+    if ((Get-DeliveryMemberValue -InputObject $nextItem -Name 'prLifecycle') -eq 'READY_FOR_REVIEW' -and
+        (Get-DeliveryMemberValue -InputObject $nextItem -Name 'reviewStatus') -in @('PENDING', 'CHANGES_REQUESTED', 'STALE')) {
+        return [pscustomobject]@{
+            kind = 'HUMAN_REVIEW_REQUIRED'
+            workItemId = Get-DeliveryMemberValue -InputObject $nextItem -Name 'id'
+            reason = 'The ready pull request requires a current human review decision.'
+            sideEffect = $false
         }
     }
 

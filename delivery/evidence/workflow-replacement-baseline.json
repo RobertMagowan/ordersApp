@@ -3,6 +3,7 @@
   "kind": "WORKFLOW_REPLACEMENT_BASELINE",
   "status": "CURRENT",
   "recordedAt": "2026-09-06T00:00:00Z",
+  "bindings": {},
   "readOnly": true,
   "repository": {
     "developmentCommit": "596d3de064f1e41cc4e655ef6d66e0a67706486e",

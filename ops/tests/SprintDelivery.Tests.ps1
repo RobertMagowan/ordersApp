@@ -88,7 +88,11 @@ Describe 'Sprint delivery contracts' -Tag 'contracts' {
         ($stateSchema.'$defs'.workItem.required -contains 'evidenceBindings') | Should Be $true
         ($stateSchema.'$defs'.workItem.required -contains 'retryCounters') | Should Be $true
         ($stateSchema.'$defs'.workItem.required -contains 'blockers') | Should Be $true
+        ($stateSchema.'$defs'.workItem.required -contains 'prLifecycle') | Should Be $true
+        ($stateSchema.'$defs'.workItem.required -contains 'reviewStatus') | Should Be $true
+        ($stateSchema.'$defs'.workItem.required -contains 'acceptanceVerification') | Should Be $true
         $stateSchema.'$defs'.evidenceBinding.properties.commit.pattern | Should Be '^[0-9a-f]{7,40}$'
+        ($evidenceSchema.properties.evidenceSchemaVersion.enum -contains '2.0') | Should Be $true
     }
 
     It 'rejects a malformed state schema missing required work-item structure' {
@@ -217,6 +221,25 @@ Describe 'Sprint delivery completion' -Tag 'completion' {
         $action.kind | Should Be 'HUMAN_DECISION_REQUIRED'
         $action.workItemId | Should Be '4A-7-D1'
         $action.reason | Should Match 'External ID tenant'
+    }
+
+    It 'requires separate PR, review, and acceptance fields for every work item' {
+        $state = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/state.json')
+        $state.currentSprint.workItems[0].PSObject.Properties.Remove('prLifecycle')
+
+        { Test-SprintDeliveryState -State $state -Config $config } | Should Throw
+    }
+
+    It 'requires human review when a ready pull request has pending review status' {
+        $state = Read-DeliveryJson -Path (Join-Path $repositoryRoot 'delivery/state.json')
+        $item = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-4' }
+        $item.prLifecycle = 'READY_FOR_REVIEW'
+        $item.reviewStatus = 'PENDING'
+
+        $action = Get-NextDeliveryAction -State $state -Config $config
+
+        $action.kind | Should Be 'HUMAN_REVIEW_REQUIRED'
+        $action.workItemId | Should Be '4A-4'
     }
 
     It 'selects the earliest candidate before evaluating later blocked work' {

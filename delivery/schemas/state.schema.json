@@ -59,13 +59,24 @@
     },
     "workItem": {
       "type": "object",
-      "required": ["id", "name", "risk", "lifecycle", "stage", "evidenceBindings", "retryCounters", "blockers", "gates"],
+      "required": ["id", "name", "risk", "lifecycle", "prLifecycle", "reviewStatus", "stage", "acceptanceVerification", "evidenceBindings", "retryCounters", "blockers", "gates"],
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string" },
         "risk": { "enum": ["low", "standard", "high"] },
-        "lifecycle": { "enum": ["TODO", "IN_PROGRESS", "PR_OPEN", "MERGED", "DEV_DEPLOYED", "QA_DEPLOYED", "RELEASED", "CANCELLED", "SUPERSEDED"] },
-        "stage": { "enum": ["PLANNING", "IMPLEMENTATION", "LOCAL_VALIDATION", "INDEPENDENT_REVIEW", "PROMOTION", "DEPLOYMENT", "QA", "BLOCKED"] },
+        "lifecycle": { "enum": ["TODO", "IN_PROGRESS", "MERGED", "DEV_DEPLOYED", "CANCELLED", "SUPERSEDED"] },
+        "prLifecycle": { "enum": ["NONE", "DRAFT", "READY_FOR_REVIEW", "MERGED", "CLOSED"] },
+        "reviewStatus": { "enum": ["NOT_REQUESTED", "PENDING", "CHANGES_REQUESTED", "APPROVED", "STALE", "HISTORICAL_UNVERIFIED", "NOT_APPLICABLE"] },
+        "stage": { "enum": ["READINESS_CHECK", "IMPACT_ANALYSIS", "PLANNING", "PLAN_REVIEW", "IMPLEMENTATION", "LOCAL_VALIDATION", "PRE_REVIEW_CHECK", "PR_REVIEW", "FINAL_CI", "PROMOTION", "DEPLOYMENT", "DEV_VALIDATION", "SPRINT_INTEGRATION", "QA", "BLOCKED"] },
+        "acceptanceVerification": {
+          "type": "object",
+          "required": ["stage", "status"],
+          "properties": {
+            "stage": { "enum": ["PRE_MERGE", "DEVELOPMENT", "SPRINT_INTEGRATION", "QA"] },
+            "status": { "enum": ["PENDING", "PASS", "FAIL", "NOT_APPLICABLE", "STALE", "HISTORICAL_UNVERIFIED", "BLOCKED"] }
+          },
+          "additionalProperties": false
+        },
         "evidenceBindings": { "type": "array", "items": { "$ref": "#/$defs/evidenceBinding" } },
         "retryCounters": {
           "type": "object",
