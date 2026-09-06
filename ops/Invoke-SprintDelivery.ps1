@@ -561,6 +561,25 @@ function Get-NextDeliveryAction {
     }
 }
 
+function Get-ReconciledDeliveryAction {
+    param(
+        [Parameter(Mandatory)] $State,
+        [Parameter(Mandatory)] $Config,
+        $Reconciliation
+    )
+
+    if ($null -ne $Reconciliation -and (Get-DeliveryMemberValue -InputObject $Reconciliation -Name 'kind') -eq 'STATE_RECONCILIATION_REQUIRED') {
+        return [pscustomobject]@{
+            kind = 'STATE_RECONCILIATION_REQUIRED'
+            workItemId = $null
+            reason = 'Authoritative state contradicts current evidence; reconcile before selecting work.'
+            sideEffect = $false
+        }
+    }
+
+    return Get-NextDeliveryAction -State $State -Config $Config
+}
+
 function Test-WorkflowLifecycleOwner {
     param(
         [Parameter(Mandatory)] $State,
@@ -786,7 +805,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     }
 
     $actionState = if ($null -ne $cutover) { $cutover.state } else { $state }
-    $action = Get-NextDeliveryAction -State $actionState -Config $config
+    $action = Get-ReconciledDeliveryAction -State $actionState -Config $config -Reconciliation $reconciliation
 
     [pscustomobject]@{
         mode = if ($WhatIf) { 'WHAT_IF' } else { 'READ_ONLY' }

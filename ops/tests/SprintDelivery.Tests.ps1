@@ -378,6 +378,16 @@ Describe 'Sprint delivery reconciliation' -Tag 'reconciliation' {
         $derivedItem.evidenceBindings[0].status | Should Be 'STALE'
     }
 
+    It 'does not select a work item when completed-cutover reconciliation contradicts current evidence' {
+        $state = Get-ReconciliationFixture
+        $reconciliation = Compare-DeliveryState -State $state -Snapshot @{ deployments = @() }
+
+        $action = Get-ReconciledDeliveryAction -State $state -Config $config -Reconciliation $reconciliation
+
+        $action.kind | Should Be 'STATE_RECONCILIATION_REQUIRED'
+        $action.workItemId | Should Be $null
+    }
+
     It 'fails closed for current workflow evidence even when an environment is not recorded' {
         $state = Get-ReconciliationFixture
         $e1 = $state.currentSprint.workItems | Where-Object { $_.id -eq '4A-E1' }
