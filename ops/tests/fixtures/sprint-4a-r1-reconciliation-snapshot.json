@@ -1,0 +1,25 @@
+{
+  "github": {
+    "pullRequests": [
+      { "number": 44, "mergeCommit": "ef869617c585c5e51e484ad0d446da4bceddc176", "status": "MERGED" },
+      { "number": 45, "mergeCommit": "778ae7e08130d3429ff7120055adf1dbcd3efd6d", "status": "MERGED" }
+    ]
+  },
+  "azure": {
+    "deployments": [
+      {
+        "environment": "development",
+        "commit": "ef869617c585c5e51e484ad0d446da4bceddc176",
+        "workflowRun": 34047231704,
+        "artifact": "cloudordersd583431devacr.azurecr.io/cloudorders-api@sha256:893f126d57c370e80b66ff26f82d740252ecc7d418cb0e3f2664fe4aa538e657"
+      },
+      {
+        "environment": "test",
+        "commit": "778ae7e08130d3429ff7120055adf1dbcd3efd6d",
+        "workflowRun": 34061359073,
+        "artifact": "cloudorderst583431testacr.azurecr.io/cloudorders-api@sha256:89c345369e75777b9879d67a170c8929360e41a9ba2c7b4565a95f7c893690fb"
+      }
+    ],
+    "migrations": []
+  }
+}

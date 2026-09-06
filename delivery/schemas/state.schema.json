@@ -64,7 +64,7 @@
         "id": { "type": "string" },
         "name": { "type": "string" },
         "risk": { "enum": ["low", "standard", "high"] },
-        "lifecycle": { "enum": ["TODO", "IN_PROGRESS", "MERGED", "DEV_DEPLOYED", "CANCELLED", "SUPERSEDED"] },
+        "lifecycle": { "enum": ["TODO", "IN_PROGRESS", "MERGED", "DEV_DEPLOYED", "QA_DEPLOYED", "RELEASED", "CANCELLED", "SUPERSEDED"] },
         "prLifecycle": { "enum": ["NONE", "DRAFT", "READY_FOR_REVIEW", "MERGED", "CLOSED"] },
         "reviewStatus": { "enum": ["NOT_REQUESTED", "PENDING", "CHANGES_REQUESTED", "APPROVED", "STALE", "HISTORICAL_UNVERIFIED", "NOT_APPLICABLE"] },
         "stage": { "enum": ["READINESS_CHECK", "IMPACT_ANALYSIS", "PLANNING", "PLAN_REVIEW", "IMPLEMENTATION", "LOCAL_VALIDATION", "PRE_REVIEW_CHECK", "PR_REVIEW", "FINAL_CI", "PROMOTION", "DEPLOYMENT", "DEV_VALIDATION", "SPRINT_INTEGRATION", "QA", "BLOCKED"] },
