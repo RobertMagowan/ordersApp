@@ -27,7 +27,10 @@ internal sealed class OrderSqlJwtBearerWebApplicationFactory(
     internal HttpClient CreateAuthenticatedClient()
         => CreateAuthenticatedClient(DefaultCustomer);
 
-    internal HttpClient CreateAuthenticatedClient(TestCustomer customer, string[]? roles = null)
+    internal HttpClient CreateAuthenticatedClient(
+        TestCustomer customer,
+        string[]? roles = null,
+        string scope = "Orders.Read Orders.Write")
     {
         SeedCustomerProfileAsync(customer).GetAwaiter().GetResult();
         var client = CreateClient();
@@ -35,7 +38,7 @@ internal sealed class OrderSqlJwtBearerWebApplicationFactory(
             "Bearer",
             tokens.CreateToken(
                 oid: customer.ObjectId.ToString("D"),
-                scope: "Orders.Read Orders.Write",
+                scope: scope,
                 roles: roles));
         return client;
     }
