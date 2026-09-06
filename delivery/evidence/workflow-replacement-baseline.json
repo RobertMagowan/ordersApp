@@ -1,0 +1,43 @@
+{
+  "evidenceSchemaVersion": "2.0",
+  "kind": "WORKFLOW_REPLACEMENT_BASELINE",
+  "status": "CURRENT",
+  "recordedAt": "2026-09-06T00:00:00Z",
+  "bindings": {},
+  "readOnly": true,
+  "repository": {
+    "developmentCommit": "596d3de064f1e41cc4e655ef6d66e0a67706486e",
+    "testCommit": "2b72a2f8d089d0d512fb99f6a2ef5cd3aeea4580",
+    "treesEqual": true,
+    "preservedOpenPullRequests": [31, 33]
+  },
+  "currentSprint": {
+    "id": "4A",
+    "plan": "docs/superpowers/plans/2026-08-27-sprint-4-external-id-authorization.md",
+    "activeWorkItems": ["4A-4", "4A-5", "4A-7-D1"]
+  },
+  "deploymentEvidence": [
+    {
+      "environment": "development",
+      "commit": "596d3de064f1e41cc4e655ef6d66e0a67706486e",
+      "workflowRun": 33999462339,
+      "migrationExecution": "cloudorders-dev-migrations-nhy1ygd",
+      "migration": "AddCustomerProfileOwnershipExpand",
+      "status": "PASS"
+    },
+    {
+      "environment": "test",
+      "commit": "2b72a2f8d089d0d512fb99f6a2ef5cd3aeea4580",
+      "workflowRun": 33999702726,
+      "migrationExecution": "cloudorders-test-migrations-2plq8cd",
+      "migration": "AddCustomerProfileOwnershipExpand",
+      "health": { "live": "PASS", "ready": "PASS" },
+      "status": "PASS"
+    }
+  ],
+  "constraints": [
+    "No production deployment occurred.",
+    "D1 remains HUMAN_DECISION_REQUIRED.",
+    "Product progression is frozen while the workflow migration is incomplete."
+  ]
+}
