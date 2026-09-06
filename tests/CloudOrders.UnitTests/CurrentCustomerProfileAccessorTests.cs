@@ -18,7 +18,11 @@ public sealed class CurrentCustomerProfileAccessorTests
         var accessor = new HttpContextAccessor { HttpContext = httpContext };
         var store = new RecordingStore();
 
-        var profile = await new CurrentCustomerProfileAccessor(accessor, store).GetAsync(CancellationToken.None);
+        var profile = await new CurrentCustomerProfileAccessor(
+            accessor,
+            store,
+            new NullAuditSink(),
+            new TestHostEnvironment()).GetAsync(CancellationToken.None);
 
         Assert.Equal(store.Profile, profile);
         Assert.Equal(new AuthenticatedSubject(issuer, objectId, null), store.Subject);
@@ -34,5 +38,19 @@ public sealed class CurrentCustomerProfileAccessorTests
             return Task.FromResult(Profile);
         }
         public Task<CustomerProfile?> FindByReferenceAsync(string customerReference, CancellationToken cancellationToken) => Task.FromResult<CustomerProfile?>(null);
+    }
+
+    private sealed class NullAuditSink : IAuthorizationAuditSink
+    {
+        public ValueTask WriteAsync(AuthorizationAuditEvent auditEvent, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+    }
+
+    private sealed class TestHostEnvironment : Microsoft.Extensions.Hosting.IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = "Testing";
+        public string ApplicationName { get; set; } = "CloudOrders.UnitTests";
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } =
+            new Microsoft.Extensions.FileProviders.NullFileProvider();
     }
 }

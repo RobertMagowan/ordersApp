@@ -37,7 +37,7 @@ public sealed class SqlIdempotentOrderStore(
                     && record.ExpiresAt <= now)
                 .ExecuteDeleteAsync(cancellationToken);
         }
-        context.Orders.Add(OrderPersistenceMapper.ToEntity(request.Order));
+        context.Orders.Add(OrderPersistenceMapper.ToEntity(request.Order, request.TargetCustomerProfileId));
         context.OutboxMessages.Add(ToOutboxEntity(request));
         context.IdempotencyRecords.Add(ToIdempotencyEntity(request));
 

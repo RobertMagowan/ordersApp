@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using CloudOrders.Application.Orders;
 using CloudOrders.Contracts.Orders;
+using CloudOrders.Domain.Orders;
 using CloudOrders.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -17,7 +18,8 @@ namespace CloudOrders.IntegrationTests;
 [Collection(SqlServerTestGroup.Name)]
 public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
 {
-    private const string SubjectId = "local-development-subject";
+    private const string SubjectId = "profile:55555555555555555555555555555555";
+    private static readonly Guid CustomerProfileId = Guid.Parse("55555555-5555-5555-5555-555555555555");
     private const string UniqueIndexSql =
         "CREATE UNIQUE INDEX UX_Test_Orders_CustomerReference ON dbo.Orders (CustomerReference);";
     private const string UniqueConstraintSql =
@@ -78,7 +80,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         using var factory = CreateFactory(database.ConnectionString);
         using var client = factory.CreateAuthenticatedClient();
         var key = Guid.NewGuid();
-        using var request = CreateOrderRequestMessage(key, " CUST-002 ", " sku.002 ", 3);
+        using var request = CreateOrderRequestMessage(key, " CUST-001 ", " sku.002 ", 3);
         request.Headers.TryAddWithoutValidation("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
 
         using var response = await client.SendAsync(request);
@@ -96,7 +98,8 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT o.OrderId, o.AggregateId, o.MessageType, o.MessageVersion, o.Payload, o.AttemptCount, o.TraceParent,
-                   i.SubjectId, i.IdempotencyKey, i.RequestHash, i.OrderId, i.ResponseStatus, i.ResponseJson
+                   i.SubjectId, i.ActorCustomerProfileId, i.TargetCustomerProfileId, i.IdempotencyKey, i.RequestHash,
+                   i.OrderId, i.ResponseStatus, i.ResponseJson
             FROM dbo.OutboxMessages AS o
             CROSS JOIN dbo.IdempotencyRecords AS i;
             """;
@@ -111,13 +114,21 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         Assert.Equal(0, reader.GetInt32(5));
         Assert.StartsWith("00-4bf92f3577b34da6a3ce929d0e0e4736-", reader.GetString(6), StringComparison.Ordinal);
         Assert.Equal(SubjectId, reader.GetString(7));
-        Assert.Equal(key, reader.GetGuid(8));
+        Assert.Equal(CustomerProfileId, reader.GetGuid(8));
+        Assert.Equal(CustomerProfileId, reader.GetGuid(9));
+        Assert.Equal(key, reader.GetGuid(10));
+        var canonicalOrder = Order.Create(
+            Guid.NewGuid(),
+            "CUST-001",
+            "SKU.002",
+            3,
+            DateTimeOffset.UtcNow);
         Assert.Equal(
-            "997f348773208c1776ccab100c067a8633dea47507ffb8e945b8bdd08f2eb312",
-            Convert.ToHexString((byte[])reader[9]).ToLowerInvariant());
-        Assert.Equal(created.Id, reader.GetGuid(10));
-        Assert.Equal(StatusCodes.Status201Created, reader.GetInt32(11));
-        Assert.Equal(created, JsonSerializer.Deserialize<OrderResponse>(reader.GetString(12), JsonOptions));
+            IdempotencyRequestHasher.Compute(CustomerProfileId, CustomerProfileId, canonicalOrder),
+            (byte[])reader[11]);
+        Assert.Equal(created.Id, reader.GetGuid(12));
+        Assert.Equal(StatusCodes.Status201Created, reader.GetInt32(13));
+        Assert.Equal(created, JsonSerializer.Deserialize<OrderResponse>(reader.GetString(14), JsonOptions));
     }
 
     [Fact]
@@ -128,8 +139,8 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         using var client = factory.CreateAuthenticatedClient();
         var key = Guid.NewGuid();
 
-        using var firstResponse = await PostOrderAsync(client, key, "CUST-003", "SKU-003", 4);
-        using var replayResponse = await PostOrderAsync(client, key, "CUST-003", "SKU-003", 4);
+        using var firstResponse = await PostOrderAsync(client, key, "CUST-001", "SKU-003", 4);
+        using var replayResponse = await PostOrderAsync(client, key, "CUST-001", "SKU-003", 4);
 
         Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
         Assert.Equal(HttpStatusCode.OK, replayResponse.StatusCode);
@@ -148,8 +159,8 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         using var client = factory.CreateAuthenticatedClient();
         var key = Guid.NewGuid();
 
-        using var firstResponse = await PostOrderAsync(client, key, " cust-004 ", "sku.004", 5);
-        using var replayResponse = await PostOrderAsync(client, key, "CUST-004", " SKU.004 ", 5);
+        using var firstResponse = await PostOrderAsync(client, key, " cust-001 ", "sku.004", 5);
+        using var replayResponse = await PostOrderAsync(client, key, "CUST-001", " SKU.004 ", 5);
 
         Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
         Assert.Equal(HttpStatusCode.OK, replayResponse.StatusCode);
@@ -167,8 +178,8 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         using var client = factory.CreateAuthenticatedClient();
         var key = Guid.NewGuid();
 
-        using var firstResponse = await PostOrderAsync(client, key, "CUST-005", "SKU-005", 1);
-        using var conflictResponse = await PostOrderAsync(client, key, "CUST-005", "SKU-005", 2);
+        using var firstResponse = await PostOrderAsync(client, key, "CUST-001", "SKU-005", 1);
+        using var conflictResponse = await PostOrderAsync(client, key, "CUST-001", "SKU-005", 2);
 
         Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
         await AssertProblemDetailsAsync(conflictResponse, HttpStatusCode.Conflict, "idempotency_conflict");
@@ -186,8 +197,8 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         var key = Guid.NewGuid();
 
         var responses = await Task.WhenAll(
-            PostOrderAsync(firstClient, key, "CUST-006", "SKU-006", 6),
-            PostOrderAsync(secondClient, key, "CUST-006", "SKU-006", 6));
+            PostOrderAsync(firstClient, key, "CUST-001", "SKU-006", 6),
+            PostOrderAsync(secondClient, key, "CUST-001", "SKU-006", 6));
 
         using var firstResponse = responses[0];
         using var secondResponse = responses[1];
@@ -211,8 +222,8 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         var key = Guid.NewGuid();
 
         var responses = await Task.WhenAll(
-            PostOrderAsync(firstClient, key, "CUST-006", "SKU-006", 6),
-            PostOrderAsync(secondClient, key, "CUST-006", "SKU-006", 7));
+            PostOrderAsync(firstClient, key, "CUST-001", "SKU-006", 6),
+            PostOrderAsync(secondClient, key, "CUST-001", "SKU-006", 7));
 
         using var firstResponse = responses[0];
         using var secondResponse = responses[1];
@@ -237,7 +248,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         using (var seedResponse = await PostOrderAsync(
             seedClient,
             Guid.NewGuid(),
-            "CUST-UNIQUE",
+            "CUST-001",
             "SKU-UNIQUE-1",
             1))
         {
@@ -250,7 +261,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         var handler = scope.ServiceProvider.GetRequiredService<CreateOrderHandler>();
 
         var exception = await Assert.ThrowsAsync<DbUpdateException>(() => handler.Handle(
-            new CreateOrderCommand("CUST-UNIQUE", "SKU-UNIQUE-2", 1),
+            new CreateOrderCommand("CUST-001", "SKU-UNIQUE-2", 1),
             Guid.NewGuid(),
             traceParent: null,
             CancellationToken.None));
@@ -272,14 +283,14 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         using var client = factory.CreateAuthenticatedClient();
         var key = Guid.NewGuid();
 
-        using var firstResponse = await PostOrderAsync(client, key, "CUST-009", "SKU-009", 1);
+        using var firstResponse = await PostOrderAsync(client, key, "CUST-001", "SKU-009", 1);
         Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
         await ExecuteAsync(
             database.ConnectionString,
             "UPDATE dbo.IdempotencyRecords SET ExpiresAt = DATEADD(day, -1, SYSUTCDATETIME()) WHERE IdempotencyKey = @key",
             command => command.Parameters.AddWithValue("@key", key));
 
-        using var secondResponse = await PostOrderAsync(client, key, "CUST-009", "SKU-009", 2);
+        using var secondResponse = await PostOrderAsync(client, key, "CUST-001", "SKU-009", 2);
 
         Assert.Equal(HttpStatusCode.Created, secondResponse.StatusCode);
         Assert.Equal(2, await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.Orders"));
@@ -293,7 +304,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         await using var database = await sqlServer.CreateDatabaseAsync();
         using var factory = CreateFactory(database.ConnectionString);
         using var client = factory.CreateAuthenticatedClient();
-        using var request = CreateOrderRequestMessage(Guid.NewGuid(), "CUST-010", "SKU-010", 1);
+        using var request = CreateOrderRequestMessage(Guid.NewGuid(), "CUST-001", "SKU-010", 1);
         request.Headers.TryAddWithoutValidation("traceparent", new string('a', 513));
 
         using var response = await client.SendAsync(request);
@@ -311,7 +322,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
 
         using (var firstFactory = CreateFactory(database.ConnectionString))
         using (var firstClient = firstFactory.CreateAuthenticatedClient())
-        using (var firstResponse = await PostOrderAsync(firstClient, key, "CUST-007", "SKU-007", 7))
+        using (var firstResponse = await PostOrderAsync(firstClient, key, "CUST-001", "SKU-007", 7))
         {
             Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
             created = (await firstResponse.Content.ReadFromJsonAsync<OrderResponse>())!;
@@ -320,7 +331,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         using var restartedFactory = CreateFactory(database.ConnectionString);
         using var restartedClient = restartedFactory.CreateAuthenticatedClient();
         using var getResponse = await restartedClient.GetAsync($"/api/v1/orders/{created.Id}");
-        using var replayResponse = await PostOrderAsync(restartedClient, key, "CUST-007", "SKU-007", 7);
+        using var replayResponse = await PostOrderAsync(restartedClient, key, "CUST-001", "SKU-007", 7);
 
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
         Assert.Equal(created, await getResponse.Content.ReadFromJsonAsync<OrderResponse>());
@@ -340,7 +351,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         using var client = factory.CreateAuthenticatedClient();
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/orders")
         {
-            Content = JsonContent.Create(new CreateOrderRequest("CUST-008", "SKU-008", 1))
+            Content = JsonContent.Create(new CreateOrderRequest("CUST-001", "SKU-008", 1))
         };
         if (idempotencyKey is not null)
         {
