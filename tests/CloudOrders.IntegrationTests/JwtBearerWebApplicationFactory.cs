@@ -39,6 +39,6 @@ internal sealed class JwtBearerWebApplicationFactory(
     private sealed class NullOrderRepository : IOrderRepository
     {
         public Task AddAsync(Order order, CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task<Order?> GetAsync(Guid orderId, CancellationToken cancellationToken) => Task.FromResult<Order?>(null);
+        public Task<OwnedOrder?> GetOwnedAsync(Guid orderId, CancellationToken cancellationToken) => Task.FromResult<OwnedOrder?>(null);
     }
 }

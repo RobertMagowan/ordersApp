@@ -254,11 +254,26 @@ app.MapPost("/api/v1/orders", async (
 
 app.MapGet("/api/v1/orders/{orderId:guid}", async (
         Guid orderId,
+        HttpContext httpContext,
         GetOrderHandler handler,
+        CurrentCustomerProfileAccessor currentCustomer,
+        IAuthorizationService authorizationService,
         CancellationToken cancellationToken) =>
     {
-        var response = await handler.Handle(orderId, cancellationToken);
-        return response is null ? Results.NotFound() : Results.Ok(response);
+        var ownedOrder = await handler.Handle(orderId, cancellationToken);
+        if (ownedOrder is null)
+        {
+            return ResourceNotFound(httpContext);
+        }
+
+        var actor = await currentCustomer.GetAsync(cancellationToken);
+        var authorization = await authorizationService.AuthorizeAsync(
+            httpContext.User,
+            new CustomerResource(actor.Id, ownedOrder.Owner.CustomerProfileId),
+            new CustomerResourceRequirement());
+        return authorization.Succeeded
+            ? Results.Ok(ownedOrder.Response)
+            : ResourceNotFound(httpContext);
     })
     .WithName("GetOrder")
     .WithTags("Orders")

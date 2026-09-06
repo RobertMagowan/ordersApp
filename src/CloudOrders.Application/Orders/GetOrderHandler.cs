@@ -5,9 +5,13 @@ namespace CloudOrders.Application.Orders;
 
 public sealed class GetOrderHandler(IOrderRepository orderRepository)
 {
-    public async Task<OrderResponse?> Handle(Guid orderId, CancellationToken cancellationToken)
+    public async Task<OwnedOrderResponse?> Handle(Guid orderId, CancellationToken cancellationToken)
     {
-        var order = await orderRepository.GetAsync(orderId, cancellationToken);
-        return order is null ? null : OrderResponseMapper.ToResponse(order);
+        var ownedOrder = await orderRepository.GetOwnedAsync(orderId, cancellationToken);
+        return ownedOrder is null
+            ? null
+            : new OwnedOrderResponse(ownedOrder.Owner, OrderResponseMapper.ToResponse(ownedOrder.Order));
     }
 }
+
+public sealed record OwnedOrderResponse(OrderOwner Owner, OrderResponse Response);
