@@ -13,8 +13,8 @@ This design applies only to these authorised pull-request paths:
 - feature/* to development
 - development to test
 
-It does not change test to master, production deployment behaviour, branch
-protection, or the prohibition on direct pushes.
+It does not change test to master, existing production deployment behaviour,
+branch protection, or the prohibition on direct pushes.
 
 ## Design
 
