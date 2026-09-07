@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace CloudOrders.ArchitectureTests;
 
 public sealed class DeploymentWorkflowPolicyTests
@@ -40,9 +42,10 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.DoesNotContain("name: Check out protected commit", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("name: Reject a protected push without merge lineage", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("Expected a two-parent merge commit", workflow, StringComparison.Ordinal);
-        Assert.DoesNotContain("github.event.before", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("gh api", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("git merge-base --is-ancestor", workflow, StringComparison.Ordinal);
+
+        AssertEventBeforeIsScopedToClassifierStep(workflow);
     }
 
     [Fact]
@@ -68,8 +71,8 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("preview_foundation:", workflow, StringComparison.Ordinal);
         Assert.Contains("prepare_release:", workflow, StringComparison.Ordinal);
         Assert.Contains("deploy_release:", workflow, StringComparison.Ordinal);
-        Assert.Contains("needs: [preview_foundation, validate_promotion_ref]", workflow, StringComparison.Ordinal);
-        Assert.Contains("needs: [prepare_release, validate_promotion_ref]", workflow, StringComparison.Ordinal);
+        AssertJobLevelNeedsInclude(workflow, "prepare_release", "preview_foundation", "validate_promotion_ref", "classify_changes");
+        AssertJobLevelNeedsInclude(workflow, "preview_sql", "prepare_release", "validate_promotion_ref", "classify_changes");
         Assert.Contains("name: Preview immutable release", workflow, StringComparison.Ordinal);
         Assert.Contains("releaseId=\"$GITHUB_SHA\"", workflow, StringComparison.Ordinal);
         Assert.Contains("releaseId=bootstrap", workflow, StringComparison.Ordinal);
@@ -265,7 +268,7 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("E1 migration execution $EXECUTION completed with status $STATUS.", workflow, StringComparison.Ordinal);
 
         var normalJobs = new[] { "preview_foundation", "prepare_release", "preview_sql", "bootstrap_sql", "run_migration", "deploy_release" };
-        Assert.All(normalJobs, job => Assert.Contains($"  {job}:", workflow, StringComparison.Ordinal));
+        AssertNormalAzureMutatingJobsNeedClassification(workflow, normalJobs);
         var normalWorkflowStart = workflow.IndexOf("preview_foundation:", StringComparison.Ordinal);
         var e1WorkflowStart = workflow.IndexOf("run_sprint_4a_e1_migration_only:", StringComparison.Ordinal);
         var normalWorkflow = workflow[normalWorkflowStart..e1WorkflowStart];
@@ -274,7 +277,9 @@ public sealed class DeploymentWorkflowPolicyTests
             normalWorkflow.Split("needs.validate_promotion_ref.outputs.migration_only != 'true'", StringSplitOptions.None).Length - 1);
         var deployReleaseStart = workflow.IndexOf("  deploy_release:", StringComparison.Ordinal);
         Assert.Contains("needs.validate_promotion_ref.outputs.migration_only != 'true'", workflow[deployReleaseStart..], StringComparison.Ordinal);
-        Assert.Contains("if: needs.validate_promotion_ref.outputs.migration_only == 'true'", workflow[e1WorkflowStart..], StringComparison.Ordinal);
+        Assert.True(e1WorkflowStart >= 0 && deployReleaseStart > e1WorkflowStart,
+            "Expected a bounded E1 migration-only job before deploy_release.");
+        AssertE1JobHasDirectDispatchGuard(workflow);
 
         var migrationRunner = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "CloudOrders.Migrations", "Program.cs"));
         Assert.Contains("--migration", migrationRunner, StringComparison.Ordinal);
@@ -335,6 +340,106 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.DoesNotContain("docker build --file src/CloudOrders.Api/Dockerfile", e1Job, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void WorkflowContractRejectsEventBeforeOutsideTheClassifierStep()
+    {
+        var weakenedWorkflows = new[]
+        {
+            """
+            jobs:
+              classify_changes:
+                name: Leaks ${{ github.event.before }} before the classifier step
+                steps:
+                  - name: Classify changed paths
+                    env:
+                      EVENT_BEFORE: ${{ github.event.before }}
+                    run: echo classify
+              deployment_not_required:
+                steps: []
+            """,
+            """
+            jobs:
+              classify_changes:
+                steps:
+                  - name: Classify changed paths
+                    env:
+                      EVENT_BEFORE: ${{ github.event.before }}
+                    run: echo classify
+                  - name: Later step
+                    run: echo "${{ github.event.before }}"
+              deployment_not_required:
+                steps: []
+            """,
+        };
+
+        Assert.All(weakenedWorkflows, weakenedWorkflow =>
+        {
+            var failure = Record.Exception(() => AssertEventBeforeIsScopedToClassifierStep(weakenedWorkflow));
+
+            Assert.NotNull(failure);
+            Assert.Contains("outside the exact Classify changed paths step", failure.Message, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public void WorkflowContractRejectsClassifierDependencyOutsideJobLevelNeeds()
+    {
+        const string weakenedWorkflow = """
+            jobs:
+              preview_foundation:
+                needs: [validate_promotion_ref]
+                if: needs.classify_changes.outputs.deployable == 'true'
+                steps:
+                  - name: Misleading mention
+                    run: echo classify_changes
+            """;
+
+        var failure = Record.Exception(() => AssertNormalAzureMutatingJobsNeedClassification(
+            weakenedWorkflow,
+            ["preview_foundation"]));
+
+        Assert.NotNull(failure);
+        Assert.Contains("job-level needs declaration", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WorkflowContractRejectsE1ConditionsOutsideTheJobLevelGuard()
+    {
+        const string deployableCondition = "needs.classify_changes.outputs.deployable == 'true'";
+        const string migrationOnlyCondition = "needs.validate_promotion_ref.outputs.migration_only == 'true'";
+        static string BuildWorkflow(string condition, string script) => $"""
+            jobs:
+              run_sprint_4a_e1_migration_only:
+                needs: [validate_promotion_ref, classify_changes]
+                if: {condition}
+                steps:
+                  - name: Misleading comment
+                    run: |
+                      {script}
+              deploy_release:
+                steps: []
+            """;
+
+        var weakenedWorkflows = new[]
+        {
+            BuildWorkflow(migrationOnlyCondition, $"# if: {deployableCondition} && {migrationOnlyCondition}"),
+            BuildWorkflow($"{deployableCondition} || {migrationOnlyCondition}", "echo run"),
+            BuildWorkflow($"true || ({deployableCondition} && {migrationOnlyCondition})", "echo run"),
+            BuildWorkflow($"{deployableCondition} # {migrationOnlyCondition}", "echo run"),
+            BuildWorkflow($"{deployableCondition} && && {migrationOnlyCondition}", "echo run"),
+            BuildWorkflow($"&& {deployableCondition} && {migrationOnlyCondition}", "echo run"),
+            BuildWorkflow($"{deployableCondition} && {migrationOnlyCondition} &&", "echo run"),
+        };
+
+        Assert.All(weakenedWorkflows, weakenedWorkflow =>
+        {
+            var failure = Record.Exception(() => AssertE1JobHasDirectDispatchGuard(weakenedWorkflow));
+
+            Assert.NotNull(failure);
+            Assert.Contains("direct job-level if declaration", failure.Message, StringComparison.Ordinal);
+        });
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -349,5 +454,111 @@ public sealed class DeploymentWorkflowPolicyTests
         }
 
         throw new DirectoryNotFoundException("Could not locate the CloudOrders repository root.");
+    }
+
+    private static void AssertEventBeforeIsScopedToClassifierStep(string workflow)
+    {
+        const string eventBeforeToken = "github.event.before";
+        var classifyJob = GetJobSection(workflow, "classify_changes");
+        var classifyStep = GetStepSection(classifyJob.Value, "Classify changed paths");
+        var eventBeforeMappingCount = Regex.Count(
+            classifyStep.Value,
+            @"^          EVENT_BEFORE: \$\{\{ github\.event\.before \}\}[ \t]*\r?$",
+            RegexOptions.Multiline | RegexOptions.CultureInvariant);
+        Assert.True(eventBeforeMappingCount == 1,
+            "Expected exactly one EVENT_BEFORE: ${{ github.event.before }} mapping in the exact Classify changed paths step.");
+
+        var eventBeforeUseCount = Regex.Count(
+            classifyStep.Value,
+            Regex.Escape(eventBeforeToken),
+            RegexOptions.CultureInvariant);
+        Assert.True(eventBeforeUseCount == 1,
+            "Expected github.event.before to be used only by the EVENT_BEFORE mapping in the exact Classify changed paths step.");
+
+        var classifyStepStart = classifyJob.Index + classifyStep.Index;
+        var workflowOutsideClassifyStep = workflow.Remove(classifyStepStart, classifyStep.Length);
+        Assert.True(!workflowOutsideClassifyStep.Contains(eventBeforeToken, StringComparison.Ordinal),
+            "Expected no github.event.before reference outside the exact Classify changed paths step.");
+    }
+
+    private static void AssertNormalAzureMutatingJobsNeedClassification(string workflow, IEnumerable<string> jobNames)
+    {
+        Assert.All(jobNames, jobName => AssertJobLevelNeedsInclude(workflow, jobName, "classify_changes"));
+    }
+
+    private static void AssertJobLevelNeedsInclude(string workflow, string jobName, params string[] expectedDependencies)
+    {
+        var job = GetJobSection(workflow, jobName);
+        var needsMatches = Regex.Matches(
+            job.Value,
+            @"^    needs:[ \t]*\[(?<dependencies>[^\]\r\n]*)\][ \t]*\r?$",
+            RegexOptions.Multiline | RegexOptions.CultureInvariant);
+        Assert.True(needsMatches.Count == 1,
+            $"Expected exactly one array-form job-level needs declaration for {jobName}.");
+
+        var dependencies = needsMatches[0].Groups["dependencies"].Value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        Assert.All(expectedDependencies, expectedDependency => Assert.True(
+            dependencies.Contains(expectedDependency, StringComparer.Ordinal),
+            $"Expected the {jobName} job-level needs declaration to include {expectedDependency}."));
+    }
+
+    private static void AssertE1JobHasDirectDispatchGuard(string workflow)
+    {
+        const string deployableCondition = "needs.classify_changes.outputs.deployable == 'true'";
+        const string migrationOnlyCondition = "needs.validate_promotion_ref.outputs.migration_only == 'true'";
+        var e1Header = GetJobHeader(workflow, "run_sprint_4a_e1_migration_only");
+        var ifMatches = Regex.Matches(
+            e1Header,
+            @"^    if:[ \t]*(?<condition>[^\r\n]+?)[ \t]*\r?$",
+            RegexOptions.Multiline | RegexOptions.CultureInvariant);
+        Assert.True(ifMatches.Count == 1,
+            "Expected exactly one direct job-level if declaration in the E1 migration-only job header.");
+
+        var condition = ifMatches[0].Groups["condition"].Value;
+        var commentStart = condition.IndexOf('#', StringComparison.Ordinal);
+        var executableCondition = (commentStart >= 0 ? condition[..commentStart] : condition).Trim();
+        var operands = executableCondition.Split(
+            "&&",
+            StringSplitOptions.TrimEntries);
+        var isRequiredConjunction = operands.Length == 2
+            && operands.Contains(deployableCondition, StringComparer.Ordinal)
+            && operands.Contains(migrationOnlyCondition, StringComparer.Ordinal);
+        Assert.True(isRequiredConjunction,
+            $"Expected the direct job-level if declaration in the E1 migration-only job header to be the conjunction of '{deployableCondition}' and '{migrationOnlyCondition}'.");
+    }
+
+    private static Match GetJobSection(string workflow, string jobName)
+    {
+        var jobMatches = Regex.Matches(
+            workflow,
+            $@"^  {Regex.Escape(jobName)}:[ \t]*\r?\n.*?(?=^  [A-Za-z0-9_-]+:[ \t]*(?:#[^\r\n]*)?\r?$|\z)",
+            RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+        Assert.True(jobMatches.Count == 1,
+            $"Expected exactly one bounded job section for {jobName}; found {jobMatches.Count}.");
+        return jobMatches[0];
+    }
+
+    private static Match GetStepSection(string jobSection, string stepName)
+    {
+        var stepMatches = Regex.Matches(
+            jobSection,
+            $@"^      - name:[ \t]+{Regex.Escape(stepName)}[ \t]*\r?\n.*?(?=^      -(?=[ \t]|\r?$)|\z)",
+            RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+        Assert.True(stepMatches.Count == 1,
+            $"Expected exactly one bounded '{stepName}' step; found {stepMatches.Count}.");
+        return stepMatches[0];
+    }
+
+    private static string GetJobHeader(string workflow, string jobName)
+    {
+        var job = GetJobSection(workflow, jobName);
+        var stepsMatches = Regex.Matches(
+            job.Value,
+            @"^    steps:[ \t]*\r?$",
+            RegexOptions.Multiline | RegexOptions.CultureInvariant);
+        Assert.True(stepsMatches.Count == 1,
+            $"Expected exactly one direct job-level steps declaration for {jobName}; found {stepsMatches.Count}.");
+        return job.Value[..stepsMatches[0].Index];
     }
 }

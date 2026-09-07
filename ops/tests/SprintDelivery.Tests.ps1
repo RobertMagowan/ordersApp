@@ -1002,3 +1002,70 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
         $result.action.workItemId | Should Be $null
     }
 }
+
+Describe 'Deployment path scope' -Tag 'deployment-scope' {
+    BeforeAll {
+        $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        . (Join-Path $repositoryRoot 'ops/Get-DeploymentScope.ps1')
+    }
+
+    It 'classifies delivery-only changes as non-deployable' {
+        (Get-DeploymentScope -ChangedPaths @('docs/evidence/release.md','delivery/state.json','AGENTS.md') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
+        (Get-DeploymentScope -ChangedPaths @('.github/workflows/ci.yml') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
+        (Get-DeploymentScope -ChangedPaths @('ops/tests/SprintDelivery.Tests.ps1') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
+        (Get-DeploymentScope -ChangedPaths @('ops/Bootstrap-CloudOrdersSql.Tests.ps1') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
+        (Get-DeploymentScope -ChangedPaths @('ops/Test-SprintDelivery.ps1') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
+        (Get-DeploymentScope -ChangedPaths @('.superpowers/sdd/progress.md') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
+    }
+
+    It 'classifies source changes as deployable' {
+        (Get-DeploymentScope -ChangedPaths @('src/CloudOrders.Api/Program.cs') -ComparisonAvailable $true).reason | Should Be 'deployable_path'
+        (Get-DeploymentScope -ChangedPaths @('.dockerignore') -ComparisonAvailable $true).reason | Should Be 'deployable_path'
+    }
+
+    It 'fails closed for infrastructure, release, workflow, and mixed changes' {
+        (Get-DeploymentScope -ChangedPaths @('infra/main.bicep') -ComparisonAvailable $true).deployable | Should Be $true
+        (Get-DeploymentScope -ChangedPaths @('ops/releases/sprint-4a-e1-migration-only.json') -ComparisonAvailable $true).deployable | Should Be $true
+        (Get-DeploymentScope -ChangedPaths @('.github/workflows/deploy.yml') -ComparisonAvailable $true).deployable | Should Be $true
+        (Get-DeploymentScope -ChangedPaths @('docs/a.md','tests/CloudOrders.UnitTests/OrdersTests.cs') -ComparisonAvailable $true).deployable | Should Be $true
+    }
+
+    It 'fails closed when comparison is unavailable or a path is unknown' {
+        (Get-DeploymentScope -ChangedPaths @('docs/a.md') -ComparisonAvailable $false).reason | Should Be 'comparison_unavailable'
+        (Get-DeploymentScope -ChangedPaths @('unknown-root-file') -ComparisonAvailable $true).reason | Should Be 'unknown_path'
+        (Get-DeploymentScope -ChangedPaths @('ops/unknown-maintenance.ps1') -ComparisonAvailable $true).reason | Should Be 'unknown_path'
+        (Get-DeploymentScope -ChangedPaths @('ops/unknown-maintenance.ps1') -ComparisonAvailable $true).deployable | Should Be $true
+    }
+}
+
+Describe 'Deployment workflow path gate' -Tag 'deployment-workflow' {
+    BeforeAll {
+        $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        $workflow = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot '.github/workflows/deploy.yml')
+    }
+
+    It 'classifies protected-branch changes before any deployment job' {
+        $workflow | Should Not Match '(?m)^\s{2}pull_request:\s*$'
+        $workflow | Should Match 'fetch-depth:\s*0'
+        $workflow | Should Match 'ops/Get-DeploymentScope\.ps1'
+        $workflow | Should Match 'comparison_unavailable'
+    }
+
+    It 'gates every Azure-mutating job on deployable classification' {
+        foreach ($jobName in 'preview_foundation', 'prepare_release', 'preview_sql', 'bootstrap_sql', 'run_migration', 'run_sprint_4a_e1_migration_only', 'deploy_release') {
+            $job = [regex]::Match($workflow, "(?ms)^  ${jobName}:\s*\r?\n.*?(?=^  [A-Za-z0-9_]+:|\z)").Value
+            $job | Should Not BeNullOrEmpty
+            $job | Should Match 'needs\.classify_changes\.outputs\.deployable\s*==\s*''true'''
+            $job | Should Match 'needs:\s*[^\r\n]*classify_changes'
+        }
+    }
+
+    It 'keeps no-deployment summary free of environment and write identity permissions' {
+        $job = [regex]::Match($workflow, '(?ms)^  deployment_not_required:\s*\r?\n.*?(?=^  [A-Za-z0-9_]+:|\z)').Value
+        $job | Should Not BeNullOrEmpty
+        $job | Should Not Match '(?m)^\s+environment:'
+        $job | Should Not Match '(?m)^\s+id-token:\s*write'
+        $job | Should Match '(?i)range'
+        $job | Should Match '(?i)reason'
+    }
+}

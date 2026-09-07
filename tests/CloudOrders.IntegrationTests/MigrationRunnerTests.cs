@@ -76,11 +76,19 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
 
     private static async Task<MigrationRunResult> RunRunnerAsync(string? connectionString, string? migration = null)
     {
-        var runnerProject = Path.Combine(RepositoryRoot(), "src", "CloudOrders.Migrations", "CloudOrders.Migrations.csproj");
+        var runnerAssembly = Path.Combine(
+            RepositoryRoot(),
+            "src",
+            "CloudOrders.Migrations",
+            "bin",
+            "Release",
+            "net10.0",
+            "CloudOrders.Migrations.dll");
+        Assert.True(File.Exists(runnerAssembly), $"Expected built migration runner at {runnerAssembly}.");
         var startInfo = new ProcessStartInfo("dotnet")
         {
-            Arguments = $"run --project \"{runnerProject}\" --configuration Release --no-launch-profile" +
-                (migration is null ? string.Empty : $" -- --migration {migration}"),
+            Arguments = $"\"{runnerAssembly}\"" +
+                (migration is null ? string.Empty : $" --migration {migration}"),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
