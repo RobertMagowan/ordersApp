@@ -2,7 +2,7 @@ namespace CloudOrders.Infrastructure.Persistence;
 
 internal sealed class IdempotencyRecordEntity
 {
-    public required string SubjectId { get; set; }
+    public string? SubjectId { get; set; }
 
     public Guid IdempotencyKey { get; set; }
 
@@ -18,9 +18,9 @@ internal sealed class IdempotencyRecordEntity
 
     public DateTimeOffset ExpiresAt { get; set; }
 
-    public Guid? ActorCustomerProfileId { get; set; }
+    public Guid ActorCustomerProfileId { get; set; }
 
-    public Guid? TargetCustomerProfileId { get; set; }
+    public Guid TargetCustomerProfileId { get; set; }
 
     public OrderEntity? Order { get; set; }
 }

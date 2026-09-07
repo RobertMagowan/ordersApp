@@ -111,8 +111,10 @@ public sealed class SqlIdempotentOrderStore(
         new()
         {
             SubjectId = request.SubjectId,
-            ActorCustomerProfileId = request.ActorCustomerProfileId,
-            TargetCustomerProfileId = request.TargetCustomerProfileId,
+            ActorCustomerProfileId = request.ActorCustomerProfileId
+                ?? throw new InvalidOperationException("Actor ownership is required for SQL persistence."),
+            TargetCustomerProfileId = request.TargetCustomerProfileId
+                ?? throw new InvalidOperationException("Target ownership is required for SQL persistence."),
             IdempotencyKey = request.IdempotencyKey,
             RequestHash = request.RequestHash,
             OrderId = request.Order.Id,

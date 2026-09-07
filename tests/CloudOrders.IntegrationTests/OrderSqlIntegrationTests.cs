@@ -70,7 +70,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
         Assert.Equal(created, read);
         Assert.Equal(1, await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.Orders"));
-        Assert.Equal(2, await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.__EFMigrationsHistory"));
+        Assert.Equal(3, await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.__EFMigrationsHistory"));
     }
 
     [Fact]
@@ -262,6 +262,8 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
 
         var exception = await Assert.ThrowsAsync<DbUpdateException>(() => handler.Handle(
             new CreateOrderCommand("CUST-001", "SKU-UNIQUE-2", 1),
+            CustomerProfileId,
+            CustomerProfileId,
             Guid.NewGuid(),
             traceParent: null,
             CancellationToken.None));

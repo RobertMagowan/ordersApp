@@ -26,8 +26,8 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
             "20260829075044_AddCustomerProfileOwnershipExpand",
             await context.Database.GetAppliedMigrationsAsync(CancellationToken.None));
         Assert.Contains(
-            "EnforceCustomerProfileOwnership",
-            await context.Database.GetAppliedMigrationsAsync(CancellationToken.None));
+            await context.Database.GetAppliedMigrationsAsync(CancellationToken.None),
+            migration => migration.EndsWith("_EnforceCustomerProfileOwnership", StringComparison.Ordinal));
     }
 
     [Fact]

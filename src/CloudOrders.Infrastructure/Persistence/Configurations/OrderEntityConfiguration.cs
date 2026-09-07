@@ -20,6 +20,7 @@ internal sealed class OrderEntityConfiguration : IEntityTypeConfiguration<OrderE
         builder.Property(order => order.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
         builder.Property(order => order.CreatedAt).HasPrecision(7);
         builder.Property(order => order.UpdatedAt).HasPrecision(7);
+        builder.Property(order => order.CustomerProfileId).IsRequired();
         builder.Property(order => order.RowVersion).IsRowVersion();
         builder.HasIndex(order => new { order.CustomerReference, order.CreatedAt, order.Id })
             .IsDescending(false, true, true)

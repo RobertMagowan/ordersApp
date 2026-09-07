@@ -65,6 +65,10 @@ public sealed class ContractPackTests
 
         Assert.Single(paths);
         var sql = File.ReadAllText(paths[0]);
+        var downStart = sql.IndexOf("protected override void Down", StringComparison.Ordinal);
+        Assert.NotEqual(-1, downStart);
+        var up = sql[..downStart];
+        var down = sql[downStart..];
         Assert.Contains("AlterColumn<Guid>(", sql, StringComparison.Ordinal);
         Assert.Contains("name: \"CustomerProfileId\"", sql, StringComparison.Ordinal);
         Assert.Contains("name: \"ActorCustomerProfileId\"", sql, StringComparison.Ordinal);
@@ -77,7 +81,8 @@ public sealed class ContractPackTests
         Assert.Contains("AddPrimaryKey(", sql, StringComparison.Ordinal);
         Assert.Contains("ActorCustomerProfileId", sql, StringComparison.Ordinal);
         Assert.Contains("IdempotencyKey", sql, StringComparison.Ordinal);
-        Assert.DoesNotContain("new[] { \"SubjectId\", \"IdempotencyKey\" }", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("new[] { \"SubjectId\", \"IdempotencyKey\" }", up, StringComparison.Ordinal);
+        Assert.Contains("new[] { \"SubjectId\", \"IdempotencyKey\" }", down, StringComparison.Ordinal);
         Assert.DoesNotContain("DropColumn(\n                name: \"SubjectId\"", sql, StringComparison.Ordinal);
     }
 
