@@ -440,6 +440,17 @@ public sealed class DeploymentWorkflowPolicyTests
         });
     }
 
+    [Fact]
+    public void Sprint4BR2QuiescenceClearsEveryIngressTrafficWeight()
+    {
+        var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml"));
+        var releaseJob = GetJobSection(workflow, "run_migration");
+        var quiesceStep = GetStepSection(releaseJob.Value, "Capture D1 revision and digest, then quiesce ingress fail-closed");
+
+        Assert.Contains("az containerapp ingress traffic set", quiesceStep.Value, StringComparison.Ordinal);
+        Assert.Contains("jq -e 'all(.[]; (.weight // 0) == 0)'", quiesceStep.Value, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

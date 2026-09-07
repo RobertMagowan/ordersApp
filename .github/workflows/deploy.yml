@@ -710,9 +710,16 @@ jobs:
           [[ -n "$BEFORE_REVISION" && -n "$BEFORE_DIGEST" ]] || { echo 'Cannot capture current D1 revision and digest.' >&2; exit 1; }
           echo "before_revision=$BEFORE_REVISION" >> "$GITHUB_OUTPUT"
           echo "before_digest=$BEFORE_DIGEST" >> "$GITHUB_OUTPUT"
-          az containerapp ingress traffic set --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --traffic-weight "${BEFORE_REVISION}=0"
           TRAFFIC=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.traffic --output json)
-          [[ "$TRAFFIC" != *"\"weight\": 100"* ]] || { echo 'Ingress quiescence was not confirmed; refusing migration.' >&2; exit 1; }
+          mapfile -t LIVE_REVISIONS < <(printf '%s' "$TRAFFIC" | jq --raw-output '.[] | select((.weight // 0) != 0) | .revisionName')
+          (( ${#LIVE_REVISIONS[@]} > 0 )) || { echo 'No live ingress revisions were found; refusing migration.' >&2; exit 1; }
+          REVISION_WEIGHTS=()
+          for revision in "${LIVE_REVISIONS[@]}"; do
+            REVISION_WEIGHTS+=("${revision}=0")
+          done
+          az containerapp ingress traffic set --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision-weight "${REVISION_WEIGHTS[@]}"
+          TRAFFIC=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.traffic --output json)
+          printf '%s' "$TRAFFIC" | jq -e 'all(.[]; (.weight // 0) == 0)' > /dev/null || { echo 'Ingress quiescence was not confirmed; refusing migration.' >&2; exit 1; }
       - name: Run read-only ownership precondition before migration
         shell: bash
         run: |
