@@ -712,7 +712,7 @@ jobs:
           echo "before_revision=$BEFORE_REVISION" >> "$GITHUB_OUTPUT"
           echo "before_digest=$BEFORE_DIGEST" >> "$GITHUB_OUTPUT"
           TRAFFIC=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.traffic --output json)
-          mapfile -t LIVE_REVISIONS < <(printf '%s' "$TRAFFIC" | jq --raw-output '.[] | select((.weight // 0) != 0) | .revisionName')
+          mapfile -t LIVE_REVISIONS < <(printf '%s' "$TRAFFIC" | jq --raw-output --arg before "$BEFORE_REVISION" '.[] | select((.weight // 0) != 0) | if .revisionName then .revisionName elif .latestRevision then $before else empty end')
           (( ${#LIVE_REVISIONS[@]} > 0 )) || { echo 'No live ingress revisions were found; refusing migration.' >&2; exit 1; }
           REVISION_WEIGHTS=()
           for revision in "${LIVE_REVISIONS[@]}"; do
