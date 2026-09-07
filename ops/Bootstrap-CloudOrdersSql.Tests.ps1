@@ -2,13 +2,27 @@ $scriptPath = Join-Path $PSScriptRoot 'Bootstrap-CloudOrdersSql.ps1'
 
 Describe 'Bootstrap-CloudOrdersSql' {
     It 'rejects production before connecting to Azure SQL' {
-        { & $scriptPath -EnvironmentName production -ResourceGroupName ordersapp-production -ServerName cloudorders-prod-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-prod-api -MigrationIdentityName cloudorders-prod-migrator -WhatIf } |
-            Should Throw
+        $threw = $false
+        try {
+            & $scriptPath -EnvironmentName production -ResourceGroupName ordersapp-production -ServerName cloudorders-prod-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-prod-api -MigrationIdentityName cloudorders-prod-migrator -WhatIf
+        }
+        catch {
+            $threw = $true
+        }
+
+        $threw | Should Be $true
     }
 
     It 'requires non-empty resource identifiers' {
-        { & $scriptPath -EnvironmentName development -ResourceGroupName '' -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-dev-api -MigrationIdentityName cloudorders-dev-migrator -WhatIf } |
-            Should Throw
+        $threw = $false
+        try {
+            & $scriptPath -EnvironmentName development -ResourceGroupName '' -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-dev-api -MigrationIdentityName cloudorders-dev-migrator -WhatIf
+        }
+        catch {
+            $threw = $true
+        }
+
+        $threw | Should Be $true
     }
 
     It 'emits least-privilege contained-user SQL without API db_owner' {
