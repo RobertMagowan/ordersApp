@@ -1011,6 +1011,8 @@ Describe 'Deployment path scope' -Tag 'deployment-scope' {
 
     It 'classifies delivery-only changes as non-deployable' {
         (Get-DeploymentScope -ChangedPaths @('docs/evidence/release.md','delivery/state.json','AGENTS.md') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
+        (Get-DeploymentScope -ChangedPaths @('.github/workflows/ci.yml') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
+        (Get-DeploymentScope -ChangedPaths @('ops/tests/SprintDelivery.Tests.ps1') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
     }
 
     It 'classifies source changes as deployable' {

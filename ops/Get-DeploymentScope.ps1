@@ -26,7 +26,9 @@ function Get-DeploymentScope {
 
     $deliveryOnlyPath = {
         param([string] $Path)
-        $Path -match '^docs/' -or $Path -match '^delivery/' -or $Path -eq 'AGENTS.md' -or $Path -match '^\.agents/skills/'
+        $Path -match '^docs/' -or $Path -match '^delivery/' -or $Path -eq 'AGENTS.md' -or $Path -match '^\.agents/skills/' -or
+        $Path -match '^\.github/workflows/' -and $Path -ne '.github/workflows/deploy.yml' -or
+        $Path -match '^ops/tests/'
     }
 
     $paths = @($ChangedPaths | Where-Object { $null -ne $_ } | ForEach-Object {
