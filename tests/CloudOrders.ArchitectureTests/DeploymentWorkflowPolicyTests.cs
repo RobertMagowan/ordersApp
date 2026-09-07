@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace CloudOrders.ArchitectureTests;
 
 public sealed class DeploymentWorkflowPolicyTests
@@ -40,9 +42,20 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.DoesNotContain("name: Check out protected commit", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("name: Reject a protected push without merge lineage", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("Expected a two-parent merge commit", workflow, StringComparison.Ordinal);
-        Assert.DoesNotContain("github.event.before", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("gh api", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("git merge-base --is-ancestor", workflow, StringComparison.Ordinal);
+
+        var classifyStart = workflow.IndexOf("  classify_changes:", StringComparison.Ordinal);
+        var deploymentDecisionStart = workflow.IndexOf("  deployment_not_required:", StringComparison.Ordinal);
+        Assert.True(classifyStart >= 0 && deploymentDecisionStart > classifyStart,
+            "Expected a bounded changed-path classification job.");
+        Assert.DoesNotContain("github.event.before", workflow[..classifyStart], StringComparison.Ordinal);
+        var classifyJob = workflow[classifyStart..deploymentDecisionStart];
+        var classifyStepStart = classifyJob.IndexOf("      - name: Classify changed paths", StringComparison.Ordinal);
+        Assert.True(classifyStepStart >= 0, "Expected a changed-path classification step.");
+        var classifyStep = classifyJob[classifyStepStart..];
+        Assert.Contains("EVENT_BEFORE: ${{ github.event.before }}", classifyStep, StringComparison.Ordinal);
+        Assert.DoesNotContain("github.event.before", workflow[(deploymentDecisionStart)..], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -68,8 +81,8 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("preview_foundation:", workflow, StringComparison.Ordinal);
         Assert.Contains("prepare_release:", workflow, StringComparison.Ordinal);
         Assert.Contains("deploy_release:", workflow, StringComparison.Ordinal);
-        Assert.Contains("needs: [preview_foundation, validate_promotion_ref]", workflow, StringComparison.Ordinal);
-        Assert.Contains("needs: [prepare_release, validate_promotion_ref]", workflow, StringComparison.Ordinal);
+        Assert.Contains("needs: [preview_foundation, validate_promotion_ref, classify_changes]", workflow, StringComparison.Ordinal);
+        Assert.Contains("needs: [prepare_release, validate_promotion_ref, classify_changes]", workflow, StringComparison.Ordinal);
         Assert.Contains("name: Preview immutable release", workflow, StringComparison.Ordinal);
         Assert.Contains("releaseId=\"$GITHUB_SHA\"", workflow, StringComparison.Ordinal);
         Assert.Contains("releaseId=bootstrap", workflow, StringComparison.Ordinal);
@@ -269,12 +282,21 @@ public sealed class DeploymentWorkflowPolicyTests
         var normalWorkflowStart = workflow.IndexOf("preview_foundation:", StringComparison.Ordinal);
         var e1WorkflowStart = workflow.IndexOf("run_sprint_4a_e1_migration_only:", StringComparison.Ordinal);
         var normalWorkflow = workflow[normalWorkflowStart..e1WorkflowStart];
+        Assert.All(normalJobs, job =>
+        {
+            var jobMatch = Regex.Match(workflow, $@"(?ms)^  {Regex.Escape(job)}:.*?(?=^  \S|\z)");
+            Assert.True(jobMatch.Success, $"Expected bounded release job section for {job}.");
+            Assert.Contains("classify_changes", jobMatch.Value, StringComparison.Ordinal);
+        });
         Assert.Equal(
             normalJobs.Length - 1,
             normalWorkflow.Split("needs.validate_promotion_ref.outputs.migration_only != 'true'", StringSplitOptions.None).Length - 1);
         var deployReleaseStart = workflow.IndexOf("  deploy_release:", StringComparison.Ordinal);
         Assert.Contains("needs.validate_promotion_ref.outputs.migration_only != 'true'", workflow[deployReleaseStart..], StringComparison.Ordinal);
-        Assert.Contains("if: needs.validate_promotion_ref.outputs.migration_only == 'true'", workflow[e1WorkflowStart..], StringComparison.Ordinal);
+        Assert.True(e1WorkflowStart >= 0 && deployReleaseStart > e1WorkflowStart,
+            "Expected a bounded E1 migration-only job before deploy_release.");
+        var e1Workflow = workflow[e1WorkflowStart..deployReleaseStart];
+        Assert.Contains("if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only == 'true'", e1Workflow, StringComparison.Ordinal);
 
         var migrationRunner = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "CloudOrders.Migrations", "Program.cs"));
         Assert.Contains("--migration", migrationRunner, StringComparison.Ordinal);
