@@ -57,6 +57,30 @@ public sealed class ContractPackTests
         Assert.Contains("Sprint 4A", traceability, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void E2MigrationSqlEnforcesOwnershipAndReplacesOnlyTheLegacyKey()
+    {
+        var migrationsDirectory = Path.Combine(FindRepositoryRoot(), "src", "CloudOrders.Infrastructure", "Persistence", "Migrations");
+        var paths = Directory.GetFiles(migrationsDirectory, "*_EnforceCustomerProfileOwnership.cs");
+
+        Assert.Single(paths);
+        var sql = File.ReadAllText(paths[0]);
+        Assert.Contains("AlterColumn<Guid>(", sql, StringComparison.Ordinal);
+        Assert.Contains("name: \"CustomerProfileId\"", sql, StringComparison.Ordinal);
+        Assert.Contains("name: \"ActorCustomerProfileId\"", sql, StringComparison.Ordinal);
+        Assert.Contains("name: \"TargetCustomerProfileId\"", sql, StringComparison.Ordinal);
+        Assert.Contains("nullable: false", sql, StringComparison.Ordinal);
+        Assert.Contains("name: \"SubjectId\"", sql, StringComparison.Ordinal);
+        Assert.Contains("AlterColumn<string>(", sql, StringComparison.Ordinal);
+        Assert.Contains("nullable: true", sql, StringComparison.Ordinal);
+        Assert.Contains("DropPrimaryKey(", sql, StringComparison.Ordinal);
+        Assert.Contains("AddPrimaryKey(", sql, StringComparison.Ordinal);
+        Assert.Contains("ActorCustomerProfileId", sql, StringComparison.Ordinal);
+        Assert.Contains("IdempotencyKey", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("new[] { \"SubjectId\", \"IdempotencyKey\" }", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("DropColumn(\n                name: \"SubjectId\"", sql, StringComparison.Ordinal);
+    }
+
     private static void AssertContractDocument(string contractsDirectory, string fileName, string requiredText)
     {
         var path = Path.Combine(contractsDirectory, fileName);
