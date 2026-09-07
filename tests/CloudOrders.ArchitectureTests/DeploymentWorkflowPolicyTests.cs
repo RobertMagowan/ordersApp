@@ -443,10 +443,14 @@ public sealed class DeploymentWorkflowPolicyTests
     [Fact]
     public void Sprint4BR2QuiescenceClearsEveryIngressTrafficWeight()
     {
-        var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml"));
+        var repositoryRoot = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(repositoryRoot, ".github", "workflows", "deploy.yml"));
+        var containerAppModule = File.ReadAllText(Path.Combine(repositoryRoot, "infra", "modules", "container-app.bicep"));
         var releaseJob = GetJobSection(workflow, "run_migration");
         var quiesceStep = GetStepSection(releaseJob.Value, "Capture D1 revision and digest, then quiesce ingress fail-closed");
 
+        Assert.Contains("activeRevisionsMode: 'Multiple'", containerAppModule, StringComparison.Ordinal);
+        Assert.Contains("az containerapp revision set-mode --name \"$AZURE_APP_NAME\" --resource-group \"$AZURE_RESOURCE_GROUP\" --mode multiple", quiesceStep.Value, StringComparison.Ordinal);
         Assert.Contains("az containerapp ingress traffic set", quiesceStep.Value, StringComparison.Ordinal);
         Assert.Contains("jq -e 'all(.[]; (.weight // 0) == 0)'", quiesceStep.Value, StringComparison.Ordinal);
     }
