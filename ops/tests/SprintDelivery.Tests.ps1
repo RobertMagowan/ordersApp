@@ -1029,3 +1029,35 @@ Describe 'Deployment path scope' -Tag 'deployment-scope' {
         (Get-DeploymentScope -ChangedPaths @('unknown-root-file') -ComparisonAvailable $true).reason | Should Be 'unknown_path'
     }
 }
+
+Describe 'Deployment workflow path gate' -Tag 'deployment-workflow' {
+    BeforeAll {
+        $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        $workflow = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot '.github/workflows/deploy.yml')
+    }
+
+    It 'classifies protected-branch changes before any deployment job' {
+        $workflow | Should Not Match '(?m)^\s{2}pull_request:\s*$'
+        $workflow | Should Match 'fetch-depth:\s*0'
+        $workflow | Should Match 'ops/Get-DeploymentScope\.ps1'
+        $workflow | Should Match 'comparison_unavailable'
+    }
+
+    It 'gates every Azure-mutating job on deployable classification' {
+        foreach ($jobName in 'preview_foundation', 'prepare_release', 'preview_sql', 'bootstrap_sql', 'run_migration', 'run_sprint_4a_e1_migration_only', 'deploy_release') {
+            $job = [regex]::Match($workflow, "(?ms)^  ${jobName}:\s*\r?\n.*?(?=^  [A-Za-z0-9_]+:|\z)").Value
+            $job | Should Not BeNullOrEmpty
+            $job | Should Match 'needs\.classify_changes\.outputs\.deployable\s*==\s*''true'''
+            $job | Should Match 'needs:\s*[^\r\n]*classify_changes'
+        }
+    }
+
+    It 'keeps no-deployment summary free of environment and write identity permissions' {
+        $job = [regex]::Match($workflow, '(?ms)^  deployment_not_required:\s*\r?\n.*?(?=^  [A-Za-z0-9_]+:|\z)').Value
+        $job | Should Not BeNullOrEmpty
+        $job | Should Not Match '(?m)^\s+environment:'
+        $job | Should Not Match '(?m)^\s+id-token:\s*write'
+        $job | Should Match '(?i)range'
+        $job | Should Match '(?i)reason'
+    }
+}

@@ -74,10 +74,91 @@ jobs:
           echo "migration_only=true" >> "$GITHUB_OUTPUT"
           echo "migration=AddCustomerProfileOwnershipExpand" >> "$GITHUB_OUTPUT"
 
+  classify_changes:
+    name: Classify deployment changes
+    needs: validate_promotion_ref
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      deployable: ${{ steps.classify.outputs.deployable }}
+      reason: ${{ steps.classify.outputs.reason }}
+      range: ${{ steps.classify.outputs.range }}
+    steps:
+      - name: Check out source history
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: classify
+        shell: bash
+        env:
+          EVENT_BEFORE: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            echo "deployable=true" >> "$GITHUB_OUTPUT"
+            echo "reason=manual_dispatch" >> "$GITHUB_OUTPUT"
+            echo "range=manual" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          COMPARISON_AVAILABLE=true
+          if [[ ! "$EVENT_BEFORE" =~ ^[0-9a-fA-F]{40}$ || "$EVENT_BEFORE" =~ ^0{40}$ ]]; then
+            COMPARISON_AVAILABLE=false
+          elif ! git cat-file -e "$EVENT_BEFORE^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$EVENT_BEFORE" || COMPARISON_AVAILABLE=false
+            git cat-file -e "$EVENT_BEFORE^{commit}" 2>/dev/null || COMPARISON_AVAILABLE=false
+          fi
+
+          if [[ "$COMPARISON_AVAILABLE" == true ]] && ! git cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
+            COMPARISON_AVAILABLE=false
+          fi
+
+          if [[ "$COMPARISON_AVAILABLE" != true ]]; then
+            # comparison_unavailable is deliberately fail-open in Get-DeploymentScope.
+            REQUEST='{"ChangedPaths":[],"ComparisonAvailable":false}'
+          else
+            if ! CHANGED_JSON=$(git diff --name-only "$EVENT_BEFORE" "$GITHUB_SHA" | jq -R -s -c 'split("\n") | map(select(length > 0))'); then
+              COMPARISON_AVAILABLE=false
+              REQUEST='{"ChangedPaths":[],"ComparisonAvailable":false}'
+            else
+              REQUEST=$(printf '{"ChangedPaths":%s,"ComparisonAvailable":true}' "$CHANGED_JSON")
+            fi
+          fi
+
+          RESULT=$(printf '%s\n' "$REQUEST" | pwsh -NoProfile -ExecutionPolicy Bypass -File ops/Get-DeploymentScope.ps1)
+          echo "deployable=$(jq -r '.deployable' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          echo "reason=$(jq -r '.reason' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          if [[ "$COMPARISON_AVAILABLE" == true ]]; then
+            echo "range=$EVENT_BEFORE...$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=unavailable...$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          fi
+
+  deployment_not_required:
+    name: Deployment not required
+    needs: classify_changes
+    if: needs.classify_changes.outputs.deployable == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish deployment decision
+        env:
+          RANGE: ${{ needs.classify_changes.outputs.range }}
+          REASON: ${{ needs.classify_changes.outputs.reason }}
+        run: |
+          {
+            echo "## CloudOrders deployment"
+            echo
+            printf -- '- Range: `%s`\n' "$RANGE"
+            printf -- '- Reason: `%s`\n' "$REASON"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   preview_foundation:
     name: Preview ${{ github.ref_name }} foundation
-    needs: validate_promotion_ref
-    if: needs.validate_promotion_ref.outputs.migration_only != 'true'
+    needs: [validate_promotion_ref, classify_changes]
+    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ needs.validate_promotion_ref.outputs.environment }}
@@ -273,8 +354,8 @@ jobs:
 
   prepare_release:
     name: Prepare and preview ${{ github.ref_name }} release
-    needs: [preview_foundation, validate_promotion_ref]
-    if: needs.validate_promotion_ref.outputs.migration_only != 'true' && needs.preview_foundation.outputs.enabled == 'true'
+    needs: [preview_foundation, validate_promotion_ref, classify_changes]
+    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true' && needs.preview_foundation.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -473,8 +554,8 @@ jobs:
 
   preview_sql:
     name: Preview ${{ github.ref_name }} Azure SQL
-    needs: [prepare_release, validate_promotion_ref]
-    if: needs.validate_promotion_ref.outputs.migration_only != 'true'
+    needs: [prepare_release, validate_promotion_ref, classify_changes]
+    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -517,8 +598,8 @@ jobs:
 
   bootstrap_sql:
     name: Provision ${{ github.ref_name }} Azure SQL
-    needs: [preview_sql, prepare_release, validate_promotion_ref]
-    if: needs.validate_promotion_ref.outputs.migration_only != 'true'
+    needs: [preview_sql, prepare_release, validate_promotion_ref, classify_changes]
+    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -573,8 +654,8 @@ jobs:
 
   run_migration:
     name: Run ${{ github.ref_name }} SQL migration
-    needs: [bootstrap_sql, validate_promotion_ref]
-    if: needs.validate_promotion_ref.outputs.migration_only != 'true'
+    needs: [bootstrap_sql, validate_promotion_ref, classify_changes]
+    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -615,8 +696,8 @@ jobs:
 
   run_sprint_4a_e1_migration_only:
     name: Run Sprint 4A E1 migration only
-    needs: validate_promotion_ref
-    if: needs.validate_promotion_ref.outputs.migration_only == 'true'
+    needs: [validate_promotion_ref, classify_changes]
+    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only == 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ needs.validate_promotion_ref.outputs.environment }}
@@ -750,8 +831,8 @@ jobs:
 
   deploy_release:
     name: Deploy ${{ github.ref_name }} after preview
-    needs: [prepare_release, run_migration, validate_promotion_ref]
-    if: needs.validate_promotion_ref.outputs.migration_only != 'true'
+    needs: [prepare_release, run_migration, validate_promotion_ref, classify_changes]
+    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
