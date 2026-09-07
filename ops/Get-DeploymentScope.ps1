@@ -26,7 +26,7 @@ function Get-DeploymentScope {
 
     $deliveryOnlyPath = {
         param([string] $Path)
-        $Path -match '^docs/' -or $Path -match '^delivery/' -or $Path -eq 'AGENTS.md' -or $Path -match '^\.agents/skills/' -or
+        $Path -match '^docs/' -or $Path -match '^delivery/' -or $Path -eq 'AGENTS.md' -or $Path -match '^\.agents/skills/' -or $Path -match '^\.superpowers/sdd/' -or
         $Path -match '^\.github/workflows/' -and $Path -ne '.github/workflows/deploy.yml' -or
         $Path -match '^ops/tests/' -or
         $Path -match '^ops/[^/]+\.Tests\.ps1$' -or

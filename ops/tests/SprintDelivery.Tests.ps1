@@ -1015,6 +1015,7 @@ Describe 'Deployment path scope' -Tag 'deployment-scope' {
         (Get-DeploymentScope -ChangedPaths @('ops/tests/SprintDelivery.Tests.ps1') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
         (Get-DeploymentScope -ChangedPaths @('ops/Bootstrap-CloudOrdersSql.Tests.ps1') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
         (Get-DeploymentScope -ChangedPaths @('ops/Test-SprintDelivery.ps1') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
+        (Get-DeploymentScope -ChangedPaths @('.superpowers/sdd/progress.md') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
     }
 
     It 'classifies source changes as deployable' {
