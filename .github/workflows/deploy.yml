@@ -712,12 +712,8 @@ jobs:
           echo "before_revision=$BEFORE_REVISION" >> "$GITHUB_OUTPUT"
           echo "before_digest=$BEFORE_DIGEST" >> "$GITHUB_OUTPUT"
           TRAFFIC=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.traffic --output json)
-          mapfile -t LIVE_REVISIONS < <(printf '%s' "$TRAFFIC" | jq --raw-output --arg before "$BEFORE_REVISION" '.[] | select((.weight // 0) != 0) | if .revisionName then .revisionName elif .latestRevision then $before else empty end')
-          (( ${#LIVE_REVISIONS[@]} > 0 )) || { echo 'No live ingress revisions were found; refusing migration.' >&2; exit 1; }
-          REVISION_WEIGHTS=()
-          for revision in "${LIVE_REVISIONS[@]}"; do
-            REVISION_WEIGHTS+=("${revision}=0")
-          done
+          mapfile -t REVISION_WEIGHTS < <(printf '%s' "$TRAFFIC" | jq --raw-output '.[] | select((.weight // 0) != 0) | if .latestRevision then "latest=0" elif .revisionName then "\(.revisionName)=0" else empty end')
+          (( ${#REVISION_WEIGHTS[@]} > 0 )) || { echo 'No resolvable live ingress traffic rules were found; refusing migration.' >&2; exit 1; }
           az containerapp ingress traffic set --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision-weight "${REVISION_WEIGHTS[@]}"
           TRAFFIC=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.traffic --output json)
           printf '%s' "$TRAFFIC" | jq -e 'all(.[]; (.weight // 0) == 0)' > /dev/null || { echo 'Ingress quiescence was not confirmed; refusing migration.' >&2; exit 1; }
