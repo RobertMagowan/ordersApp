@@ -705,6 +705,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$DEPLOYMENT_ENVIRONMENT" == development || "$DEPLOYMENT_ENVIRONMENT" == test ]] || { echo 'R2 refuses production.' >&2; exit 1; }
+          az containerapp revision set-mode --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --mode multiple
           BEFORE_REVISION=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.latestRevisionName --output tsv)
           BEFORE_DIGEST=$(az containerapp revision show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision "$BEFORE_REVISION" --query properties.template.containers[0].image --output tsv)
           [[ -n "$BEFORE_REVISION" && -n "$BEFORE_DIGEST" ]] || { echo 'Cannot capture current D1 revision and digest.' >&2; exit 1; }

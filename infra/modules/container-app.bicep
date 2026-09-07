@@ -107,7 +107,7 @@ var containers = [
 module containerApp 'br/avm:res/app/container-app:0.11.0' = {
   name: 'cloudOrdersContainerApp'
   params: {
-    activeRevisionsMode: 'Single'
+    activeRevisionsMode: 'Multiple'
     containers: containers
     environmentResourceId: environmentResourceId
     ingressAllowInsecure: false
