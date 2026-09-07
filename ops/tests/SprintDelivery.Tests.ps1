@@ -1002,3 +1002,30 @@ Describe 'Sprint delivery migration cutover' -Tag 'migration' {
         $result.action.workItemId | Should Be $null
     }
 }
+
+Describe 'Deployment path scope' -Tag 'deployment-scope' {
+    BeforeAll {
+        $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        . (Join-Path $repositoryRoot 'ops/Get-DeploymentScope.ps1')
+    }
+
+    It 'classifies delivery-only changes as non-deployable' {
+        (Get-DeploymentScope -ChangedPaths @('docs/evidence/release.md','delivery/state.json','AGENTS.md') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
+    }
+
+    It 'classifies source changes as deployable' {
+        (Get-DeploymentScope -ChangedPaths @('src/CloudOrders.Api/Program.cs') -ComparisonAvailable $true).reason | Should Be 'deployable_path'
+    }
+
+    It 'fails closed for infrastructure, release, workflow, and mixed changes' {
+        (Get-DeploymentScope -ChangedPaths @('infra/main.bicep') -ComparisonAvailable $true).deployable | Should Be $true
+        (Get-DeploymentScope -ChangedPaths @('ops/releases/sprint-4a-e1-migration-only.json') -ComparisonAvailable $true).deployable | Should Be $true
+        (Get-DeploymentScope -ChangedPaths @('.github/workflows/deploy.yml') -ComparisonAvailable $true).deployable | Should Be $true
+        (Get-DeploymentScope -ChangedPaths @('docs/a.md','tests/CloudOrders.UnitTests/OrdersTests.cs') -ComparisonAvailable $true).deployable | Should Be $true
+    }
+
+    It 'fails closed when comparison is unavailable or a path is unknown' {
+        (Get-DeploymentScope -ChangedPaths @('docs/a.md') -ComparisonAvailable $false).reason | Should Be 'comparison_unavailable'
+        (Get-DeploymentScope -ChangedPaths @('unknown-root-file') -ComparisonAvailable $true).reason | Should Be 'unknown_path'
+    }
+}
