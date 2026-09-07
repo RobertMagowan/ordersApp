@@ -664,14 +664,60 @@ jobs:
       id-token: write
     env:
       AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
+      AZURE_SQL_SERVER_NAME: ${{ vars.AZURE_SQL_SERVER_NAME }}
+      AZURE_SQL_DATABASE_NAME: ${{ vars.AZURE_SQL_DATABASE_NAME }}
       DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
     steps:
+      - name: Check out release controls
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Sign in to Azure with OIDC
         uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Validate Sprint 4B R2 release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path('ops/releases/sprint-4b-r2.json').read_text(encoding='utf-8'))
+          required = {
+              'release': 'sprint-4b-r2',
+              'migration': 'EnforceCustomerProfileOwnership',
+              'rollback': 'Sprint 4A D1',
+              'deployApi': True,
+              'environments': ['development', 'test'],
+              'precondition': 'ownership-read-only-transaction',
+              'trafficPolicy': 'quiesce-until-health',
+          }
+          if manifest != required:
+              raise SystemExit('Sprint 4B R2 manifest is invalid or has unexpected fields.')
+          if '${{ github.ref_name }}' not in manifest['environments']:
+              raise SystemExit('Sprint 4B R2 is restricted to development and test.')
+          PY
+      - name: Capture D1 revision and digest, then quiesce ingress fail-closed
+        id: quiesce
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOYMENT_ENVIRONMENT" == development || "$DEPLOYMENT_ENVIRONMENT" == test ]] || { echo 'R2 refuses production.' >&2; exit 1; }
+          BEFORE_REVISION=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.latestRevisionName --output tsv)
+          BEFORE_DIGEST=$(az containerapp revision show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision "$BEFORE_REVISION" --query properties.template.containers[0].image --output tsv)
+          [[ -n "$BEFORE_REVISION" && -n "$BEFORE_DIGEST" ]] || { echo 'Cannot capture current D1 revision and digest.' >&2; exit 1; }
+          echo "before_revision=$BEFORE_REVISION" >> "$GITHUB_OUTPUT"
+          echo "before_digest=$BEFORE_DIGEST" >> "$GITHUB_OUTPUT"
+          az containerapp ingress traffic set --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --traffic-weight "${BEFORE_REVISION}=0"
+          TRAFFIC=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.traffic --output json)
+          [[ "$TRAFFIC" != *"\"weight\": 100"* ]] || { echo 'Ingress quiescence was not confirmed; refusing migration.' >&2; exit 1; }
+      - name: Run read-only ownership precondition before migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ops/Bootstrap-CloudOrdersSql.ps1 -EnvironmentName "$DEPLOYMENT_ENVIRONMENT" -ResourceGroupName "$AZURE_RESOURCE_GROUP" -ServerName "$AZURE_SQL_SERVER_NAME" -DatabaseName "$AZURE_SQL_DATABASE_NAME" -ApiIdentityName "cloudorders-$DEPLOYMENT_ENVIRONMENT-api" -MigrationIdentityName "cloudorders-$DEPLOYMENT_ENVIRONMENT-migrator"
       - name: Start nonproduction migration Job
         run: |
           if [[ "$DEPLOYMENT_ENVIRONMENT" == production ]]; then
@@ -685,14 +731,20 @@ jobs:
           esac
           EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query name --output tsv)
           [[ -n "$EXECUTION" ]] || { echo "Migration Job did not return an execution name." >&2; exit 1; }
+          EXECUTION_ARGS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].args' --output json)
+          python3 - "$EXECUTION_ARGS" <<'PY'
+          import json, sys
+          if json.loads(sys.argv[1]) != ['--migration', 'EnforceCustomerProfileOwnership']:
+              raise SystemExit('Migration execution did not run the exact manifest migration.')
+          PY
           for _ in {1..30}; do
             STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query properties.status --output tsv)
-            [[ "$STATUS" == Succeeded ]] && exit 0
+            [[ "$STATUS" == Succeeded ]] && break
             [[ "$STATUS" == Failed ]] && { echo "Migration Job execution $EXECUTION failed." >&2; exit 1; }
             sleep 10
           done
-          echo "Migration Job did not complete within five minutes." >&2
-          exit 1
+          [[ "$STATUS" == Succeeded ]] || { echo "Migration Job did not complete within five minutes." >&2; exit 1; }
+          echo "Sprint 4B R2 migration execution $EXECUTION completed successfully."
 
   run_sprint_4a_e1_migration_only:
     name: Run Sprint 4A E1 migration only
@@ -999,6 +1051,7 @@ jobs:
           for attempt in {1..30}; do
             STATUS=$(curl --fail --silent --show-error --output /dev/null --write-out '%{http_code}' "$ENDPOINT/health/live" || true)
             if [[ "$STATUS" == "200" ]]; then
+              az containerapp ingress traffic set --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision-weight "$CANDIDATE_REVISION=100"
               echo "Candidate revision $CANDIDATE_REVISION ($CANDIDATE_IMAGE) passed ingress smoke on attempt $attempt."
               echo "url=$ENDPOINT" >> "$GITHUB_OUTPUT"
               echo "revision=$CANDIDATE_REVISION" >> "$GITHUB_OUTPUT"
