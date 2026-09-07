@@ -1015,6 +1015,7 @@ Describe 'Deployment path scope' -Tag 'deployment-scope' {
 
     It 'classifies source changes as deployable' {
         (Get-DeploymentScope -ChangedPaths @('src/CloudOrders.Api/Program.cs') -ComparisonAvailable $true).reason | Should Be 'deployable_path'
+        (Get-DeploymentScope -ChangedPaths @('.dockerignore') -ComparisonAvailable $true).reason | Should Be 'deployable_path'
     }
 
     It 'fails closed for infrastructure, release, workflow, and mixed changes' {

@@ -20,7 +20,7 @@ function Get-DeploymentScope {
     $deployablePath = {
         param([string] $Path)
         $Path -match '^(src|tests|infra|local|ops/releases)/' -or
-        $Path -in @('ops/Get-DeploymentScope.ps1', '.github/workflows/deploy.yml', 'global.json', 'NuGet.config', 'Directory.Build.props', 'Directory.Build.targets') -or
+        $Path -in @('ops/Get-DeploymentScope.ps1', '.dockerignore', '.github/workflows/deploy.yml', 'global.json', 'NuGet.config', 'Directory.Build.props', 'Directory.Build.targets') -or
         $Path -match '(^|/)(Dockerfile(?:\..*)?|docker-compose(?:\..*)?|[^/]+\.(?:sln|slnx|csproj|fsproj|vbproj|props|targets|proj))$'
     }
 
