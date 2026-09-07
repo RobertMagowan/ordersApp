@@ -22,7 +22,8 @@ public sealed class SqlIdempotentOrderStore(
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
         var now = timeProvider.GetUtcNow();
-        var existing = await FindExistingAsync(context, request, cancellationToken);
+        var actorCustomerProfileId = GetRequiredActorCustomerProfileId(request);
+        var existing = await FindExistingAsync(context, request, actorCustomerProfileId, cancellationToken);
         if (existing is not null && existing.ExpiresAt > now)
         {
             return Classify(existing, request.RequestHash);
@@ -32,7 +33,7 @@ public sealed class SqlIdempotentOrderStore(
         if (existing is not null)
         {
             await context.IdempotencyRecords
-                .Where(record => record.SubjectId == request.SubjectId
+                .Where(record => record.ActorCustomerProfileId == actorCustomerProfileId
                     && record.IdempotencyKey == request.IdempotencyKey
                     && record.ExpiresAt <= now)
                 .ExecuteDeleteAsync(cancellationToken);
@@ -50,7 +51,7 @@ public sealed class SqlIdempotentOrderStore(
         catch (DbUpdateException exception) when (IsIdempotencyPrimaryKeyViolation(exception))
         {
             await transaction.RollbackAsync(cancellationToken);
-            var racedRecord = await FindExistingInNewQueryAsync(request, cancellationToken);
+            var racedRecord = await FindExistingInNewQueryAsync(request, actorCustomerProfileId, cancellationToken);
             if (racedRecord is null)
             {
                 throw;
@@ -62,21 +63,28 @@ public sealed class SqlIdempotentOrderStore(
 
     private async Task<IdempotencyRecordEntity?> FindExistingInNewQueryAsync(
         IdempotentOrderRequest request,
+        Guid actorCustomerProfileId,
         CancellationToken cancellationToken)
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        return await FindExistingAsync(context, request, cancellationToken);
+        return await FindExistingAsync(context, request, actorCustomerProfileId, cancellationToken);
     }
 
     private static Task<IdempotencyRecordEntity?> FindExistingAsync(
         CloudOrdersDbContext context,
         IdempotentOrderRequest request,
+        Guid actorCustomerProfileId,
         CancellationToken cancellationToken) =>
         context.IdempotencyRecords
             .AsNoTracking()
             .SingleOrDefaultAsync(
-                record => record.SubjectId == request.SubjectId && record.IdempotencyKey == request.IdempotencyKey,
+                record => record.ActorCustomerProfileId == actorCustomerProfileId
+                    && record.IdempotencyKey == request.IdempotencyKey,
                 cancellationToken);
+
+    private static Guid GetRequiredActorCustomerProfileId(IdempotentOrderRequest request) =>
+        request.ActorCustomerProfileId
+            ?? throw new InvalidOperationException("Actor ownership is required for SQL persistence.");
 
     private static CreateOrderResult Classify(
         IdempotencyRecordEntity existing,
@@ -111,8 +119,9 @@ public sealed class SqlIdempotentOrderStore(
         new()
         {
             SubjectId = request.SubjectId,
-            ActorCustomerProfileId = request.ActorCustomerProfileId,
-            TargetCustomerProfileId = request.TargetCustomerProfileId,
+            ActorCustomerProfileId = GetRequiredActorCustomerProfileId(request),
+            TargetCustomerProfileId = request.TargetCustomerProfileId
+                ?? throw new InvalidOperationException("Target ownership is required for SQL persistence."),
             IdempotencyKey = request.IdempotencyKey,
             RequestHash = request.RequestHash,
             OrderId = request.Order.Id,

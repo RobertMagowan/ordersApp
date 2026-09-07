@@ -19,10 +19,10 @@ public sealed class SqlOrderRepository(IDbContextFactory<CloudOrdersDbContext> c
         var entity = await context.Orders
             .AsNoTracking()
             .SingleOrDefaultAsync(order => order.Id == orderId, cancellationToken);
-        return entity is null || entity.CustomerProfileId is not { } ownerId
+        return entity is null || entity.CustomerProfileId == Guid.Empty
             ? null
             : new OwnedOrder(
                 OrderPersistenceMapper.ToDomain(entity),
-                new OrderOwner(ownerId, entity.CustomerReference));
+                new OrderOwner(entity.CustomerProfileId, entity.CustomerReference));
     }
 }

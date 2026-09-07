@@ -25,6 +25,44 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
         Assert.Contains(
             "20260829075044_AddCustomerProfileOwnershipExpand",
             await context.Database.GetAppliedMigrationsAsync(CancellationToken.None));
+        Assert.Contains(
+            await context.Database.GetAppliedMigrationsAsync(CancellationToken.None),
+            migration => migration.EndsWith("_EnforceCustomerProfileOwnership", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task E2MakesOwnershipRequiredAndUsesActorKeyIdentityWhileRetainingSubjectId()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        var result = await RunRunnerAsync(database.ConnectionString);
+
+        Assert.Equal(0, result.ExitCode);
+        await using var context = new CloudOrdersDbContext(
+            new DbContextOptionsBuilder<CloudOrdersDbContext>().UseSqlServer(database.ConnectionString).Options);
+
+        var nullability = await context.Database.SqlQuery<ColumnShape>($"""
+            SELECT TABLE_NAME AS TableName, COLUMN_NAME AS ColumnName, IS_NULLABLE AS IsNullable
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = 'dbo'
+              AND ((TABLE_NAME = 'Orders' AND COLUMN_NAME = 'CustomerProfileId')
+                OR (TABLE_NAME = 'IdempotencyRecords' AND COLUMN_NAME IN ('ActorCustomerProfileId', 'TargetCustomerProfileId', 'SubjectId')))
+            """).ToListAsync();
+
+        Assert.Equal("NO", nullability.Single(x => x.TableName == "Orders").IsNullable);
+        Assert.Equal("NO", nullability.Single(x => x.ColumnName == "ActorCustomerProfileId").IsNullable);
+        Assert.Equal("NO", nullability.Single(x => x.ColumnName == "TargetCustomerProfileId").IsNullable);
+        Assert.Equal("YES", nullability.Single(x => x.ColumnName == "SubjectId").IsNullable);
+
+        var keyColumns = await context.Database.SqlQuery<KeyColumn>($"""
+            SELECT c.name AS ColumnName
+            FROM sys.indexes i
+            JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+            JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+            WHERE i.object_id = OBJECT_ID(N'dbo.IdempotencyRecords') AND i.is_primary_key = 1
+            ORDER BY ic.key_ordinal
+            """).ToListAsync();
+
+        Assert.Equal(["ActorCustomerProfileId", "IdempotencyKey"], keyColumns.Select(x => x.ColumnName));
     }
 
     [Fact]
@@ -124,4 +162,8 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
     }
 
     private sealed record MigrationRunResult(int ExitCode, string StandardOutput, string StandardError);
+
+    private sealed record ColumnShape(string TableName, string ColumnName, string IsNullable);
+
+    private sealed record KeyColumn(string ColumnName);
 }
