@@ -86,6 +86,21 @@ public sealed class ContractPackTests
         Assert.DoesNotContain("DropColumn(\n                name: \"SubjectId\"", sql, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void E2IdempotencyPersistenceUsesActorOwnershipForLookupAndExpiry()
+    {
+        var storePath = Path.Combine(
+            FindRepositoryRoot(),
+            "src",
+            "CloudOrders.Infrastructure",
+            "Persistence",
+            "SqlIdempotentOrderStore.cs");
+        var store = File.ReadAllText(storePath);
+
+        Assert.Contains("record.ActorCustomerProfileId == actorCustomerProfileId", store, StringComparison.Ordinal);
+        Assert.DoesNotContain("record.SubjectId == request.SubjectId && record.IdempotencyKey", store, StringComparison.Ordinal);
+    }
+
     private static void AssertContractDocument(string contractsDirectory, string fileName, string requiredText)
     {
         var path = Path.Combine(contractsDirectory, fileName);

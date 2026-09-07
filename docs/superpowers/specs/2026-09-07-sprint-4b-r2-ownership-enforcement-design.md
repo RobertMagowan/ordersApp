@@ -18,7 +18,9 @@ Before each environment migration, temporarily quiesce order traffic and run one
 
 ## Release and rollback
 
-R2 records the D1 image/revision before migration, polls the exact migration execution, deploys the D1-compatible rebuild, and proves health, create, replay, direct SQL constraints, and foreign-resource denial. The only rollback is the retained authenticated D1 image or fail-closed order ingress; Sprint 3 is never eligible. H1 cannot begin until R2 passes targeted QA in test.
+R2 records the D1 image/revision before migration, polls the exact migration execution, deploys the D1-compatible rebuild, and proves health, create, replay, direct SQL constraints, and foreign-resource denial. The only rollback is the retained authenticated D1 image or fail-closed order ingress; Sprint 3 is never eligible. The EF `Down` method is model-shape metadata, not an operational rollback: it restores E1's non-null subject primary key and therefore must never be executed in an environment containing nullable R2 subjects. H1 cannot begin until R2 passes targeted QA in test.
+
+The release manifest is deliberately one-shot. It remains present while the exact R2 commit is promoted from development to test, then a follow-up cleanup PR removes it only after test acceptance so routine deployments do not repeat the ingress-quiescing migration path.
 
 ## Verification
 
