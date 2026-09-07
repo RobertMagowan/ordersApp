@@ -1013,6 +1013,8 @@ Describe 'Deployment path scope' -Tag 'deployment-scope' {
         (Get-DeploymentScope -ChangedPaths @('docs/evidence/release.md','delivery/state.json','AGENTS.md') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
         (Get-DeploymentScope -ChangedPaths @('.github/workflows/ci.yml') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
         (Get-DeploymentScope -ChangedPaths @('ops/tests/SprintDelivery.Tests.ps1') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
+        (Get-DeploymentScope -ChangedPaths @('ops/Bootstrap-CloudOrdersSql.Tests.ps1') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
+        (Get-DeploymentScope -ChangedPaths @('ops/Test-SprintDelivery.ps1') -ComparisonAvailable $true).reason | Should Be 'delivery_only'
     }
 
     It 'classifies source changes as deployable' {
@@ -1030,6 +1032,8 @@ Describe 'Deployment path scope' -Tag 'deployment-scope' {
     It 'fails closed when comparison is unavailable or a path is unknown' {
         (Get-DeploymentScope -ChangedPaths @('docs/a.md') -ComparisonAvailable $false).reason | Should Be 'comparison_unavailable'
         (Get-DeploymentScope -ChangedPaths @('unknown-root-file') -ComparisonAvailable $true).reason | Should Be 'unknown_path'
+        (Get-DeploymentScope -ChangedPaths @('ops/unknown-maintenance.ps1') -ComparisonAvailable $true).reason | Should Be 'unknown_path'
+        (Get-DeploymentScope -ChangedPaths @('ops/unknown-maintenance.ps1') -ComparisonAvailable $true).deployable | Should Be $true
     }
 }
 
