@@ -141,7 +141,8 @@ public sealed class RepositoryPolicyTests
         Assert.Contains("CURRENT_STATE", workflow, StringComparison.Ordinal);
         Assert.Contains("MERGED", workflow, StringComparison.Ordinal);
         Assert.Contains("CURRENT_MERGE_COMMIT", workflow, StringComparison.Ordinal);
-        Assert.Contains("gh workflow run deploy.yml --ref \"$CURRENT_BASE_REF\" -f release_sha=\"$CURRENT_MERGE_COMMIT\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("GITHUB_REPOSITORY: ${{ github.repository }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("gh workflow run deploy.yml --repo \"$GITHUB_REPOSITORY\" --ref \"$CURRENT_BASE_REF\" -f release_sha=\"$CURRENT_MERGE_COMMIT\"", workflow, StringComparison.Ordinal);
         Assert.Contains("gh pr view \"$PR_URL\" --json baseRefName,headRefName,isDraft,headRepository,headRefOid", workflow, StringComparison.Ordinal);
         Assert.Contains("CURRENT_BASE_REF", workflow, StringComparison.Ordinal);
         Assert.Contains("CURRENT_HEAD_REF", workflow, StringComparison.Ordinal);
