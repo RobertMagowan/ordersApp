@@ -5,9 +5,9 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[a-z0-9-]{1,63}$')][string]$ServerName,
     [Parameter(Mandatory)][ValidatePattern('^[A-Za-z][A-Za-z0-9_]{0,127}$')][string]$DatabaseName,
     [Parameter(Mandatory)][ValidatePattern('^[a-z0-9-]{1,127}$')][string]$ApiIdentityName,
-    [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F-]{36}$')][Guid]$ApiObjectId,
+    [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F-]{36}$')][Guid]$ApiApplicationId,
     [Parameter(Mandatory)][ValidatePattern('^[a-z0-9-]{1,127}$')][string]$MigrationIdentityName,
-    [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F-]{36}$')][Guid]$MigrationObjectId
+    [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F-]{36}$')][Guid]$MigrationApplicationId
 )
 
 Set-StrictMode -Version Latest
@@ -17,10 +17,10 @@ function Quote-SqlIdentifier([string]$Name) { "[$($Name.Replace(']', ']]'))]" }
 
 $apiIdentity = Quote-SqlIdentifier $ApiIdentityName
 $migrationIdentity = Quote-SqlIdentifier $MigrationIdentityName
-$apiId = $ApiObjectId.ToString().ToUpperInvariant()
-$migrationId = $MigrationObjectId.ToString().ToUpperInvariant()
-$apiSidHex = [BitConverter]::ToString($ApiObjectId.ToByteArray()).Replace('-', '')
-$migrationSidHex = [BitConverter]::ToString($MigrationObjectId.ToByteArray()).Replace('-', '')
+$apiId = $ApiApplicationId.ToString().ToUpperInvariant()
+$migrationId = $MigrationApplicationId.ToString().ToUpperInvariant()
+$apiSidHex = [BitConverter]::ToString($ApiApplicationId.ToByteArray()).Replace('-', '')
+$migrationSidHex = [BitConverter]::ToString($MigrationApplicationId.ToByteArray()).Replace('-', '')
 $sql = @"
 SET XACT_ABORT ON;
 BEGIN TRANSACTION;
