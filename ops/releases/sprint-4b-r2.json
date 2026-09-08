@@ -5,5 +5,5 @@
   "deployApi": true,
   "environments": ["development", "test"],
   "precondition": "ownership-read-only-transaction",
-  "trafficPolicy": "quiesce-until-health"
+  "trafficPolicy": "controlled-nonproduction-access"
 }

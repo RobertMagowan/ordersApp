@@ -704,31 +704,13 @@ jobs:
               'deployApi': True,
               'environments': ['development', 'test'],
               'precondition': 'ownership-read-only-transaction',
-              'trafficPolicy': 'quiesce-until-health',
+              'trafficPolicy': 'controlled-nonproduction-access',
           }
           if manifest != required:
               raise SystemExit('Sprint 4B R2 manifest is invalid or has unexpected fields.')
           if '${{ github.ref_name }}' not in manifest['environments']:
               raise SystemExit('Sprint 4B R2 is restricted to development and test.')
           PY
-      - name: Capture D1 revision and digest, then quiesce ingress fail-closed
-        id: quiesce
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$DEPLOYMENT_ENVIRONMENT" == development || "$DEPLOYMENT_ENVIRONMENT" == test ]] || { echo 'R2 refuses production.' >&2; exit 1; }
-          az containerapp revision set-mode --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --mode multiple
-          BEFORE_REVISION=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.latestRevisionName --output tsv)
-          BEFORE_DIGEST=$(az containerapp revision show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision "$BEFORE_REVISION" --query properties.template.containers[0].image --output tsv)
-          [[ -n "$BEFORE_REVISION" && -n "$BEFORE_DIGEST" ]] || { echo 'Cannot capture current D1 revision and digest.' >&2; exit 1; }
-          echo "before_revision=$BEFORE_REVISION" >> "$GITHUB_OUTPUT"
-          echo "before_digest=$BEFORE_DIGEST" >> "$GITHUB_OUTPUT"
-          TRAFFIC=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.traffic --output json)
-          mapfile -t REVISION_WEIGHTS < <(printf '%s' "$TRAFFIC" | jq --raw-output '.[] | select((.weight // 0) != 0) | if .latestRevision then "latest=0" elif .revisionName then "\(.revisionName)=0" else empty end')
-          (( ${#REVISION_WEIGHTS[@]} > 0 )) || { echo 'No resolvable live ingress traffic rules were found; refusing migration.' >&2; exit 1; }
-          az containerapp ingress traffic set --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision-weight "${REVISION_WEIGHTS[@]}"
-          TRAFFIC=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.traffic --output json)
-          printf '%s' "$TRAFFIC" | jq -e 'all(.[]; (.weight // 0) == 0)' > /dev/null || { echo 'Ingress quiescence was not confirmed; refusing migration.' >&2; exit 1; }
       - name: Run read-only ownership precondition before migration
         shell: bash
         run: |
