@@ -45,6 +45,13 @@ Describe 'Bootstrap-CloudOrdersSql' {
         $sql | Should Not Match '(?is)(UPDATE|INSERT|DELETE)\s+(Orders|IdempotencyRecords)'
     }
 
+    It 'emits SQL-compatible comments in the ownership precondition' {
+        $output = & $scriptPath -EnvironmentName development -ResourceGroupName ordersapp-development -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-dev-api -MigrationIdentityName cloudorders-dev-migrator -WhatIf
+        $sql = $output -join "`n"
+
+        $sql | Should Not Match '(?m)^\s*#'
+    }
+
     It 'fails closed when the ownership precondition reports unsafe rows' {
         $script = Get-Content $scriptPath -Raw
         $script | Should Match 'Precondition'

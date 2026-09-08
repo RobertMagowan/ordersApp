@@ -45,7 +45,7 @@ function Quote-SqlIdentifier {
 $apiIdentity = Quote-SqlIdentifier $ApiIdentityName
 $migrationIdentity = Quote-SqlIdentifier $MigrationIdentityName
 $ownershipPreconditionSql = @'
-# Any non-zero count blocks migration. This transaction never repairs, backfills, or deletes data.
+-- Any non-zero count blocks migration. This transaction never repairs, backfills, or deletes data.
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 BEGIN TRANSACTION;
