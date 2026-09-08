@@ -36,7 +36,7 @@ test; the existing deployment workflow remains the sole Azure mutator.
 - Produces: a GitHub auto-merge request using merge commits for only an
   eligible nonproduction pull request.
 
-- [ ] **Step 1: Write the failing architecture test**
+- [x] **Step 1: Write the failing architecture test**
 
 Add a fact that requires a workflow with pull_request triggers, only
 contents: write and pull-requests: write permissions, same-repository
@@ -44,7 +44,7 @@ validation, feature/* to development, development to test, and a merge-mode
 auto-merge command. Assert that the workflow contains no master or production
 target and no review approval, dismissal, or conversation-resolution command.
 
-- [ ] **Step 2: Run the focused test and verify it fails**
+- [x] **Step 2: Run the focused test and verify it fails**
 
 Run:
 
@@ -54,7 +54,7 @@ dotnet test tests/CloudOrders.ArchitectureTests/CloudOrders.ArchitectureTests.cs
 
 Expected: failure because the auto-merge workflow does not yet exist.
 
-- [ ] **Step 3: Create the minimal workflow**
+- [x] **Step 3: Create the minimal workflow**
 
 Create a pull_request workflow with:
 
@@ -74,11 +74,11 @@ gh pr merge "$PR_URL" --auto --merge
 Do not use pull_request_target, checkout pull-request code, a PAT, or
 production/base-master conditions.
 
-- [ ] **Step 4: Run the focused test and verify it passes**
+- [x] **Step 4: Run the focused test and verify it passes**
 
 Run the Step 2 command. Expected: one passing auto-merge architecture test.
 
-- [ ] **Step 5: Commit the task**
+- [x] **Step 5: Commit the task**
 
 ~~~powershell
 git add .github/workflows/auto-merge-nonproduction.yml tests/CloudOrders.ArchitectureTests/RepositoryPolicyTests.cs
@@ -98,7 +98,7 @@ git commit -m "ci: automate nonproduction pull request merges"
 development/test deploy after merge, and test-to-master and production remain
 excluded from auto-merge.
 
-- [ ] **Step 1: Write the failing documentation-policy test**
+- [x] **Step 1: Write the failing documentation-policy test**
 
 Add assertions requiring the repository guide and sprint runbook to say that
 development/test merge and deploy automatically after required checks and
@@ -106,7 +106,7 @@ resolved conversations, that review feedback is assessed and addressed before
 resolution, and that test-to-master and production remain excluded from
 auto-merge.
 
-- [ ] **Step 2: Run the focused test and verify it fails**
+- [x] **Step 2: Run the focused test and verify it fails**
 
 Run:
 
@@ -116,18 +116,18 @@ dotnet test tests/CloudOrders.ArchitectureTests/CloudOrders.ArchitectureTests.cs
 
 Expected: failure because the documented policy is not yet present.
 
-- [ ] **Step 3: Add the minimal documentation**
+- [x] **Step 3: Add the minimal documentation**
 
 Update the guide and runbook with the automatic nonproduction merge/deploy
 rule. State that unresolved review conversations prevent auto-merge and that
 deployment failure requires diagnosis, a new feature branch, validation, and
 normal promotion rather than a blind retry.
 
-- [ ] **Step 4: Run the focused test and verify it passes**
+- [x] **Step 4: Run the focused test and verify it passes**
 
 Run the Step 2 command. Expected: passing documentation-policy test.
 
-- [ ] **Step 5: Commit the task**
+- [x] **Step 5: Commit the task**
 
 ~~~powershell
 git add AGENTS.md docs/operations/sprint-delivery-workflow.md tests/CloudOrders.ArchitectureTests/RepositoryPolicyTests.cs
@@ -144,7 +144,7 @@ git commit -m "docs: clarify nonproduction automation"
 - Produces: repository auto-merge enabled; development/test environments have
   no required-reviewer rule; production configuration is unchanged.
 
-- [ ] **Step 1: Capture the existing settings**
+- [x] **Step 1: Capture the existing settings**
 
 Run:
 
@@ -156,7 +156,7 @@ gh api repos/RobertMagowan/ordersApp/environments
 Expected: merge commits are allowed; development/test contain a
 required_reviewers rule; production is recorded for comparison.
 
-- [ ] **Step 2: Enable repository auto-merge**
+- [x] **Step 2: Enable repository auto-merge**
 
 Run:
 
@@ -164,13 +164,13 @@ Run:
 gh api --method PATCH repos/RobertMagowan/ordersApp --raw-field allow_auto_merge=true
 ~~~
 
-- [ ] **Step 3: Remove only nonproduction reviewer gates**
+- [x] **Step 3: Remove only nonproduction reviewer gates**
 
 Delete the required-reviewer protection rule for development and test using
 the rule identifiers captured in Step 1. Do not alter branch-policy rules or
 the production environment.
 
-- [ ] **Step 4: Verify the settings**
+- [x] **Step 4: Verify the settings**
 
 Run:
 
@@ -190,7 +190,7 @@ production response is unchanged.
 **Files:**
 - Verify all files from Tasks 1 and 2.
 
-- [ ] **Step 1: Run repository validation**
+- [x] **Step 1: Run repository validation**
 
 ~~~powershell
 dotnet format CloudOrders.slnx --verify-no-changes
@@ -203,7 +203,7 @@ git diff --check
 
 Expected: format, build, tests, Bicep validation, and whitespace checks pass.
 
-- [ ] **Step 2: Push and create the feature pull request**
+- [x] **Step 2: Push and create the feature pull request**
 
 ~~~powershell
 git push -u origin feature/automate-nonproduction-promotion
