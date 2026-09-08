@@ -125,6 +125,7 @@ public sealed class RepositoryPolicyTests
         var workflow = File.ReadAllText(workflowPath);
 
         Assert.Contains("pull_request:", workflow, StringComparison.Ordinal);
+        Assert.Contains("    types: [opened, reopened, synchronize, ready_for_review, edited]", workflow, StringComparison.Ordinal);
         Assert.Contains("contents: write", workflow, StringComparison.Ordinal);
         Assert.Contains("pull-requests: write", workflow, StringComparison.Ordinal);
         Assert.Contains("github.event.pull_request.draft == false", workflow, StringComparison.Ordinal);
@@ -149,7 +150,6 @@ public sealed class RepositoryPolicyTests
         Assert.DoesNotContain("production", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("pull_request_target:", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("checkout", workflow, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("review", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("dismiss", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("conversation", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("gh api", workflow, StringComparison.OrdinalIgnoreCase);
