@@ -16,28 +16,32 @@
 
 ---
 
-### Task 1: Make CI SQL bootstrap read-only
+### Task 1: Separate administrator SQL provisioning from CI validation
 
 **Files:**
+- Create: `ops/Provision-CloudOrdersSqlIdentities.ps1`
 - Modify: `ops/Bootstrap-CloudOrdersSql.ps1`
 - Modify: `ops/Bootstrap-CloudOrdersSql.Tests.ps1`
+- Create: `ops/Provision-CloudOrdersSqlIdentities.Tests.ps1`
 - Modify: `tests/CloudOrders.ArchitectureTests/DeploymentWorkflowPolicyTests.cs`
+- Modify: `docs/operations/azure-sql-bootstrap.md`
+- Modify: `README.md`
 
 - [ ] **Step 1: Write failing tests**
 
-Assert the PowerShell `-WhatIf` output contains the ownership query and contains neither `CREATE USER` nor `ALTER ROLE`; assert the workflow precondition invokes the same script before the migration job.
+Assert the CI script's `-WhatIf` output contains the ownership query and contains neither `CREATE USER` nor `ALTER ROLE`. Mock `Invoke-Sqlcmd` and assert exactly one invocation. Assert the administrator script emits `CREATE USER` with expected identities and role grants, then validates each SID/application ID. Assert the workflow precondition invokes the CI script before the migration job.
 
 - [ ] **Step 2: Run tests to verify red**
 
-Run `Invoke-Pester -Path ops/Bootstrap-CloudOrdersSql.Tests.ps1` and the focused architecture test. Expect the new no-DDL assertions to fail.
+Run `Invoke-Pester -Path ops/Bootstrap-CloudOrdersSql.Tests.ps1` and the focused architecture test. Expect the new no-DDL/runtime-call assertions to fail.
 
 - [ ] **Step 3: Implement minimal change**
 
-Remove `$bootstrapSql` construction and the second `Invoke-Sqlcmd` call. Keep the existing production guard, token acquisition, identifier validation, and read-only transaction call.
+Move identity/role DDL into `Provision-CloudOrdersSqlIdentities.ps1`, an explicit administrator-only command that takes expected API and migration application IDs, validates `sys.database_principals.sid`, and reports drift without changing CI permissions. Replace `$sql` in the CI script with the ownership query, remove the DDL construction and identity parameters, and make its `ShouldProcess` description read-only.
 
 - [ ] **Step 4: Run verification**
 
-Run Pester, `dotnet test CloudOrders.slnx --configuration Release --no-restore`, `dotnet format CloudOrders.slnx --verify-no-changes --no-restore`, and `git diff --check`.
+Run both Pester suites, `dotnet test CloudOrders.slnx --configuration Release --no-restore`, `dotnet format CloudOrders.slnx --verify-no-changes --no-restore`, and `git diff --check`. Run the administrator preflight read-only against development and test before deployment.
 
 - [ ] **Step 5: Commit**
 
