@@ -721,6 +721,9 @@ jobs:
           if '${{ github.ref_name }}' not in manifest['environments']:
               raise SystemExit('Sprint 4B R2 is restricted to development and test.')
           PY
+      - name: Install SQL precondition module
+        shell: pwsh
+        run: Install-Module SqlServer -Scope CurrentUser -Force -AllowClobber
       - name: Run read-only ownership precondition before migration
         shell: bash
         run: |

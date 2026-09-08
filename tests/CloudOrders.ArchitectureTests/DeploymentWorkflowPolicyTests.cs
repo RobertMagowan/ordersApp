@@ -212,6 +212,21 @@ public sealed class DeploymentWorkflowPolicyTests
     }
 
     [Fact]
+    public void MigrationInstallsTheRequiredSqlServerModuleBeforeTheReadOnlyPrecondition()
+    {
+        var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
+        var workflow = File.ReadAllText(workflowPath);
+        var migrationJob = GetJobSection(workflow, "run_migration");
+        var moduleStep = GetStepSection(migrationJob.Value, "Install SQL precondition module");
+        var preconditionStep = GetStepSection(migrationJob.Value, "Run read-only ownership precondition before migration");
+
+        Assert.Contains("Install-Module SqlServer -Scope CurrentUser -Force -AllowClobber", moduleStep.Value, StringComparison.Ordinal);
+        Assert.True(
+            migrationJob.Value.IndexOf(moduleStep.Value, StringComparison.Ordinal) < migrationJob.Value.IndexOf(preconditionStep.Value, StringComparison.Ordinal),
+            "The SqlServer module must be available before the precondition invokes Bootstrap-CloudOrdersSql.ps1.");
+    }
+
+    [Fact]
     public void DeploymentWorkflowPollsOnlyTheStartedMigrationExecution()
     {
         var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
