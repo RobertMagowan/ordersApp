@@ -193,6 +193,25 @@ public sealed class DeploymentWorkflowPolicyTests
     }
 
     [Fact]
+    public void MigrationUsesSqlTargetsProducedByTheProvisioningDeployment()
+    {
+        var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
+        var workflow = File.ReadAllText(workflowPath);
+        var bootstrapJob = GetJobSection(workflow, "bootstrap_sql");
+        var migrationJob = GetJobSection(workflow, "run_migration");
+
+        Assert.Contains("sql_server_name: ${{ steps.sql_target.outputs.server_name }}", bootstrapJob.Value, StringComparison.Ordinal);
+        Assert.Contains("sql_database_name: ${{ steps.sql_target.outputs.database_name }}", bootstrapJob.Value, StringComparison.Ordinal);
+        Assert.Contains("id: sql_target", bootstrapJob.Value, StringComparison.Ordinal);
+        Assert.Contains("properties.outputs.sqlServerFqdn.value", bootstrapJob.Value, StringComparison.Ordinal);
+        Assert.Contains("properties.outputs.databaseName.value", bootstrapJob.Value, StringComparison.Ordinal);
+        Assert.Contains("AZURE_SQL_SERVER_NAME: ${{ needs.bootstrap_sql.outputs.sql_server_name }}", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("AZURE_SQL_DATABASE_NAME: ${{ needs.bootstrap_sql.outputs.sql_database_name }}", migrationJob.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("AZURE_SQL_SERVER_NAME: ${{ vars.AZURE_SQL_SERVER_NAME }}", migrationJob.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("AZURE_SQL_DATABASE_NAME: ${{ vars.AZURE_SQL_DATABASE_NAME }}", migrationJob.Value, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DeploymentWorkflowPollsOnlyTheStartedMigrationExecution()
     {
         var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");

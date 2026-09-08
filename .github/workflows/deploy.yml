@@ -612,6 +612,9 @@ jobs:
     name: Provision ${{ github.ref_name }} Azure SQL
     needs: [preview_sql, prepare_release, validate_promotion_ref, classify_changes]
     if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
+    outputs:
+      sql_server_name: ${{ steps.sql_target.outputs.server_name }}
+      sql_database_name: ${{ steps.sql_target.outputs.database_name }}
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -639,6 +642,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: Provision nonproduction Azure SQL
+        id: sql_target
         env:
           API_IMAGE: ${{ needs.prepare_release.outputs.image }}
           MIGRATION_IMAGE: ${{ needs.prepare_release.outputs.migration_image }}
@@ -649,6 +653,12 @@ jobs:
           fi
           SQL_DEPLOYMENT_NAME="cloudorders-$DEPLOYMENT_ENVIRONMENT-sql-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           az deployment group create --resource-group "$AZURE_RESOURCE_GROUP" --name "$SQL_DEPLOYMENT_NAME-identity" --template-file infra/main.bicep --parameters "infra/environments/$DEPLOYMENT_ENVIRONMENT.bicepparam" location="$AZURE_LOCATION" environmentName="$DEPLOYMENT_ENVIRONMENT" releaseId="$GITHUB_SHA" appName="$AZURE_APP_NAME" acrName="$AZURE_ACR_NAME" managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" logAnalyticsName="$AZURE_LOG_ANALYTICS_NAME" containerImage="$API_IMAGE" migrationImage="$MIGRATION_IMAGE" useAcr=true deploySql=true deployContainerApp=false deployMigrationJob=false sqlAdministratorLogin="$AZURE_SQL_ADMIN_LOGIN" sqlAdministratorObjectId="$AZURE_SQL_ADMIN_OBJECT_ID" sqlAdministratorTenantId="$AZURE_SQL_ADMIN_TENANT_ID" --mode Incremental
+          SQL_FQDN=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name "$SQL_DEPLOYMENT_NAME-identity" --query properties.outputs.sqlServerFqdn.value --output tsv)
+          SQL_DATABASE=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name "$SQL_DEPLOYMENT_NAME-identity" --query properties.outputs.databaseName.value --output tsv)
+          SQL_SERVER="${SQL_FQDN%%.*}"
+          [[ -n "$SQL_SERVER" && -n "$SQL_DATABASE" ]] || { echo 'SQL deployment did not return a server and database target.' >&2; exit 1; }
+          echo "server_name=$SQL_SERVER" >> "$GITHUB_OUTPUT"
+          echo "database_name=$SQL_DATABASE" >> "$GITHUB_OUTPUT"
           for attempt in {1..5}; do
             retry_output=$(mktemp)
             set +e
@@ -677,8 +687,8 @@ jobs:
     env:
       AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
       AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
-      AZURE_SQL_SERVER_NAME: ${{ vars.AZURE_SQL_SERVER_NAME }}
-      AZURE_SQL_DATABASE_NAME: ${{ vars.AZURE_SQL_DATABASE_NAME }}
+      AZURE_SQL_SERVER_NAME: ${{ needs.bootstrap_sql.outputs.sql_server_name }}
+      AZURE_SQL_DATABASE_NAME: ${{ needs.bootstrap_sql.outputs.sql_database_name }}
       DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
     steps:
       - name: Check out release controls
