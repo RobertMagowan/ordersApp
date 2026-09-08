@@ -2,13 +2,15 @@ $scriptPath = Join-Path $PSScriptRoot 'Provision-CloudOrdersSqlIdentities.ps1'
 
 Describe 'Provision-CloudOrdersSqlIdentities' {
     It 'emits contained-user DDL and validates the expected Entra application IDs' {
-        $output = & $scriptPath -EnvironmentName development -ResourceGroupName ordersapp-development -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-dev-api -ApiApplicationId e7957993-59a3-4ce8-a450-cefa415a2890 -MigrationIdentityName cloudorders-dev-migrator -MigrationApplicationId e7714292-e53f-4492-9f27-472ac02a03b4 -WhatIf
+        $output = & $scriptPath -EnvironmentName development -ResourceGroupName ordersapp-development -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-dev-api -ApiObjectId 531c7fce-73c2-491e-9422-1f8713e2993a -MigrationIdentityName cloudorders-dev-migrator -MigrationObjectId 3c5c53fe-e390-4754-a719-f31cf786ab8b -WhatIf
         $sql = $output -join "`n"
 
-        $sql | Should Match 'CREATE USER \[cloudorders-dev-api\] FROM EXTERNAL PROVIDER'
-        $sql | Should Match 'CREATE USER \[cloudorders-dev-migrator\] FROM EXTERNAL PROVIDER'
-        $sql | Should Match 'E7957993-59A3-4CE8-A450-CEFA415A2890'
-        $sql | Should Match 'E7714292-E53F-4492-9F27-472AC02A03B4'
+        $sql | Should Match 'CREATE USER \[cloudorders-dev-api\] WITH SID'
+        $sql | Should Match 'CREATE USER \[cloudorders-dev-migrator\] WITH SID'
+        $sql | Should Match '531C7FCE-73C2-491E-9422-1F8713E2993A'
+        $sql | Should Match '3C5C53FE-E390-4754-A719-F31CF786AB8B'
         $sql | Should Match 'db_ddladmin'
+        $sql | Should Match 'BEGIN TRANSACTION'
+        $sql | Should Match 'COMMIT TRANSACTION'
     }
 }

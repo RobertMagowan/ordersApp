@@ -20,11 +20,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\ops\Provision-CloudOrd
   -ServerName <sql-server-name> `
   -DatabaseName CloudOrders `
   -ApiIdentityName cloudorders-dev-api `
-  -ApiApplicationId <api-managed-identity-client-id> `
+  -ApiObjectId <api-managed-identity-principal-id> `
   -MigrationIdentityName cloudorders-dev-migrator `
-  -MigrationApplicationId <migration-managed-identity-client-id>
+  -MigrationObjectId <migration-managed-identity-principal-id>
 ```
 
-Use `-WhatIf` to print the idempotent T-SQL before execution. The script verifies each contained principal's application ID against `sys.database_principals.sid`; a recreated identity with the same display name therefore fails closed. The API identity receives only `db_datareader` and `db_datawriter`; it never receives `db_owner`. The migration identity receives `db_ddladmin`, `db_datareader`, and `db_datawriter` so EF Core can create and update the migration history.
+Use `-WhatIf` to print the idempotent T-SQL before execution. Obtain each principal ID from the Azure resource identity (`principalId`), not its client ID. The script verifies each contained principal's object ID against `sys.database_principals.sid` before assigning roles; a recreated identity with the same display name therefore fails closed. The API identity receives only `db_datareader` and `db_datawriter`; it never receives `db_owner`. The migration identity receives `db_ddladmin`, `db_datareader`, and `db_datawriter` so EF Core can create and update the migration history.
 
 The script is intentionally rejected for `production`. A future automation that creates Entra users from a service principal requires a SQL logical-server managed identity with Microsoft Graph directory-read permissions; this bootstrap instead uses the delegated permissions of the signed-in Entra SQL administrator.

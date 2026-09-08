@@ -4,7 +4,7 @@ Describe 'Bootstrap-CloudOrdersSql' {
     It 'rejects production before connecting to Azure SQL' {
         $threw = $false
         try {
-            & $scriptPath -EnvironmentName production -ResourceGroupName ordersapp-production -ServerName cloudorders-prod-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-prod-api -MigrationIdentityName cloudorders-prod-migrator -WhatIf
+            & $scriptPath -EnvironmentName production -ResourceGroupName ordersapp-production -ServerName cloudorders-prod-sql -DatabaseName CloudOrders -WhatIf
         }
         catch {
             $threw = $true
@@ -16,7 +16,7 @@ Describe 'Bootstrap-CloudOrdersSql' {
     It 'requires non-empty resource identifiers' {
         $threw = $false
         try {
-            & $scriptPath -EnvironmentName development -ResourceGroupName '' -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-dev-api -MigrationIdentityName cloudorders-dev-migrator -WhatIf
+            & $scriptPath -EnvironmentName development -ResourceGroupName '' -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -WhatIf
         }
         catch {
             $threw = $true
