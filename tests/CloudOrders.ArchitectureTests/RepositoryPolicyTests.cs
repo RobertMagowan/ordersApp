@@ -125,6 +125,7 @@ public sealed class RepositoryPolicyTests
         var workflow = File.ReadAllText(workflowPath);
 
         Assert.Contains("pull_request:", workflow, StringComparison.Ordinal);
+        Assert.Contains("    types: [opened, reopened, synchronize, ready_for_review, edited]", workflow, StringComparison.Ordinal);
         Assert.Contains("contents: write", workflow, StringComparison.Ordinal);
         Assert.Contains("pull-requests: write", workflow, StringComparison.Ordinal);
         Assert.Contains("github.event.pull_request.draft == false", workflow, StringComparison.Ordinal);
@@ -135,12 +136,20 @@ public sealed class RepositoryPolicyTests
         Assert.Contains("github.event.pull_request.base.ref == 'test'", workflow, StringComparison.Ordinal);
         Assert.Contains("github.event.pull_request.head.ref == 'development'", workflow, StringComparison.Ordinal);
         Assert.Contains("gh pr merge \"$PR_URL\" --auto --merge", workflow, StringComparison.Ordinal);
+        Assert.Contains("gh pr view \"$PR_URL\" --json baseRefName,headRefName,isDraft,headRepository,headRefOid", workflow, StringComparison.Ordinal);
+        Assert.Contains("CURRENT_BASE_REF", workflow, StringComparison.Ordinal);
+        Assert.Contains("CURRENT_HEAD_REF", workflow, StringComparison.Ordinal);
+        Assert.Contains("CURRENT_IS_DRAFT", workflow, StringComparison.Ordinal);
+        Assert.Contains("CURRENT_HEAD_REPOSITORY", workflow, StringComparison.Ordinal);
+        Assert.Contains("CURRENT_HEAD_OID", workflow, StringComparison.Ordinal);
+        Assert.Contains("EXPECTED_HEAD_SHA", workflow, StringComparison.Ordinal);
+        Assert.Contains("CURRENT_HEAD_OID\" != \"$EXPECTED_HEAD_SHA\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("exit 1", workflow, StringComparison.Ordinal);
 
         Assert.DoesNotContain("master", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("production", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("pull_request_target:", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("checkout", workflow, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("review", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("dismiss", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("conversation", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("gh api", workflow, StringComparison.OrdinalIgnoreCase);
@@ -153,7 +162,8 @@ public sealed class RepositoryPolicyTests
         var guide = File.ReadAllText(Path.Combine(repositoryRoot, "AGENTS.md"));
         var runbook = File.ReadAllText(Path.Combine(repositoryRoot, "docs", "operations", "sprint-delivery-workflow.md"));
 
-        Assert.Contains("development/test merge and deploy automatically after required checks and resolved conversations", guide, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("development/test deployments run automatically after protected merges", guide, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("environments have no required-reviewer gate and deploy automatically after their protected merge", guide, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("review feedback is assessed and addressed before resolution", guide, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("test-to-master and production remain excluded from auto-merge", guide, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("development/test merge and deploy automatically after required checks and resolved conversations", runbook, StringComparison.OrdinalIgnoreCase);

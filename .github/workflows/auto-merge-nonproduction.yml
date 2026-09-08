@@ -2,6 +2,7 @@ name: Auto-merge eligible promotions
 
 on:
   pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, edited]
 
 permissions:
   contents: write
@@ -22,4 +23,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge "$PR_URL" --auto --merge
+          EXPECTED_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EXPECTED_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          EXPECTED_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          if ! CURRENT_PR=$(gh pr view "$PR_URL" --json baseRefName,headRefName,isDraft,headRepository,headRefOid); then
+            echo "Unable to verify the current pull request state; refusing auto-merge." >&2
+            exit 1
+          fi
+
+          CURRENT_BASE_REF=$(jq -er '.baseRefName' <<<"$CURRENT_PR")
+          CURRENT_HEAD_REF=$(jq -er '.headRefName' <<<"$CURRENT_PR")
+          CURRENT_IS_DRAFT=$(jq -er '.isDraft | tostring' <<<"$CURRENT_PR")
+          CURRENT_HEAD_REPOSITORY=$(jq -er '.headRepository.nameWithOwner' <<<"$CURRENT_PR")
+          CURRENT_HEAD_OID=$(jq -er '.headRefOid' <<<"$CURRENT_PR")
+
+          if [[ "$CURRENT_IS_DRAFT" != "false" ||
+                "$CURRENT_HEAD_REPOSITORY" != "$EXPECTED_HEAD_REPOSITORY" ||
+                "$CURRENT_HEAD_OID" != "$EXPECTED_HEAD_SHA" ||
+                "$CURRENT_BASE_REF" != "$EXPECTED_BASE_REF" ||
+                "$CURRENT_HEAD_REF" != "$EXPECTED_HEAD_REF" ]]; then
+            echo "Pull request state changed since the event; refusing auto-merge." >&2
+            exit 1
+          fi
+
+          gh pr merge "$PR_URL" --auto --merge
