@@ -163,6 +163,7 @@ public sealed class RepositoryPolicyTests
         var runbook = File.ReadAllText(Path.Combine(repositoryRoot, "docs", "operations", "sprint-delivery-workflow.md"));
 
         Assert.Contains("development/test deployments run automatically after protected merges", guide, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("environments have no required-reviewer gate and deploy automatically after their protected merge", guide, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("review feedback is assessed and addressed before resolution", guide, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("test-to-master and production remain excluded from auto-merge", guide, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("development/test merge and deploy automatically after required checks and resolved conversations", runbook, StringComparison.OrdinalIgnoreCase);
