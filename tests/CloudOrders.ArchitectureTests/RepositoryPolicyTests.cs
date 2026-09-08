@@ -146,6 +146,22 @@ public sealed class RepositoryPolicyTests
         Assert.DoesNotContain("gh api", workflow, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void NonproductionPromotionDocumentationStatesAutomaticMergeAndDeployment()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var guide = File.ReadAllText(Path.Combine(repositoryRoot, "AGENTS.md"));
+        var runbook = File.ReadAllText(Path.Combine(repositoryRoot, "docs", "operations", "sprint-delivery-workflow.md"));
+
+        Assert.Contains("development/test merge and deploy automatically after required checks and resolved conversations", guide, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("review feedback is assessed and addressed before resolution", guide, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("test-to-master and production remain excluded from auto-merge", guide, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("development/test merge and deploy automatically after required checks and resolved conversations", runbook, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("review feedback is assessed and addressed before resolution", runbook, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("test-to-master and production remain excluded from auto-merge", runbook, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("deployment failure requires diagnosis, a new feature branch, validation, and normal promotion rather than a blind retry", runbook, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
