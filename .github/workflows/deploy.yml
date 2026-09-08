@@ -728,7 +728,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pwsh -NoProfile -ExecutionPolicy Bypass -File ops/Bootstrap-CloudOrdersSql.ps1 -EnvironmentName "$DEPLOYMENT_ENVIRONMENT" -ResourceGroupName "$AZURE_RESOURCE_GROUP" -ServerName "$AZURE_SQL_SERVER_NAME" -DatabaseName "$AZURE_SQL_DATABASE_NAME" -ApiIdentityName "$AZURE_APP_NAME" -MigrationIdentityName "${AZURE_APP_NAME%-api}-migrator"
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ops/Bootstrap-CloudOrdersSql.ps1 -EnvironmentName "$DEPLOYMENT_ENVIRONMENT" -ResourceGroupName "$AZURE_RESOURCE_GROUP" -ServerName "$AZURE_SQL_SERVER_NAME" -DatabaseName "$AZURE_SQL_DATABASE_NAME"
       - name: Start nonproduction migration Job
         run: |
           if [[ "$DEPLOYMENT_ENVIRONMENT" == production ]]; then

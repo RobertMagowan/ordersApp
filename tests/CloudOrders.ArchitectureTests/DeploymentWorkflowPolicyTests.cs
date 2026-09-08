@@ -227,16 +227,16 @@ public sealed class DeploymentWorkflowPolicyTests
     }
 
     [Fact]
-    public void MigrationBootstrapsTheManagedIdentitiesNamedByTheDeploymentConfiguration()
+    public void MigrationOwnershipPreconditionDoesNotPassManagedIdentitiesToCi()
     {
         var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
         var workflow = File.ReadAllText(workflowPath);
         var migrationJob = GetJobSection(workflow, "run_migration");
         var preconditionStep = GetStepSection(migrationJob.Value, "Run read-only ownership precondition before migration");
 
-        Assert.Contains("-ApiIdentityName \"$AZURE_APP_NAME\"", preconditionStep.Value, StringComparison.Ordinal);
-        Assert.Contains("-MigrationIdentityName \"${AZURE_APP_NAME%-api}-migrator\"", preconditionStep.Value, StringComparison.Ordinal);
-        Assert.DoesNotContain("cloudorders-$DEPLOYMENT_ENVIRONMENT-api", preconditionStep.Value, StringComparison.Ordinal);
+        Assert.Contains("-DatabaseName \"$AZURE_SQL_DATABASE_NAME\"", preconditionStep.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("-ApiIdentityName", preconditionStep.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("-MigrationIdentityName", preconditionStep.Value, StringComparison.Ordinal);
     }
 
     [Fact]

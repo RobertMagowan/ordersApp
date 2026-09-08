@@ -4,7 +4,7 @@ Describe 'Bootstrap-CloudOrdersSql' {
     It 'rejects production before connecting to Azure SQL' {
         $threw = $false
         try {
-            & $scriptPath -EnvironmentName production -ResourceGroupName ordersapp-production -ServerName cloudorders-prod-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-prod-api -MigrationIdentityName cloudorders-prod-migrator -WhatIf
+            & $scriptPath -EnvironmentName production -ResourceGroupName ordersapp-production -ServerName cloudorders-prod-sql -DatabaseName CloudOrders -WhatIf
         }
         catch {
             $threw = $true
@@ -16,7 +16,7 @@ Describe 'Bootstrap-CloudOrdersSql' {
     It 'requires non-empty resource identifiers' {
         $threw = $false
         try {
-            & $scriptPath -EnvironmentName development -ResourceGroupName '' -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-dev-api -MigrationIdentityName cloudorders-dev-migrator -WhatIf
+            & $scriptPath -EnvironmentName development -ResourceGroupName '' -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -WhatIf
         }
         catch {
             $threw = $true
@@ -25,18 +25,17 @@ Describe 'Bootstrap-CloudOrdersSql' {
         $threw | Should Be $true
     }
 
-    It 'emits least-privilege contained-user SQL without API db_owner' {
-        $output = & $scriptPath -EnvironmentName development -ResourceGroupName ordersapp-development -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-dev-api -MigrationIdentityName cloudorders-dev-migrator -WhatIf
+    It 'emits only the read-only ownership precondition for CI' {
+        $output = & $scriptPath -EnvironmentName development -ResourceGroupName ordersapp-development -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -WhatIf
         $sql = $output -join "`n"
 
-        $sql | Should Match 'CREATE USER \[cloudorders-dev-api\] FROM EXTERNAL PROVIDER'
-        $sql | Should Match 'ALTER ROLE \[db_datareader\] ADD MEMBER \[cloudorders-dev-api\]'
-        $sql | Should Match 'ALTER ROLE \[db_ddladmin\] ADD MEMBER \[cloudorders-dev-migrator\]'
-        $sql | Should Not Match 'db_owner.*cloudorders-dev-api'
+        $sql | Should Match 'BEGIN TRANSACTION'
+        $sql | Should Not Match 'CREATE USER'
+        $sql | Should Not Match 'ALTER ROLE'
     }
 
     It 'emits a one-transaction read-only ownership precondition probe' {
-        $output = & $scriptPath -EnvironmentName development -ResourceGroupName ordersapp-development -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-dev-api -MigrationIdentityName cloudorders-dev-migrator -WhatIf
+        $output = & $scriptPath -EnvironmentName development -ResourceGroupName ordersapp-development -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -WhatIf
         $sql = $output -join "`n"
 
         $sql | Should Match '(?is)BEGIN TRANSACTION.*Orders.*CustomerProfileId.*ROLLBACK TRANSACTION'
@@ -46,7 +45,7 @@ Describe 'Bootstrap-CloudOrdersSql' {
     }
 
     It 'emits SQL-compatible comments in the ownership precondition' {
-        $output = & $scriptPath -EnvironmentName development -ResourceGroupName ordersapp-development -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-dev-api -MigrationIdentityName cloudorders-dev-migrator -WhatIf
+        $output = & $scriptPath -EnvironmentName development -ResourceGroupName ordersapp-development -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -WhatIf
         $sql = $output -join "`n"
 
         $sql | Should Not Match '(?m)^\s*#'
