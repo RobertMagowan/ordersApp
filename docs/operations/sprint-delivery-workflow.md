@@ -29,6 +29,8 @@ Classify an unavailable Docker daemon or equivalent unavailable local dependency
 
 Use the selected task plan to keep planning, implementation, independent review, runtime validation, and QA separate. Implementation follows TDD and inspects affected persistent state directly. Record compact evidence before moving to another role. Retry commands only within the configured limit and with a new hypothesis. Repeated or unresolved failures require escalation with evidence, not improvisation.
 
+For nonproduction promotion, development/test merge and deploy automatically after required checks and resolved conversations. Review feedback is assessed and addressed before resolution; any unresolved review conversation prevents auto-merge. This automation applies only to `feature/*` → `development` and `development` → `test`; test-to-master and production remain excluded from auto-merge. A deployment failure requires diagnosis, a new feature branch, validation, and normal promotion rather than a blind retry.
+
 When `prLifecycle` is `READY_FOR_REVIEW`, a `PENDING`, `CHANGES_REQUESTED`, or `STALE` `reviewStatus` produces `HUMAN_REVIEW_REQUIRED`; it does not allow promotion. Human decisions remain distinct from review: destructive data work, privilege changes, or production actions return `HUMAN_DECISION_REQUIRED`.
 
 ## Cancellation and supersession

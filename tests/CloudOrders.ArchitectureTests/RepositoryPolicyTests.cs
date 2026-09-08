@@ -115,6 +115,53 @@ public sealed class RepositoryPolicyTests
         Assert.DoesNotContain("two-parent merge", workflow, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void NonProductionAutoMergeWorkflowIsNarrowlyGuarded()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var workflowPath = Path.Combine(repositoryRoot, ".github", "workflows", "auto-merge-nonproduction.yml");
+
+        Assert.True(File.Exists(workflowPath), $"Expected nonproduction auto-merge workflow at {workflowPath}.");
+        var workflow = File.ReadAllText(workflowPath);
+
+        Assert.Contains("pull_request:", workflow, StringComparison.Ordinal);
+        Assert.Contains("contents: write", workflow, StringComparison.Ordinal);
+        Assert.Contains("pull-requests: write", workflow, StringComparison.Ordinal);
+        Assert.Contains("github.event.pull_request.draft == false", workflow, StringComparison.Ordinal);
+        Assert.Contains("github.event.pull_request.head.repo.full_name == github.repository", workflow, StringComparison.Ordinal);
+        Assert.Contains("github.event.pull_request.base.ref == 'development'", workflow, StringComparison.Ordinal);
+        Assert.Contains("github.event.pull_request.head.ref", workflow, StringComparison.Ordinal);
+        Assert.Contains("feature/", workflow, StringComparison.Ordinal);
+        Assert.Contains("github.event.pull_request.base.ref == 'test'", workflow, StringComparison.Ordinal);
+        Assert.Contains("github.event.pull_request.head.ref == 'development'", workflow, StringComparison.Ordinal);
+        Assert.Contains("gh pr merge \"$PR_URL\" --auto --merge", workflow, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("master", workflow, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("production", workflow, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("pull_request_target:", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("checkout", workflow, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("review", workflow, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("dismiss", workflow, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("conversation", workflow, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("gh api", workflow, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void NonproductionPromotionDocumentationStatesAutomaticMergeAndDeployment()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var guide = File.ReadAllText(Path.Combine(repositoryRoot, "AGENTS.md"));
+        var runbook = File.ReadAllText(Path.Combine(repositoryRoot, "docs", "operations", "sprint-delivery-workflow.md"));
+
+        Assert.Contains("development/test merge and deploy automatically after required checks and resolved conversations", guide, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("review feedback is assessed and addressed before resolution", guide, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("test-to-master and production remain excluded from auto-merge", guide, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("development/test merge and deploy automatically after required checks and resolved conversations", runbook, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("review feedback is assessed and addressed before resolution", runbook, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("test-to-master and production remain excluded from auto-merge", runbook, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("deployment failure requires diagnosis, a new feature branch, validation, and normal promotion rather than a blind retry", runbook, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
