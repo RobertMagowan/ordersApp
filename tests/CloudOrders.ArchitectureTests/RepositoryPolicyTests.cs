@@ -128,6 +128,7 @@ public sealed class RepositoryPolicyTests
         Assert.Contains("    types: [opened, reopened, synchronize, ready_for_review, edited]", workflow, StringComparison.Ordinal);
         Assert.Contains("contents: write", workflow, StringComparison.Ordinal);
         Assert.Contains("pull-requests: write", workflow, StringComparison.Ordinal);
+        Assert.Contains("actions: write", workflow, StringComparison.Ordinal);
         Assert.Contains("github.event.pull_request.draft == false", workflow, StringComparison.Ordinal);
         Assert.Contains("github.event.pull_request.head.repo.full_name == github.repository", workflow, StringComparison.Ordinal);
         Assert.Contains("github.event.pull_request.base.ref == 'development'", workflow, StringComparison.Ordinal);
@@ -136,6 +137,11 @@ public sealed class RepositoryPolicyTests
         Assert.Contains("github.event.pull_request.base.ref == 'test'", workflow, StringComparison.Ordinal);
         Assert.Contains("github.event.pull_request.head.ref == 'development'", workflow, StringComparison.Ordinal);
         Assert.Contains("gh pr merge \"$PR_URL\" --auto --merge", workflow, StringComparison.Ordinal);
+        Assert.Contains("gh pr view \"$PR_URL\" --json state,mergedAt,mergeCommit,baseRefName,headRefOid", workflow, StringComparison.Ordinal);
+        Assert.Contains("CURRENT_STATE", workflow, StringComparison.Ordinal);
+        Assert.Contains("MERGED", workflow, StringComparison.Ordinal);
+        Assert.Contains("CURRENT_MERGE_COMMIT", workflow, StringComparison.Ordinal);
+        Assert.Contains("gh workflow run deploy.yml --ref \"$CURRENT_BASE_REF\" -f release_sha=\"$CURRENT_MERGE_COMMIT\"", workflow, StringComparison.Ordinal);
         Assert.Contains("gh pr view \"$PR_URL\" --json baseRefName,headRefName,isDraft,headRepository,headRefOid", workflow, StringComparison.Ordinal);
         Assert.Contains("CURRENT_BASE_REF", workflow, StringComparison.Ordinal);
         Assert.Contains("CURRENT_HEAD_REF", workflow, StringComparison.Ordinal);
@@ -153,6 +159,17 @@ public sealed class RepositoryPolicyTests
         Assert.DoesNotContain("dismiss", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("conversation", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("gh api", workflow, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DeploymentWorkflowRejectsAnAutomatedDispatchForTheWrongCommit()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(repositoryRoot, ".github", "workflows", "deploy.yml"));
+
+        Assert.Contains("release_sha:", workflow, StringComparison.Ordinal);
+        Assert.Contains("RELEASE_SHA: ${{ inputs.release_sha }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("[[ \"$RELEASE_SHA\" == \"$GITHUB_SHA\" ]]", workflow, StringComparison.Ordinal);
     }
 
     [Fact]
