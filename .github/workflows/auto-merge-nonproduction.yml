@@ -77,7 +77,8 @@ jobs:
               [[ "$CURRENT_HEAD_OID" == "$EXPECTED_HEAD_SHA" ]] || { echo "Pull request head changed before merge; refusing deployment dispatch." >&2; exit 1; }
               [[ "$CURRENT_BASE_REF" == "development" || "$CURRENT_BASE_REF" == "test" ]] || { echo "Only the permitted deployment branches can dispatch deployment." >&2; exit 1; }
               jq -e '.mergedAt != null and .mergeCommit.oid != null' <<<"$CURRENT_PR" >/dev/null || { echo "Merged pull request has no immutable merge evidence; refusing deployment dispatch." >&2; exit 1; }
-              gh workflow run deploy.yml --ref "$CURRENT_BASE_REF"
+              CURRENT_MERGE_COMMIT=$(jq -er '.mergeCommit.oid' <<<"$CURRENT_PR")
+              gh workflow run deploy.yml --ref "$CURRENT_BASE_REF" -f release_sha="$CURRENT_MERGE_COMMIT"
               exit 0
             fi
 

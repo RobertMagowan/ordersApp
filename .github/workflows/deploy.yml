@@ -7,6 +7,11 @@ on:
       - test
       - master
   workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Immutable commit expected by an automated nonproduction promotion.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -27,6 +32,8 @@ jobs:
       - name: Reject a non-promotion branch
         id: promotion_ref
         shell: bash
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF_TYPE" == "branch" ]] || {
@@ -45,6 +52,11 @@ jobs:
               exit 1
               ;;
           esac
+
+          if [[ -n "$RELEASE_SHA" ]]; then
+            [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] || { echo "An immutable release SHA is valid only for a dispatched workflow." >&2; exit 1; }
+            [[ "$RELEASE_SHA" == "$GITHUB_SHA" ]] || { echo "The dispatched release SHA does not match the workflow commit; refusing deployment." >&2; exit 1; }
+          fi
 
       - name: Check out Sprint 4A E1 manifest
         if: github.ref_name == 'development' || github.ref_name == 'test'

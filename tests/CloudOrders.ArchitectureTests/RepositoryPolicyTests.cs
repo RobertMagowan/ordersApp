@@ -140,7 +140,8 @@ public sealed class RepositoryPolicyTests
         Assert.Contains("gh pr view \"$PR_URL\" --json state,mergedAt,mergeCommit,baseRefName,headRefOid", workflow, StringComparison.Ordinal);
         Assert.Contains("CURRENT_STATE", workflow, StringComparison.Ordinal);
         Assert.Contains("MERGED", workflow, StringComparison.Ordinal);
-        Assert.Contains("gh workflow run deploy.yml --ref \"$CURRENT_BASE_REF\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("CURRENT_MERGE_COMMIT", workflow, StringComparison.Ordinal);
+        Assert.Contains("gh workflow run deploy.yml --ref \"$CURRENT_BASE_REF\" -f release_sha=\"$CURRENT_MERGE_COMMIT\"", workflow, StringComparison.Ordinal);
         Assert.Contains("gh pr view \"$PR_URL\" --json baseRefName,headRefName,isDraft,headRepository,headRefOid", workflow, StringComparison.Ordinal);
         Assert.Contains("CURRENT_BASE_REF", workflow, StringComparison.Ordinal);
         Assert.Contains("CURRENT_HEAD_REF", workflow, StringComparison.Ordinal);
@@ -158,6 +159,17 @@ public sealed class RepositoryPolicyTests
         Assert.DoesNotContain("dismiss", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("conversation", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("gh api", workflow, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DeploymentWorkflowRejectsAnAutomatedDispatchForTheWrongCommit()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(repositoryRoot, ".github", "workflows", "deploy.yml"));
+
+        Assert.Contains("release_sha:", workflow, StringComparison.Ordinal);
+        Assert.Contains("RELEASE_SHA: ${{ inputs.release_sha }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("[[ \"$RELEASE_SHA\" == \"$GITHUB_SHA\" ]]", workflow, StringComparison.Ordinal);
     }
 
     [Fact]
