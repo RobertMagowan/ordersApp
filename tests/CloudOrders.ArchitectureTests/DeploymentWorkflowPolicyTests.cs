@@ -451,8 +451,8 @@ public sealed class DeploymentWorkflowPolicyTests
 
         Assert.Contains("activeRevisionsMode: 'Multiple'", containerAppModule, StringComparison.Ordinal);
         Assert.Contains("az containerapp revision set-mode --name \"$AZURE_APP_NAME\" --resource-group \"$AZURE_RESOURCE_GROUP\" --mode multiple", quiesceStep.Value, StringComparison.Ordinal);
-        Assert.Contains("--arg before \"$BEFORE_REVISION\"", quiesceStep.Value, StringComparison.Ordinal);
-        Assert.Contains("elif .latestRevision then $before", quiesceStep.Value, StringComparison.Ordinal);
+        Assert.Contains("if .latestRevision then \"latest=0\"", quiesceStep.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("elif .latestRevision then $before", quiesceStep.Value, StringComparison.Ordinal);
         Assert.Contains("az containerapp ingress traffic set", quiesceStep.Value, StringComparison.Ordinal);
         Assert.Contains("jq -e 'all(.[]; (.weight // 0) == 0)'", quiesceStep.Value, StringComparison.Ordinal);
     }
