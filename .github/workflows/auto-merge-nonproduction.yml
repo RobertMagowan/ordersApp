@@ -5,6 +5,7 @@ on:
     types: [opened, reopened, synchronize, ready_for_review, edited]
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -51,3 +52,38 @@ jobs:
           fi
 
           gh pr merge "$PR_URL" --auto --merge
+
+      - name: Dispatch deployment after confirmed merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          EXPECTED_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..80}; do
+            if ! CURRENT_PR=$(gh pr view "$PR_URL" --json state,mergedAt,mergeCommit,baseRefName,headRefOid); then
+              echo "Unable to verify the pull request after enabling auto-merge." >&2
+              exit 1
+            fi
+
+            CURRENT_STATE=$(jq -er '.state' <<<"$CURRENT_PR")
+            CURRENT_BASE_REF=$(jq -er '.baseRefName' <<<"$CURRENT_PR")
+            CURRENT_HEAD_OID=$(jq -er '.headRefOid' <<<"$CURRENT_PR")
+
+            if [[ "$CURRENT_STATE" == "MERGED" ]]; then
+              [[ "$CURRENT_BASE_REF" == "$EXPECTED_BASE_REF" ]] || { echo "Pull request base changed before merge; refusing deployment dispatch." >&2; exit 1; }
+              [[ "$CURRENT_HEAD_OID" == "$EXPECTED_HEAD_SHA" ]] || { echo "Pull request head changed before merge; refusing deployment dispatch." >&2; exit 1; }
+              [[ "$CURRENT_BASE_REF" == "development" || "$CURRENT_BASE_REF" == "test" ]] || { echo "Only the permitted deployment branches can dispatch deployment." >&2; exit 1; }
+              jq -e '.mergedAt != null and .mergeCommit.oid != null' <<<"$CURRENT_PR" >/dev/null || { echo "Merged pull request has no immutable merge evidence; refusing deployment dispatch." >&2; exit 1; }
+              gh workflow run deploy.yml --ref "$CURRENT_BASE_REF"
+              exit 0
+            fi
+
+            [[ "$CURRENT_STATE" == "OPEN" ]] || { echo "Pull request closed without merge; refusing deployment dispatch." >&2; exit 1; }
+            sleep 15
+          done
+
+          echo "Timed out waiting for auto-merge; no deployment was dispatched." >&2
+          exit 1
