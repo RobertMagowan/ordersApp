@@ -25,18 +25,17 @@ Describe 'Bootstrap-CloudOrdersSql' {
         $threw | Should Be $true
     }
 
-    It 'emits least-privilege contained-user SQL without API db_owner' {
-        $output = & $scriptPath -EnvironmentName development -ResourceGroupName ordersapp-development -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-dev-api -MigrationIdentityName cloudorders-dev-migrator -WhatIf
+    It 'emits only the read-only ownership precondition for CI' {
+        $output = & $scriptPath -EnvironmentName development -ResourceGroupName ordersapp-development -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -WhatIf
         $sql = $output -join "`n"
 
-        $sql | Should Match 'CREATE USER \[cloudorders-dev-api\] FROM EXTERNAL PROVIDER'
-        $sql | Should Match 'ALTER ROLE \[db_datareader\] ADD MEMBER \[cloudorders-dev-api\]'
-        $sql | Should Match 'ALTER ROLE \[db_ddladmin\] ADD MEMBER \[cloudorders-dev-migrator\]'
-        $sql | Should Not Match 'db_owner.*cloudorders-dev-api'
+        $sql | Should Match 'BEGIN TRANSACTION'
+        $sql | Should Not Match 'CREATE USER'
+        $sql | Should Not Match 'ALTER ROLE'
     }
 
     It 'emits a one-transaction read-only ownership precondition probe' {
-        $output = & $scriptPath -EnvironmentName development -ResourceGroupName ordersapp-development -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-dev-api -MigrationIdentityName cloudorders-dev-migrator -WhatIf
+        $output = & $scriptPath -EnvironmentName development -ResourceGroupName ordersapp-development -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -WhatIf
         $sql = $output -join "`n"
 
         $sql | Should Match '(?is)BEGIN TRANSACTION.*Orders.*CustomerProfileId.*ROLLBACK TRANSACTION'
@@ -46,7 +45,7 @@ Describe 'Bootstrap-CloudOrdersSql' {
     }
 
     It 'emits SQL-compatible comments in the ownership precondition' {
-        $output = & $scriptPath -EnvironmentName development -ResourceGroupName ordersapp-development -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -ApiIdentityName cloudorders-dev-api -MigrationIdentityName cloudorders-dev-migrator -WhatIf
+        $output = & $scriptPath -EnvironmentName development -ResourceGroupName ordersapp-development -ServerName cloudorders-dev-sql -DatabaseName CloudOrders -WhatIf
         $sql = $output -join "`n"
 
         $sql | Should Not Match '(?m)^\s*#'
