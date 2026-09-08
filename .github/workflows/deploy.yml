@@ -740,14 +740,17 @@ jobs:
             test) JOB_NAME='cloudorders-test-migrations' ;;
             *) echo "Unsupported migration environment: $DEPLOYMENT_ENVIRONMENT" >&2; exit 1 ;;
           esac
-          EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query name --output tsv)
-          [[ -n "$EXECUTION" ]] || { echo "Migration Job did not return an execution name." >&2; exit 1; }
-          EXECUTION_ARGS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].args' --output json)
-          python3 - "$EXECUTION_ARGS" <<'PY'
-          import json, sys
-          if json.loads(sys.argv[1]) != ['--migration', 'EnforceCustomerProfileOwnership']:
-              raise SystemExit('Migration execution did not run the exact manifest migration.')
-          PY
+          EXECUTION_PAYLOAD=$(az containerapp job start \
+            --name "$JOB_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --args '--migration' 'EnforceCustomerProfileOwnership' \
+            --output json)
+          EXECUTION=$(jq -er '.name' <<<"$EXECUTION_PAYLOAD")
+          jq -e '.properties.template.containers[0].args == ["--migration", "EnforceCustomerProfileOwnership"]' \
+            <<<"$EXECUTION_PAYLOAD" >/dev/null || {
+              echo "Migration execution did not run the exact manifest migration." >&2
+              exit 1
+            }
           for _ in {1..30}; do
             STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query properties.status --output tsv)
             [[ "$STATUS" == Succeeded ]] && break

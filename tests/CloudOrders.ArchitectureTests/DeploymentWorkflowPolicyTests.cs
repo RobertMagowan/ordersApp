@@ -159,12 +159,18 @@ public sealed class DeploymentWorkflowPolicyTests
     {
         var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
         var workflow = File.ReadAllText(workflowPath);
+        var migrationJob = GetJobSection(workflow, "run_migration");
 
         Assert.Contains("preview_sql:", workflow, StringComparison.Ordinal);
         Assert.Contains("bootstrap_sql:", workflow, StringComparison.Ordinal);
         Assert.Contains("run_migration:", workflow, StringComparison.Ordinal);
         Assert.Contains("deploy_release:", workflow, StringComparison.Ordinal);
         Assert.Contains("az containerapp job start", workflow, StringComparison.Ordinal);
+        Assert.Contains("--args '--migration' 'EnforceCustomerProfileOwnership'", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("EXECUTION_PAYLOAD=$(az containerapp job start", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("jq -er '.name' <<<\"$EXECUTION_PAYLOAD\"", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("jq -e '.properties.template.containers[0].args == [\"--migration\", \"EnforceCustomerProfileOwnership\"]'", migrationJob.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("EXECUTION_ARGS=$(az containerapp job execution show", migrationJob.Value, StringComparison.Ordinal);
         Assert.DoesNotContain("JOB_IDENTITY=", workflow, StringComparison.Ordinal);
         Assert.Contains("deployMigrationJob=false", workflow, StringComparison.Ordinal);
         Assert.Contains("deployMigrationJob=true", workflow, StringComparison.Ordinal);
@@ -245,8 +251,9 @@ public sealed class DeploymentWorkflowPolicyTests
         var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
         var workflow = File.ReadAllText(workflowPath);
 
-        Assert.Contains("az containerapp job start --name \"$JOB_NAME\" --resource-group \"$AZURE_RESOURCE_GROUP\" --query name --output tsv", workflow, StringComparison.Ordinal);
-        Assert.Contains("[[ -n \"$EXECUTION\" ]]", workflow, StringComparison.Ordinal);
+        Assert.Contains("EXECUTION_PAYLOAD=$(az containerapp job start", workflow, StringComparison.Ordinal);
+        Assert.Contains("--args '--migration' 'EnforceCustomerProfileOwnership'", workflow, StringComparison.Ordinal);
+        Assert.Contains("EXECUTION=$(jq -er '.name' <<<\"$EXECUTION_PAYLOAD\")", workflow, StringComparison.Ordinal);
         Assert.Contains("az containerapp job execution show --name \"$JOB_NAME\" --resource-group \"$AZURE_RESOURCE_GROUP\" --job-execution-name \"$EXECUTION\"", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("az containerapp job execution list", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("--query '[0].name'", workflow, StringComparison.Ordinal);
