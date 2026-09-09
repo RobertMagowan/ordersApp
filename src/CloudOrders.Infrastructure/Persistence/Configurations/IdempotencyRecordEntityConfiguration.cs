@@ -8,8 +8,10 @@ internal sealed class IdempotencyRecordEntityConfiguration : IEntityTypeConfigur
     public void Configure(EntityTypeBuilder<IdempotencyRecordEntity> builder)
     {
         builder.ToTable("IdempotencyRecords", "dbo");
-        builder.HasKey(record => new { record.SubjectId, record.IdempotencyKey });
-        builder.Property(record => record.SubjectId).HasMaxLength(200).IsRequired();
+        builder.HasKey(record => new { record.ActorCustomerProfileId, record.IdempotencyKey });
+        builder.Property(record => record.SubjectId).HasMaxLength(200).IsRequired(false);
+        builder.Property(record => record.ActorCustomerProfileId).IsRequired();
+        builder.Property(record => record.TargetCustomerProfileId).IsRequired();
         builder.Property(record => record.IdempotencyKey).ValueGeneratedNever();
         builder.Property(record => record.RequestHash).HasColumnType("binary(32)").IsRequired();
         builder.Property(record => record.ResponseJson).HasColumnType("nvarchar(max)").IsRequired();

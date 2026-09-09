@@ -1,6 +1,6 @@
 # Azure SQL contained-user bootstrap
 
-Run this once after the non-production Azure SQL server and database have deployed, and again only when an identity is recreated. It creates the two Microsoft Entra contained database users required by CloudOrders; it does not create SQL logins or passwords.
+Run this once after the non-production Azure SQL server and database have deployed, and again only when an identity is recreated. It creates or repairs the two Microsoft Entra contained database users required by CloudOrders; it does not create SQL logins or passwords. This is an administrator-only operation and is never performed by GitHub Actions.
 
 ## Prerequisites
 
@@ -14,15 +14,17 @@ Run this once after the non-production Azure SQL server and database have deploy
 From the repository root:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\ops\Bootstrap-CloudOrdersSql.ps1 `
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\ops\Provision-CloudOrdersSqlIdentities.ps1 `
   -EnvironmentName development `
   -ResourceGroupName ordersapp-development `
   -ServerName <sql-server-name> `
   -DatabaseName CloudOrders `
   -ApiIdentityName cloudorders-dev-api `
-  -MigrationIdentityName cloudorders-dev-migrator
+  -ApiApplicationId <api-managed-identity-client-id> `
+  -MigrationIdentityName cloudorders-dev-migrator `
+  -MigrationApplicationId <migration-managed-identity-client-id>
 ```
 
-Use `-WhatIf` to print the idempotent T-SQL before execution. The API identity receives only `db_datareader` and `db_datawriter`; it never receives `db_owner`. The migration identity receives `db_ddladmin`, `db_datareader`, and `db_datawriter` so EF Core can create and update the migration history.
+Use `-WhatIf` to print the idempotent T-SQL before execution. Obtain each client ID from the Azure resource identity. The script verifies each contained principal's application ID against `sys.database_principals.sid` before assigning roles; a recreated identity with the same display name therefore fails closed. The API identity receives only `db_datareader` and `db_datawriter`; it never receives `db_owner`. The migration identity receives `db_ddladmin`, `db_datareader`, and `db_datawriter` so EF Core can create and update the migration history.
 
 The script is intentionally rejected for `production`. A future automation that creates Entra users from a service principal requires a SQL logical-server managed identity with Microsoft Graph directory-read permissions; this bootstrap instead uses the delegated permissions of the signed-in Entra SQL administrator.

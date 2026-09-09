@@ -14,6 +14,8 @@
 - `infra/`, `local/`, `ops/`, and `.github/workflows/` contain Bicep, local emulators, operations, and CI/CD. `infra/main.bicep` composes the focused AVM-backed modules under `infra/modules/`; pinned versions are recorded in `infra/avm-versions.md`.
 - Git promotion is PR-only: `feature/*` → `development` → `test` → `master`; all new feature branches must use the `feature/` prefix. The promotion policy validates the PR source and base branches before merge: `feature/*` into `development`, `development` into `test`, and `test` into `master`. Do not make independent product changes directly on promotion branches. If a promotion PR has conflicts with code changes, return those changes to `development` and recreate the promotion PR after the branch is updated. Because this is a single-developer repository, one developer reviews the PR and remains responsible for merging. Merge every protected-branch PR using GitHub's **Create a merge commit** option; GitHub is configured with squash and rebase merges disabled.
 
+For nonproduction promotion, development/test deployments run automatically after protected merges. The auto-merge workflow confirms the resulting merge and passes its immutable merge commit to the matching deployment; review feedback is assessed and addressed before resolution, and any unresolved review conversation prevents auto-merge. This automation applies only to `feature/*` → `development` and `development` → `test`; test-to-master and production remain excluded from auto-merge. A deployment failure requires diagnosis, a new feature branch, validation, and normal promotion rather than a blind retry.
+
 ## Build, Test, and Development Commands
 
 Run from the repository root:
@@ -30,7 +32,7 @@ az bicep build-params --file infra/environments/test.bicepparam
 az bicep build-params --file infra/environments/production.bicepparam
 ```
 
-Local infrastructure and deployment commands are added per sprint. Never run migrations from application startup; use the documented deployment migration command. Merges to `development`, `test`, and `master` invoke the matching protected GitHub environment workflow. `development` and `test` require the repository owner as deployment reviewer with self-review allowed and administrator bypass disabled; this gates each what-if transition without adding an independent PR approval. The MVP workflow previews and provisions Azure Container Apps, Azure Container Registry, and Log Analytics from `infra/main.bicep`, then publishes an immutable API image. AVM module versions are pinned; the registry-scoped `AcrPull` assignment remains a documented native Bicep exception because the Container App AVM role assignments are app-scoped.
+Local infrastructure and deployment commands are added per sprint. Never run migrations from application startup; use the documented deployment migration command. Merges to `development`, `test`, and `master` invoke the matching protected GitHub environment workflow. `development` and `test` environments have no required-reviewer gate and deploy automatically after their protected merge; `master` continues to invoke the production workflow unchanged. The MVP workflow previews and provisions Azure Container Apps, Azure Container Registry, and Log Analytics from `infra/main.bicep`, then publishes an immutable API image. AVM module versions are pinned; the registry-scoped `AcrPull` assignment remains a documented native Bicep exception because the Container App AVM role assignments are app-scoped.
 
 ## Coding Style and Naming
 

@@ -10,6 +10,36 @@ namespace CloudOrders.IntegrationTests;
 public sealed class CustomerProfileSqlIntegrationTests(SqlServerFixture sqlServer)
 {
     [Fact]
+    public async Task E2RetainsNullableSubjectIdForD1CompatibleIdempotencyWrites()
+    {
+        await using var database = await sqlServer.CreateDatabaseAsync();
+        await using var context = new CloudOrdersDbContext(
+            new DbContextOptionsBuilder<CloudOrdersDbContext>().UseSqlServer(database.ConnectionString).Options);
+        var profileId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var key = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        const string customerReference = "CUS-E2-D1";
+        const string issuer = "https://issuer.example/v2.0";
+        const string sku = "SKU-1";
+        const string status = "Pending";
+        const string responseJson = "{}";
+
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO dbo.CustomerProfiles (Id, CustomerReference, Issuer, ObjectId, CreatedAt, UpdatedAt)
+            VALUES ({profileId}, {customerReference}, {issuer}, {Guid.NewGuid()}, {now}, {now});
+            INSERT INTO dbo.Orders (Id, CustomerReference, ProductSku, Quantity, Status, CreatedAt, UpdatedAt, CustomerProfileId)
+            VALUES ({orderId}, {customerReference}, {sku}, {1}, {status}, {now}, {now}, {profileId});
+            INSERT INTO dbo.IdempotencyRecords
+                (SubjectId, IdempotencyKey, RequestHash, OrderId, ResponseStatus, ResponseJson, CreatedAt, ExpiresAt,
+                 ActorCustomerProfileId, TargetCustomerProfileId)
+            VALUES (NULL, {key}, {new byte[32]}, {orderId}, {201}, {responseJson}, {now}, {now.AddHours(1)}, {profileId}, {profileId});
+            """);
+
+        Assert.Equal(1, await context.Database.SqlQuery<int>($"SELECT COUNT(*) AS Value FROM dbo.IdempotencyRecords WHERE IdempotencyKey = {key}").SingleAsync());
+    }
+
+    [Fact]
     public async Task ConcurrentFirstAccessForTheSameIssuerAndObjectIdCreatesOneProfile()
     {
         await using var database = await sqlServer.CreateDatabaseAsync();

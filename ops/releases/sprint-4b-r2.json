@@ -1,0 +1,9 @@
+{
+  "release": "sprint-4b-r2",
+  "migration": "EnforceCustomerProfileOwnership",
+  "rollback": "Sprint 4A D1",
+  "deployApi": true,
+  "environments": ["development", "test"],
+  "precondition": "ownership-read-only-transaction",
+  "trafficPolicy": "controlled-nonproduction-access"
+}

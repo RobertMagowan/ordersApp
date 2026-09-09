@@ -7,6 +7,11 @@ on:
       - test
       - master
   workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Immutable commit expected by an automated nonproduction promotion.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -27,6 +32,8 @@ jobs:
       - name: Reject a non-promotion branch
         id: promotion_ref
         shell: bash
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF_TYPE" == "branch" ]] || {
@@ -45,6 +52,11 @@ jobs:
               exit 1
               ;;
           esac
+
+          if [[ -n "$RELEASE_SHA" ]]; then
+            [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] || { echo "An immutable release SHA is valid only for a dispatched workflow." >&2; exit 1; }
+            [[ "$RELEASE_SHA" == "$GITHUB_SHA" ]] || { echo "The dispatched release SHA does not match the workflow commit; refusing deployment." >&2; exit 1; }
+          fi
 
       - name: Check out Sprint 4A E1 manifest
         if: github.ref_name == 'development' || github.ref_name == 'test'
@@ -74,10 +86,91 @@ jobs:
           echo "migration_only=true" >> "$GITHUB_OUTPUT"
           echo "migration=AddCustomerProfileOwnershipExpand" >> "$GITHUB_OUTPUT"
 
+  classify_changes:
+    name: Classify deployment changes
+    needs: validate_promotion_ref
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      deployable: ${{ steps.classify.outputs.deployable }}
+      reason: ${{ steps.classify.outputs.reason }}
+      range: ${{ steps.classify.outputs.range }}
+    steps:
+      - name: Check out source history
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: classify
+        shell: bash
+        env:
+          EVENT_BEFORE: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            echo "deployable=true" >> "$GITHUB_OUTPUT"
+            echo "reason=manual_dispatch" >> "$GITHUB_OUTPUT"
+            echo "range=manual" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          COMPARISON_AVAILABLE=true
+          if [[ ! "$EVENT_BEFORE" =~ ^[0-9a-fA-F]{40}$ || "$EVENT_BEFORE" =~ ^0{40}$ ]]; then
+            COMPARISON_AVAILABLE=false
+          elif ! git cat-file -e "$EVENT_BEFORE^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$EVENT_BEFORE" || COMPARISON_AVAILABLE=false
+            git cat-file -e "$EVENT_BEFORE^{commit}" 2>/dev/null || COMPARISON_AVAILABLE=false
+          fi
+
+          if [[ "$COMPARISON_AVAILABLE" == true ]] && ! git cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null; then
+            COMPARISON_AVAILABLE=false
+          fi
+
+          if [[ "$COMPARISON_AVAILABLE" != true ]]; then
+            # comparison_unavailable is deliberately fail-open in Get-DeploymentScope.
+            REQUEST='{"ChangedPaths":[],"ComparisonAvailable":false}'
+          else
+            if ! CHANGED_JSON=$(git diff --name-only "$EVENT_BEFORE" "$GITHUB_SHA" | jq -R -s -c 'split("\n") | map(select(length > 0))'); then
+              COMPARISON_AVAILABLE=false
+              REQUEST='{"ChangedPaths":[],"ComparisonAvailable":false}'
+            else
+              REQUEST=$(printf '{"ChangedPaths":%s,"ComparisonAvailable":true}' "$CHANGED_JSON")
+            fi
+          fi
+
+          RESULT=$(printf '%s\n' "$REQUEST" | pwsh -NoProfile -ExecutionPolicy Bypass -File ops/Get-DeploymentScope.ps1)
+          echo "deployable=$(jq -r '.deployable' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          echo "reason=$(jq -r '.reason' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          if [[ "$COMPARISON_AVAILABLE" == true ]]; then
+            echo "range=$EVENT_BEFORE...$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=unavailable...$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          fi
+
+  deployment_not_required:
+    name: Deployment not required
+    needs: classify_changes
+    if: needs.classify_changes.outputs.deployable == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish deployment decision
+        env:
+          RANGE: ${{ needs.classify_changes.outputs.range }}
+          REASON: ${{ needs.classify_changes.outputs.reason }}
+        run: |
+          {
+            echo "## CloudOrders deployment"
+            echo
+            printf -- '- Range: `%s`\n' "$RANGE"
+            printf -- '- Reason: `%s`\n' "$REASON"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   preview_foundation:
     name: Preview ${{ github.ref_name }} foundation
-    needs: validate_promotion_ref
-    if: needs.validate_promotion_ref.outputs.migration_only != 'true'
+    needs: [validate_promotion_ref, classify_changes]
+    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ needs.validate_promotion_ref.outputs.environment }}
@@ -273,8 +366,8 @@ jobs:
 
   prepare_release:
     name: Prepare and preview ${{ github.ref_name }} release
-    needs: [preview_foundation, validate_promotion_ref]
-    if: needs.validate_promotion_ref.outputs.migration_only != 'true' && needs.preview_foundation.outputs.enabled == 'true'
+    needs: [preview_foundation, validate_promotion_ref, classify_changes]
+    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true' && needs.preview_foundation.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -473,8 +566,8 @@ jobs:
 
   preview_sql:
     name: Preview ${{ github.ref_name }} Azure SQL
-    needs: [prepare_release, validate_promotion_ref]
-    if: needs.validate_promotion_ref.outputs.migration_only != 'true'
+    needs: [prepare_release, validate_promotion_ref, classify_changes]
+    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -517,8 +610,11 @@ jobs:
 
   bootstrap_sql:
     name: Provision ${{ github.ref_name }} Azure SQL
-    needs: [preview_sql, prepare_release, validate_promotion_ref]
-    if: needs.validate_promotion_ref.outputs.migration_only != 'true'
+    needs: [preview_sql, prepare_release, validate_promotion_ref, classify_changes]
+    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
+    outputs:
+      sql_server_name: ${{ steps.sql_target.outputs.server_name }}
+      sql_database_name: ${{ steps.sql_target.outputs.database_name }}
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -546,6 +642,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: Provision nonproduction Azure SQL
+        id: sql_target
         env:
           API_IMAGE: ${{ needs.prepare_release.outputs.image }}
           MIGRATION_IMAGE: ${{ needs.prepare_release.outputs.migration_image }}
@@ -556,6 +653,12 @@ jobs:
           fi
           SQL_DEPLOYMENT_NAME="cloudorders-$DEPLOYMENT_ENVIRONMENT-sql-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           az deployment group create --resource-group "$AZURE_RESOURCE_GROUP" --name "$SQL_DEPLOYMENT_NAME-identity" --template-file infra/main.bicep --parameters "infra/environments/$DEPLOYMENT_ENVIRONMENT.bicepparam" location="$AZURE_LOCATION" environmentName="$DEPLOYMENT_ENVIRONMENT" releaseId="$GITHUB_SHA" appName="$AZURE_APP_NAME" acrName="$AZURE_ACR_NAME" managedEnvironmentName="$AZURE_MANAGED_ENVIRONMENT_NAME" logAnalyticsName="$AZURE_LOG_ANALYTICS_NAME" containerImage="$API_IMAGE" migrationImage="$MIGRATION_IMAGE" useAcr=true deploySql=true deployContainerApp=false deployMigrationJob=false sqlAdministratorLogin="$AZURE_SQL_ADMIN_LOGIN" sqlAdministratorObjectId="$AZURE_SQL_ADMIN_OBJECT_ID" sqlAdministratorTenantId="$AZURE_SQL_ADMIN_TENANT_ID" --mode Incremental
+          SQL_FQDN=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name "$SQL_DEPLOYMENT_NAME-identity" --query properties.outputs.sqlServerFqdn.value --output tsv)
+          SQL_DATABASE=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name "$SQL_DEPLOYMENT_NAME-identity" --query properties.outputs.databaseName.value --output tsv)
+          SQL_SERVER="${SQL_FQDN%%.*}"
+          [[ -n "$SQL_SERVER" && -n "$SQL_DATABASE" ]] || { echo 'SQL deployment did not return a server and database target.' >&2; exit 1; }
+          echo "server_name=$SQL_SERVER" >> "$GITHUB_OUTPUT"
+          echo "database_name=$SQL_DATABASE" >> "$GITHUB_OUTPUT"
           for attempt in {1..5}; do
             retry_output=$(mktemp)
             set +e
@@ -573,8 +676,8 @@ jobs:
 
   run_migration:
     name: Run ${{ github.ref_name }} SQL migration
-    needs: [bootstrap_sql, validate_promotion_ref]
-    if: needs.validate_promotion_ref.outputs.migration_only != 'true'
+    needs: [bootstrap_sql, validate_promotion_ref, classify_changes]
+    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -583,14 +686,49 @@ jobs:
       id-token: write
     env:
       AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
+      AZURE_SQL_SERVER_NAME: ${{ needs.bootstrap_sql.outputs.sql_server_name }}
+      AZURE_SQL_DATABASE_NAME: ${{ needs.bootstrap_sql.outputs.sql_database_name }}
       DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
     steps:
+      - name: Check out release controls
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Sign in to Azure with OIDC
         uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Validate Sprint 4B R2 release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path('ops/releases/sprint-4b-r2.json').read_text(encoding='utf-8'))
+          required = {
+              'release': 'sprint-4b-r2',
+              'migration': 'EnforceCustomerProfileOwnership',
+              'rollback': 'Sprint 4A D1',
+              'deployApi': True,
+              'environments': ['development', 'test'],
+              'precondition': 'ownership-read-only-transaction',
+              'trafficPolicy': 'controlled-nonproduction-access',
+          }
+          if manifest != required:
+              raise SystemExit('Sprint 4B R2 manifest is invalid or has unexpected fields.')
+          if '${{ github.ref_name }}' not in manifest['environments']:
+              raise SystemExit('Sprint 4B R2 is restricted to development and test.')
+          PY
+      - name: Install SQL precondition module
+        shell: pwsh
+        run: Install-Module SqlServer -Scope CurrentUser -Force -AllowClobber
+      - name: Run read-only ownership precondition before migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ops/Bootstrap-CloudOrdersSql.ps1 -EnvironmentName "$DEPLOYMENT_ENVIRONMENT" -ResourceGroupName "$AZURE_RESOURCE_GROUP" -ServerName "$AZURE_SQL_SERVER_NAME" -DatabaseName "$AZURE_SQL_DATABASE_NAME"
       - name: Start nonproduction migration Job
         run: |
           if [[ "$DEPLOYMENT_ENVIRONMENT" == production ]]; then
@@ -602,21 +740,44 @@ jobs:
             test) JOB_NAME='cloudorders-test-migrations' ;;
             *) echo "Unsupported migration environment: $DEPLOYMENT_ENVIRONMENT" >&2; exit 1 ;;
           esac
-          EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query name --output tsv)
+          EXECUTION_TEMPLATE=$(mktemp)
+          trap 'rm -f "$EXECUTION_TEMPLATE"' EXIT
+          az containerapp job show \
+            --name "$JOB_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.template --output json |
+            jq '.containers |= map(if .name == "migrations" then .args = ["--migration", "EnforceCustomerProfileOwnership"] else . end)' \
+              > "$EXECUTION_TEMPLATE"
+          jq -e '.containers | any(.name == "migrations" and .args == ["--migration", "EnforceCustomerProfileOwnership"])' \
+            "$EXECUTION_TEMPLATE" >/dev/null || {
+              echo "Migration execution template did not contain the exact manifest migration." >&2
+              exit 1
+            }
+          EXECUTION=$(az containerapp job start \
+            --name "$JOB_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --yaml "$EXECUTION_TEMPLATE" \
+            --query name --output tsv)
           [[ -n "$EXECUTION" ]] || { echo "Migration Job did not return an execution name." >&2; exit 1; }
+          EXECUTION_ARGS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].args' --output json)
+          python3 - "$EXECUTION_ARGS" <<'PY'
+          import json, sys
+          if json.loads(sys.argv[1]) != ['--migration', 'EnforceCustomerProfileOwnership']:
+              raise SystemExit('Migration execution did not run the exact manifest migration.')
+          PY
           for _ in {1..30}; do
             STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query properties.status --output tsv)
-            [[ "$STATUS" == Succeeded ]] && exit 0
+            [[ "$STATUS" == Succeeded ]] && break
             [[ "$STATUS" == Failed ]] && { echo "Migration Job execution $EXECUTION failed." >&2; exit 1; }
             sleep 10
           done
-          echo "Migration Job did not complete within five minutes." >&2
-          exit 1
+          [[ "$STATUS" == Succeeded ]] || { echo "Migration Job did not complete within five minutes." >&2; exit 1; }
+          echo "Sprint 4B R2 migration execution $EXECUTION completed successfully."
 
   run_sprint_4a_e1_migration_only:
     name: Run Sprint 4A E1 migration only
-    needs: validate_promotion_ref
-    if: needs.validate_promotion_ref.outputs.migration_only == 'true'
+    needs: [validate_promotion_ref, classify_changes]
+    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only == 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ needs.validate_promotion_ref.outputs.environment }}
@@ -750,8 +911,8 @@ jobs:
 
   deploy_release:
     name: Deploy ${{ github.ref_name }} after preview
-    needs: [prepare_release, run_migration, validate_promotion_ref]
-    if: needs.validate_promotion_ref.outputs.migration_only != 'true'
+    needs: [prepare_release, run_migration, validate_promotion_ref, classify_changes]
+    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -918,6 +1079,7 @@ jobs:
           for attempt in {1..30}; do
             STATUS=$(curl --fail --silent --show-error --output /dev/null --write-out '%{http_code}' "$ENDPOINT/health/live" || true)
             if [[ "$STATUS" == "200" ]]; then
+              az containerapp ingress traffic set --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision-weight "$CANDIDATE_REVISION=100"
               echo "Candidate revision $CANDIDATE_REVISION ($CANDIDATE_IMAGE) passed ingress smoke on attempt $attempt."
               echo "url=$ENDPOINT" >> "$GITHUB_OUTPUT"
               echo "revision=$CANDIDATE_REVISION" >> "$GITHUB_OUTPUT"

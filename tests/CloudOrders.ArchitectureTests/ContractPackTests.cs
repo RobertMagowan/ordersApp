@@ -57,6 +57,50 @@ public sealed class ContractPackTests
         Assert.Contains("Sprint 4A", traceability, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void E2MigrationSqlEnforcesOwnershipAndReplacesOnlyTheLegacyKey()
+    {
+        var migrationsDirectory = Path.Combine(FindRepositoryRoot(), "src", "CloudOrders.Infrastructure", "Persistence", "Migrations");
+        var paths = Directory.GetFiles(migrationsDirectory, "*_EnforceCustomerProfileOwnership.cs");
+
+        Assert.Single(paths);
+        var sql = File.ReadAllText(paths[0]);
+        var downStart = sql.IndexOf("protected override void Down", StringComparison.Ordinal);
+        Assert.NotEqual(-1, downStart);
+        var up = sql[..downStart];
+        var down = sql[downStart..];
+        Assert.Contains("AlterColumn<Guid>(", sql, StringComparison.Ordinal);
+        Assert.Contains("name: \"CustomerProfileId\"", sql, StringComparison.Ordinal);
+        Assert.Contains("name: \"ActorCustomerProfileId\"", sql, StringComparison.Ordinal);
+        Assert.Contains("name: \"TargetCustomerProfileId\"", sql, StringComparison.Ordinal);
+        Assert.Contains("nullable: false", sql, StringComparison.Ordinal);
+        Assert.Contains("name: \"SubjectId\"", sql, StringComparison.Ordinal);
+        Assert.Contains("AlterColumn<string>(", sql, StringComparison.Ordinal);
+        Assert.Contains("nullable: true", sql, StringComparison.Ordinal);
+        Assert.Contains("DropPrimaryKey(", sql, StringComparison.Ordinal);
+        Assert.Contains("AddPrimaryKey(", sql, StringComparison.Ordinal);
+        Assert.Contains("ActorCustomerProfileId", sql, StringComparison.Ordinal);
+        Assert.Contains("IdempotencyKey", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("new[] { \"SubjectId\", \"IdempotencyKey\" }", up, StringComparison.Ordinal);
+        Assert.Contains("new[] { \"SubjectId\", \"IdempotencyKey\" }", down, StringComparison.Ordinal);
+        Assert.DoesNotContain("DropColumn(\n                name: \"SubjectId\"", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void E2IdempotencyPersistenceUsesActorOwnershipForLookupAndExpiry()
+    {
+        var storePath = Path.Combine(
+            FindRepositoryRoot(),
+            "src",
+            "CloudOrders.Infrastructure",
+            "Persistence",
+            "SqlIdempotentOrderStore.cs");
+        var store = File.ReadAllText(storePath);
+
+        Assert.Contains("record.ActorCustomerProfileId == actorCustomerProfileId", store, StringComparison.Ordinal);
+        Assert.DoesNotContain("record.SubjectId == request.SubjectId && record.IdempotencyKey", store, StringComparison.Ordinal);
+    }
+
     private static void AssertContractDocument(string contractsDirectory, string fileName, string requiredText)
     {
         var path = Path.Combine(contractsDirectory, fileName);

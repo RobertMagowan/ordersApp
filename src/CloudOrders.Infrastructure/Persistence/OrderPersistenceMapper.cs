@@ -15,6 +15,7 @@ internal static class OrderPersistenceMapper
             CreatedAt = order.CreatedAt,
             UpdatedAt = order.UpdatedAt,
             CustomerProfileId = customerProfileId
+                ?? throw new InvalidOperationException("Order ownership is required for SQL persistence.")
         };
 
     public static Order ToDomain(OrderEntity entity)

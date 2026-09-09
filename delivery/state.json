@@ -74,29 +74,35 @@
         "id": "4A-4",
         "name": "Owner-aware authorization",
         "risk": "high",
-        "lifecycle": "TODO",
-        "prLifecycle": "NONE",
-        "reviewStatus": "NOT_REQUESTED",
-        "stage": "PLANNING",
-        "acceptanceVerification": { "stage": "PRE_MERGE", "status": "PENDING" },
-        "evidenceBindings": [],
+        "lifecycle": "QA_DEPLOYED",
+        "prLifecycle": "MERGED",
+        "reviewStatus": "APPROVED",
+        "stage": "QA",
+        "acceptanceVerification": { "stage": "QA", "status": "PASS" },
+        "evidenceBindings": [
+          { "commit": "ef869617c585c5e51e484ad0d446da4bceddc176", "workflowRun": 34047231704, "environment": "development", "artifact": "cloudordersd583431devacr.azurecr.io/cloudorders-api@sha256:893f126d57c370e80b66ff26f82d740252ecc7d418cb0e3f2664fe4aa538e657", "status": "CURRENT" },
+          { "commit": "778ae7e08130d3429ff7120055adf1dbcd3efd6d", "workflowRun": 34061359073, "environment": "test", "artifact": "cloudorderst583431testacr.azurecr.io/cloudorders-api@sha256:89c345369e75777b9879d67a170c8929360e41a9ba2c7b4565a95f7c893690fb", "status": "CURRENT" }
+        ],
         "retryCounters": { "command": 0, "deployment": 0 },
         "blockers": [],
-        "gates": { "codeReview": { "status": "NOT_APPLICABLE" }, "ci": { "status": "NOT_APPLICABLE" }, "devValidation": { "status": "PENDING" }, "independentReview": { "status": "PENDING" }, "qaValidation": { "status": "PENDING" } }
+        "gates": { "codeReview": { "status": "PASS" }, "ci": { "status": "PASS" }, "devValidation": { "status": "PASS" }, "independentReview": { "status": "PASS" }, "qaValidation": { "status": "PASS" } }
       },
       {
         "id": "4A-5",
         "name": "Current customer discovery endpoint",
         "risk": "standard",
-        "lifecycle": "TODO",
-        "prLifecycle": "NONE",
-        "reviewStatus": "NOT_REQUESTED",
-        "stage": "PLANNING",
-        "acceptanceVerification": { "stage": "PRE_MERGE", "status": "PENDING" },
-        "evidenceBindings": [],
+        "lifecycle": "QA_DEPLOYED",
+        "prLifecycle": "MERGED",
+        "reviewStatus": "APPROVED",
+        "stage": "QA",
+        "acceptanceVerification": { "stage": "QA", "status": "PASS" },
+        "evidenceBindings": [
+          { "commit": "ef869617c585c5e51e484ad0d446da4bceddc176", "workflowRun": 34047231704, "environment": "development", "artifact": "cloudordersd583431devacr.azurecr.io/cloudorders-api@sha256:893f126d57c370e80b66ff26f82d740252ecc7d418cb0e3f2664fe4aa538e657", "status": "CURRENT" },
+          { "commit": "778ae7e08130d3429ff7120055adf1dbcd3efd6d", "workflowRun": 34061359073, "environment": "test", "artifact": "cloudorderst583431testacr.azurecr.io/cloudorders-api@sha256:89c345369e75777b9879d67a170c8929360e41a9ba2c7b4565a95f7c893690fb", "status": "CURRENT" }
+        ],
         "retryCounters": { "command": 0, "deployment": 0 },
         "blockers": [],
-        "gates": { "codeReview": { "status": "NOT_APPLICABLE" }, "ci": { "status": "NOT_APPLICABLE" }, "devValidation": { "status": "PENDING" }, "independentReview": { "status": "PENDING" } }
+        "gates": { "codeReview": { "status": "PASS" }, "ci": { "status": "PASS" }, "devValidation": { "status": "PASS" }, "independentReview": { "status": "PASS" } }
       },
       {
         "id": "4A-6",
@@ -116,15 +122,18 @@
         "id": "4A-7-D1",
         "name": "D1 data transition and release",
         "risk": "high",
-        "lifecycle": "IN_PROGRESS",
-        "prLifecycle": "NONE",
-        "reviewStatus": "NOT_REQUESTED",
-        "stage": "BLOCKED",
-        "acceptanceVerification": { "stage": "PRE_MERGE", "status": "BLOCKED" },
-        "evidenceBindings": [],
+        "lifecycle": "QA_DEPLOYED",
+        "prLifecycle": "MERGED",
+        "reviewStatus": "APPROVED",
+        "stage": "QA",
+        "acceptanceVerification": { "stage": "QA", "status": "PASS" },
+        "evidenceBindings": [
+          { "commit": "ef869617c585c5e51e484ad0d446da4bceddc176", "workflowRun": 34047231704, "environment": "development", "artifact": "cloudordersd583431devacr.azurecr.io/cloudorders-api@sha256:893f126d57c370e80b66ff26f82d740252ecc7d418cb0e3f2664fe4aa538e657", "status": "CURRENT" },
+          { "commit": "778ae7e08130d3429ff7120055adf1dbcd3efd6d", "workflowRun": 34061359073, "environment": "test", "artifact": "cloudorderst583431testacr.azurecr.io/cloudorders-api@sha256:89c345369e75777b9879d67a170c8929360e41a9ba2c7b4565a95f7c893690fb", "status": "CURRENT" }
+        ],
         "retryCounters": { "command": 0, "deployment": 0 },
-        "blockers": [{ "status": "HUMAN_DECISION_REQUIRED", "reason": "External ID tenant and reset-or-mapped-backfill data-transition decision are required before D1 traffic." }],
-        "gates": { "codeReview": { "status": "PENDING" }, "ci": { "status": "PENDING" }, "devValidation": { "status": "BLOCKED" }, "independentReview": { "status": "PENDING" }, "qaValidation": { "status": "PENDING" } }
+        "blockers": [{ "status": "RESOLVED", "reason": "The approved reset transition completed in development and test before D1 traffic was restored." }],
+        "gates": { "codeReview": { "status": "PASS" }, "ci": { "status": "PASS" }, "devValidation": { "status": "PASS" }, "independentReview": { "status": "PASS" }, "qaValidation": { "status": "PASS" } }
       }
     ]
   }
