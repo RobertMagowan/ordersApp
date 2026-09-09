@@ -13,7 +13,7 @@ param tags object
 module database 'br/avm:res/sql/server/database:0.3.0' = {
   name: 'cloudOrdersSqlDatabaseAvm'
   params: {
-    autoPauseDelay: 60
+    autoPauseDelay: 15
     availabilityZone: -1
     enableTelemetry: false
     location: location
