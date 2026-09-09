@@ -155,6 +155,47 @@ public sealed class DeploymentWorkflowPolicyTests
     }
 
     [Fact]
+    public void DeploymentWorkflowRetriesOnlyTheFinalAzureOidcLogin()
+    {
+        var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml"));
+        var releaseJob = GetJobSection(workflow, "deploy_release");
+        var initialLogin = GetStepSection(releaseJob.Value, "Sign in to Azure with OIDC (initial attempt)");
+        var retryDelay = GetStepSection(releaseJob.Value, "Wait before Azure OIDC retry");
+        var retryLogin = GetStepSection(releaseJob.Value, "Sign in to Azure with OIDC (retry)");
+        var failureGuard = GetStepSection(releaseJob.Value, "Fail after repeated Azure OIDC login failures");
+
+        Assert.Contains("id: azure_login_initial", initialLogin.Value, StringComparison.Ordinal);
+        Assert.Contains("continue-on-error: true", initialLogin.Value, StringComparison.Ordinal);
+        Assert.Contains("azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0", initialLogin.Value, StringComparison.Ordinal);
+        Assert.Contains("if: steps.azure_login_initial.outcome == 'failure'", retryDelay.Value, StringComparison.Ordinal);
+        Assert.Contains("sleep 10", retryDelay.Value, StringComparison.Ordinal);
+        Assert.Contains("id: azure_login_retry", retryLogin.Value, StringComparison.Ordinal);
+        Assert.Contains("continue-on-error: true", retryLogin.Value, StringComparison.Ordinal);
+        Assert.Contains("if: steps.azure_login_initial.outcome == 'failure'", retryLogin.Value, StringComparison.Ordinal);
+        Assert.Contains("if: steps.azure_login_initial.outcome == 'failure' && steps.azure_login_retry.outcome == 'failure'", failureGuard.Value, StringComparison.Ordinal);
+        Assert.Contains("exit 1", failureGuard.Value, StringComparison.Ordinal);
+
+        Assert.Equal(2, Regex.Count(
+            releaseJob.Value,
+            "azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0",
+            RegexOptions.CultureInvariant));
+        Assert.Equal(1, Regex.Count(workflow, Regex.Escape("Sign in to Azure with OIDC (initial attempt)"), RegexOptions.CultureInvariant));
+        Assert.Equal(1, Regex.Count(workflow, Regex.Escape("Wait before Azure OIDC retry"), RegexOptions.CultureInvariant));
+        Assert.Equal(1, Regex.Count(workflow, Regex.Escape("Sign in to Azure with OIDC (retry)"), RegexOptions.CultureInvariant));
+        Assert.Equal(1, Regex.Count(workflow, Regex.Escape("Fail after repeated Azure OIDC login failures"), RegexOptions.CultureInvariant));
+
+        Assert.True(
+            initialLogin.Index < retryDelay.Index
+            && retryDelay.Index < retryLogin.Index
+            && retryLogin.Index < failureGuard.Index,
+            "The retry steps must execute in their fail-closed order.");
+
+        var firstMutation = releaseJob.Value.IndexOf("name: Install Bicep", StringComparison.Ordinal);
+        Assert.True(firstMutation > failureGuard.Index,
+            "The repeated-failure guard must run before installation or any release mutation.");
+    }
+
+    [Fact]
     public void DeploymentWorkflowRunsSqlMigrationBeforeApiCandidatePromotion()
     {
         var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
