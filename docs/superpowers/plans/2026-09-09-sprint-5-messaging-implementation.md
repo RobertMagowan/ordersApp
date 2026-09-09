@@ -107,4 +107,4 @@
 
 - Coverage: Tasks 1–4 implement every persistence, publishing, processing, failure, replay, and local-proof requirement; Task 5 covers Azure identity/IaC/development proof; Task 6 covers independent review and test QA.
 - Dependencies: Tasks 2–4 depend on Task 1; Task 3 depends on Task 2 event contract; Task 4 depends on Task 3 settlement path; Tasks 5–6 depend on the complete local path.
-- No production scope, secrets, startup migration, broad roles, or ambiguous placeholder remains.
+- No production scope, secrets, startup migration, broad roles, or ambiguous implementation gap remains.
