@@ -5,15 +5,19 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 string? targetMigration = null;
+var ownershipPrecondition = args.Length == 1 && string.Equals(args[0], "--ownership-precondition", StringComparison.Ordinal);
 if (args.Length > 0)
 {
-    if (args.Length != 2 || !string.Equals(args[0], "--migration", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(args[1]))
+    if (!ownershipPrecondition && (args.Length != 2 || !string.Equals(args[0], "--migration", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(args[1])))
     {
         Console.Error.WriteLine("SQL migration accepts only '--migration <migration-id>'.");
         return 1;
     }
 
-    targetMigration = args[1];
+    if (!ownershipPrecondition)
+    {
+        targetMigration = args[1];
+    }
 }
 
 var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__CloudOrders")
@@ -32,7 +36,20 @@ try
         .Options;
     await using var context = new CloudOrdersDbContext(options);
 
-    if (targetMigration is null)
+    if (ownershipPrecondition)
+    {
+        await context.Database.ExecuteSqlRawAsync("""
+            SET NOCOUNT ON; SET XACT_ABORT ON; BEGIN TRANSACTION;
+            DECLARE @invalid bigint = (SELECT COUNT_BIG(*) FROM dbo.Orders WHERE CustomerProfileId IS NULL)
+              + (SELECT COUNT_BIG(*) FROM dbo.IdempotencyRecords WHERE ActorCustomerProfileId IS NULL)
+              + (SELECT COUNT_BIG(*) FROM dbo.IdempotencyRecords WHERE TargetCustomerProfileId IS NULL)
+              + (SELECT COUNT_BIG(*) FROM (SELECT ActorCustomerProfileId, IdempotencyKey FROM dbo.IdempotencyRecords GROUP BY ActorCustomerProfileId, IdempotencyKey HAVING COUNT_BIG(*) > 1) AS duplicateGroups);
+            IF @invalid <> 0 THROW 51001, 'Sprint 4B ownership precondition failed; migration is blocked.', 1;
+            ROLLBACK TRANSACTION;
+            """);
+        Console.WriteLine("SQL ownership precondition passed.");
+    }
+    else if (targetMigration is null)
     {
         await context.Database.MigrateAsync();
     }
@@ -84,7 +101,7 @@ try
         }
     }
 
-    Console.WriteLine("SQL migrations applied successfully.");
+    if (!ownershipPrecondition) Console.WriteLine("SQL migrations applied successfully.");
     return 0;
 }
 catch (Exception exception)
