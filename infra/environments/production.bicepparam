@@ -9,5 +9,6 @@ param logAnalyticsName = 'cloudorders-prod-logs'
 param containerImage = 'mcr.microsoft.com/k8se/quickstart:latest'
 param useAcr = false
 param createAcrPullRole = false
+param minReplicas = 1
 param deploySql = false
 param externalIdentityEnabled = false

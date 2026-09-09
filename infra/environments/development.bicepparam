@@ -9,6 +9,7 @@ param logAnalyticsName = 'cloudorders-dev-logs'
 param containerImage = 'mcr.microsoft.com/k8se/quickstart:latest'
 param useAcr = false
 param createAcrPullRole = false
+param minReplicas = 0
 param deploySql = false
 param sqlServerName = 'cloudordersd583431devsql'
 param sqlDatabaseName = 'CloudOrders'
