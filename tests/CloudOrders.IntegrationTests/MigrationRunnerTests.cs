@@ -104,11 +104,15 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
     [Fact]
     public async Task MigrationRunnerFailsWhenMigrationCannotConnect()
     {
-        var result = await RunRunnerAsync(
-            "Server=localhost,1;Initial Catalog=CloudOrders;User ID=invalid;Password=invalid;Connect Timeout=1;Encrypt=False");
+        const string invalidConnectionString = "Server=localhost,1;Initial Catalog=CloudOrders;User ID=invalid;Password=invalid;Connect Timeout=1;Encrypt=False";
+        var result = await RunRunnerAsync(invalidConnectionString);
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("SQL migration failed:", result.StandardError);
+        Assert.Contains("detail=SqlErrorNumber=", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("; SqlErrorState=", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("; SqlErrorClass=", result.StandardError, StringComparison.Ordinal);
+        Assert.DoesNotContain(invalidConnectionString, result.StandardError, StringComparison.Ordinal);
     }
 
     [Fact]
