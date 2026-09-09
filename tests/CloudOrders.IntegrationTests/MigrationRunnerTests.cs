@@ -18,7 +18,7 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
             .Options;
         await using var context = new CloudOrdersDbContext(options);
 
-        Assert.Equal(0, result.ExitCode);
+        Assert.True(result.ExitCode == 0, result.StandardError);
         Assert.Contains(
             "20260816221235_InitialSqlPersistence",
             await context.Database.GetAppliedMigrationsAsync(CancellationToken.None));
@@ -89,6 +89,19 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
     }
 
     [Fact]
+    public async Task OwnershipPreconditionRunnerSucceedsForCompliantSchema()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        var initialResult = await RunRunnerAsync(database.ConnectionString);
+
+        var result = await RunRunnerAsync(database.ConnectionString, ownershipPrecondition: true);
+
+        Assert.Equal(0, initialResult.ExitCode);
+        Assert.True(result.ExitCode == 0, result.StandardError);
+        Assert.Contains("SQL ownership precondition passed.", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task MigrationRunnerFailsWhenMigrationCannotConnect()
     {
         var result = await RunRunnerAsync(
@@ -112,7 +125,7 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
         Assert.DoesNotContain(database.ConnectionString, result.StandardError, StringComparison.Ordinal);
     }
 
-    private static async Task<MigrationRunResult> RunRunnerAsync(string? connectionString, string? migration = null)
+    private static async Task<MigrationRunResult> RunRunnerAsync(string? connectionString, string? migration = null, bool ownershipPrecondition = false)
     {
         var runnerAssembly = Path.Combine(
             RepositoryRoot(),
@@ -126,7 +139,7 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
         var startInfo = new ProcessStartInfo("dotnet")
         {
             Arguments = $"\"{runnerAssembly}\"" +
-                (migration is null ? string.Empty : $" --migration {migration}"),
+                (ownershipPrecondition ? " --ownership-precondition" : migration is null ? string.Empty : $" --migration {migration}"),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false

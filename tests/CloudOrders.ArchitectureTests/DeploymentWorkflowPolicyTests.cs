@@ -170,7 +170,8 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("--query properties.template --output json", migrationJob.Value, StringComparison.Ordinal);
         Assert.Contains(".containers |= map(if .name == \"migrations\" then .args = [\"--migration\", \"EnforceCustomerProfileOwnership\"] else . end)", migrationJob.Value, StringComparison.Ordinal);
         Assert.Contains("--yaml \"$EXECUTION_TEMPLATE\"", migrationJob.Value, StringComparison.Ordinal);
-        Assert.Contains("EXECUTION_ARGS=$(az containerapp job execution show", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("PRECONDITION_EXECUTION=$(az containerapp job start", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("[\"--ownership-precondition\"]", migrationJob.Value, StringComparison.Ordinal);
         Assert.DoesNotContain("--args '--migration' 'EnforceCustomerProfileOwnership'", migrationJob.Value, StringComparison.Ordinal);
         Assert.DoesNotContain("JOB_IDENTITY=", workflow, StringComparison.Ordinal);
         Assert.Contains("deployMigrationJob=false", workflow, StringComparison.Ordinal);
@@ -216,34 +217,6 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("AZURE_SQL_DATABASE_NAME: ${{ needs.bootstrap_sql.outputs.sql_database_name }}", migrationJob.Value, StringComparison.Ordinal);
         Assert.DoesNotContain("AZURE_SQL_SERVER_NAME: ${{ vars.AZURE_SQL_SERVER_NAME }}", migrationJob.Value, StringComparison.Ordinal);
         Assert.DoesNotContain("AZURE_SQL_DATABASE_NAME: ${{ vars.AZURE_SQL_DATABASE_NAME }}", migrationJob.Value, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void MigrationInstallsTheRequiredSqlServerModuleBeforeTheReadOnlyPrecondition()
-    {
-        var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
-        var workflow = File.ReadAllText(workflowPath);
-        var migrationJob = GetJobSection(workflow, "run_migration");
-        var moduleStep = GetStepSection(migrationJob.Value, "Install SQL precondition module");
-        var preconditionStep = GetStepSection(migrationJob.Value, "Run read-only ownership precondition before migration");
-
-        Assert.Contains("Install-Module SqlServer -Scope CurrentUser -Force -AllowClobber", moduleStep.Value, StringComparison.Ordinal);
-        Assert.True(
-            migrationJob.Value.IndexOf(moduleStep.Value, StringComparison.Ordinal) < migrationJob.Value.IndexOf(preconditionStep.Value, StringComparison.Ordinal),
-            "The SqlServer module must be available before the precondition invokes Bootstrap-CloudOrdersSql.ps1.");
-    }
-
-    [Fact]
-    public void MigrationOwnershipPreconditionDoesNotPassManagedIdentitiesToCi()
-    {
-        var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
-        var workflow = File.ReadAllText(workflowPath);
-        var migrationJob = GetJobSection(workflow, "run_migration");
-        var preconditionStep = GetStepSection(migrationJob.Value, "Run read-only ownership precondition before migration");
-
-        Assert.Contains("-DatabaseName \"$AZURE_SQL_DATABASE_NAME\"", preconditionStep.Value, StringComparison.Ordinal);
-        Assert.DoesNotContain("-ApiIdentityName", preconditionStep.Value, StringComparison.Ordinal);
-        Assert.DoesNotContain("-MigrationIdentityName", preconditionStep.Value, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -508,6 +481,17 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.DoesNotContain("az containerapp ingress enable", releaseJob.Value, StringComparison.Ordinal);
         Assert.DoesNotContain("az containerapp ingress traffic set", releaseJob.Value, StringComparison.Ordinal);
         Assert.DoesNotContain("ingress_maintenance_started", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Sprint4BR2RunsOwnershipPreconditionInTheMigrationJob()
+    {
+        var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml"));
+        var migrationJob = GetJobSection(workflow, "run_migration");
+
+        Assert.DoesNotContain("Bootstrap-CloudOrdersSql.ps1", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("--ownership-precondition", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("Ownership precondition execution", migrationJob.Value, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()
