@@ -123,5 +123,6 @@ static string GetFailureCategory(Exception exception) => exception switch
 static string GetSafeFailureDetail(Exception exception, string connectionString) => exception switch
 {
     InvalidOperationException => exception.Message.Replace(connectionString, "[REDACTED]", StringComparison.Ordinal),
+    SqlException sqlException => $"SqlErrorNumber={sqlException.Number}; SqlErrorState={sqlException.State}; SqlErrorClass={sqlException.Class}",
     _ => "Unavailable"
 };
