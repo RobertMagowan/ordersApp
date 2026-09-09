@@ -12,9 +12,11 @@ public sealed record OrderCreatedIntegrationEventV1(
 {
     public const int CurrentMessageVersion = 1;
     public const string MessageType = "orders.order-created";
+    private readonly int messageVersion = CurrentMessageVersion;
+    private readonly string serializedMessageType = MessageType;
     [JsonPropertyName("messageVersion")]
-    public int MessageVersion { get; init; } = CurrentMessageVersion;
+    public int MessageVersion => messageVersion;
     [JsonPropertyName("messageType")]
-    public string SerializedMessageType { get; init; } = MessageType;
+    public string SerializedMessageType => serializedMessageType;
     public string? TraceParent { get; init; }
 }

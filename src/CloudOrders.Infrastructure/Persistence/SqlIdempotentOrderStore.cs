@@ -150,20 +150,34 @@ public sealed class SqlIdempotentOrderStore(
         return CreateOrderResult.Replayed(response);
     }
 
-    private static OutboxMessageEntity ToOutboxEntity(IdempotentOrderRequest request) =>
-        new()
+    private static OutboxMessageEntity ToOutboxEntity(IdempotentOrderRequest request)
+    {
+        var source = request.IntegrationEvent;
+        var canonicalEvent = new OrderCreatedIntegrationEventV1(
+            source.EventId,
+            source.OrderId,
+            source.CustomerReference,
+            source.ProductSku,
+            source.Quantity,
+            source.OccurredAt)
         {
-            EventId = request.IntegrationEvent.EventId,
+            TraceParent = request.TraceParent
+        };
+
+        return new()
+        {
+            EventId = canonicalEvent.EventId,
             OrderId = request.Order.Id,
             AggregateId = request.Order.Id,
             MessageType = OrderCreatedIntegrationEventV1.MessageType,
-            MessageVersion = request.IntegrationEvent.MessageVersion,
-            Payload = JsonSerializer.Serialize(request.IntegrationEvent with { TraceParent = request.TraceParent }, JsonOptions),
-            OccurredAt = request.IntegrationEvent.OccurredAt,
+            MessageVersion = OrderCreatedIntegrationEventV1.CurrentMessageVersion,
+            Payload = JsonSerializer.Serialize(canonicalEvent, JsonOptions),
+            OccurredAt = canonicalEvent.OccurredAt,
             CreatedAt = request.Order.CreatedAt,
             AttemptCount = 0,
             TraceParent = request.TraceParent
         };
+    }
 
     private static IdempotencyRecordEntity ToIdempotencyEntity(IdempotentOrderRequest request) =>
         new()

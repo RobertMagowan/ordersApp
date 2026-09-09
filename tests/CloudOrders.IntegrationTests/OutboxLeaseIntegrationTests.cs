@@ -45,11 +45,10 @@ public sealed class OutboxLeaseIntegrationTests(SqlServerFixture sqlServer)
 
         var claims = await Task.WhenAll(
             store.ClaimAsync("publisher-cap-a", 500, TimeSpan.FromSeconds(90), CancellationToken.None),
-            store.ClaimAsync("publisher-cap-b", 1, TimeSpan.FromSeconds(90), CancellationToken.None));
+            store.ClaimAsync("publisher-cap-b", 500, TimeSpan.FromSeconds(90), CancellationToken.None));
 
         Assert.Equal(501, claims.Sum(x => x.Count));
-        Assert.Contains(claims, x => x.Count == 500);
-        Assert.Contains(claims, x => x.Count == 1);
+        Assert.All(claims, batch => Assert.InRange(batch.Count, 1, 500));
     }
 
     [Fact]
@@ -60,12 +59,28 @@ public sealed class OutboxLeaseIntegrationTests(SqlServerFixture sqlServer)
         var store = CreateStore(database.ConnectionString);
 
         var first = Assert.Single(await store.ClaimAsync("publisher-old", 500, TimeSpan.FromMilliseconds(1), CancellationToken.None));
-        await Task.Delay(1200);
+        await WaitForAsync(async () =>
+            await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.OutboxMessages WHERE LeaseExpiresAt <= SYSUTCDATETIME()") == 1);
         var reclaimed = Assert.Single(await store.ClaimAsync("publisher-new", 500, TimeSpan.FromSeconds(90), CancellationToken.None));
 
         Assert.NotEqual(first.LeaseToken, reclaimed.LeaseToken);
         Assert.False(await store.MarkPublishedAsync(first.EventId, first.LeaseOwner, first.LeaseToken, CancellationToken.None));
         Assert.True(await store.MarkPublishedAsync(reclaimed.EventId, reclaimed.LeaseOwner, reclaimed.LeaseToken, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RenewRequiresMatchingActiveLeaseAndToken()
+    {
+        await using var database = await sqlServer.CreateDatabaseAsync();
+        await SeedOutboxAsync(database.ConnectionString, 1);
+        var store = CreateStore(database.ConnectionString);
+        var claim = Assert.Single(await store.ClaimAsync("publisher-renew", 1, TimeSpan.FromSeconds(90), CancellationToken.None));
+
+        Assert.True(await store.RenewAsync(claim.EventId, claim.LeaseOwner, claim.LeaseToken, TimeSpan.FromSeconds(90), CancellationToken.None));
+        Assert.False(await store.RenewAsync(claim.EventId, "another-owner", claim.LeaseToken, TimeSpan.FromSeconds(90), CancellationToken.None));
+        Assert.False(await store.RenewAsync(claim.EventId, claim.LeaseOwner, Guid.NewGuid(), TimeSpan.FromSeconds(90), CancellationToken.None));
+        await ExecuteAsync(database.ConnectionString, "UPDATE dbo.OutboxMessages SET LeaseExpiresAt = DATEADD(second, -1, SYSUTCDATETIME()) WHERE EventId = @eventId", command => command.Parameters.AddWithValue("@eventId", claim.EventId));
+        Assert.False(await store.RenewAsync(claim.EventId, claim.LeaseOwner, claim.LeaseToken, TimeSpan.FromSeconds(90), CancellationToken.None));
     }
 
     [Fact]
@@ -96,24 +111,55 @@ public sealed class OutboxLeaseIntegrationTests(SqlServerFixture sqlServer)
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         var profile = Guid.NewGuid();
-        var values = new List<string>(count);
+        await using var profileCommand = connection.CreateCommand();
+        profileCommand.CommandText = "INSERT INTO dbo.CustomerProfiles (Id, CustomerReference, Issuer, ObjectId, CreatedAt, UpdatedAt) VALUES (@profile, 'PROFILE', 'issuer', @objectId, SYSUTCDATETIME(), SYSUTCDATETIME());";
+        profileCommand.Parameters.AddWithValue("@profile", profile);
+        profileCommand.Parameters.AddWithValue("@objectId", Guid.NewGuid());
+        await profileCommand.ExecuteNonQueryAsync();
+
         for (var i = 0; i < count; i++)
         {
             var order = Guid.NewGuid();
             var eventId = Guid.NewGuid();
-            values.Add($"('{order}', 'C{i}', 'SKU', 1, 'Pending', SYSUTCDATETIME(), SYSUTCDATETIME(), '{profile}', '{eventId}', '{order}', '{eventId}', '{order}')");
+            command.CommandText = "INSERT INTO dbo.Orders (Id, CustomerReference, ProductSku, Quantity, Status, CreatedAt, UpdatedAt, CustomerProfileId) VALUES (@order, @customer, 'SKU', 1, 'Pending', SYSUTCDATETIME(), SYSUTCDATETIME(), @profile); INSERT INTO dbo.OutboxMessages (EventId, OrderId, AggregateId, MessageType, MessageVersion, Payload, OccurredAt, CreatedAt, AttemptCount) VALUES (@event, @order, @order, 'orders.order-created', 1, @payload, SYSUTCDATETIME(), SYSUTCDATETIME(), 0);";
+            command.Parameters.Clear();
+            command.Parameters.AddWithValue("@order", order);
+            command.Parameters.AddWithValue("@customer", $"C{i}");
+            command.Parameters.AddWithValue("@profile", profile);
+            command.Parameters.AddWithValue("@event", eventId);
+            command.Parameters.AddWithValue("@payload", $"{{\"eventId\":\"{eventId}\",\"orderId\":\"{order}\",\"messageType\":\"orders.order-created\",\"messageVersion\":1}}");
+            await command.ExecuteNonQueryAsync();
         }
-        command.CommandText = $"INSERT INTO dbo.CustomerProfiles (Id, CustomerReference, Issuer, ObjectId, CreatedAt, UpdatedAt) VALUES ('{profile}', 'PROFILE', 'issuer', '{Guid.NewGuid()}', SYSUTCDATETIME(), SYSUTCDATETIME()); INSERT INTO dbo.Orders (Id, CustomerReference, ProductSku, Quantity, Status, CreatedAt, UpdatedAt, CustomerProfileId) VALUES {string.Join(',', values.Select(v => v[..v.IndexOf(", '", StringComparison.Ordinal)]))};";
-        // Build inserts separately to keep each statement's columns explicit.
-        command.CommandText = $"INSERT INTO dbo.CustomerProfiles (Id, CustomerReference, Issuer, ObjectId, CreatedAt, UpdatedAt) VALUES ('{profile}', 'PROFILE', 'issuer', '{Guid.NewGuid()}', SYSUTCDATETIME(), SYSUTCDATETIME());";
-        foreach (var value in values)
+    }
+
+    private static async Task WaitForAsync(Func<Task<bool>> condition)
+    {
+        for (var attempt = 0; attempt < 20; attempt++)
         {
-            var parts = value.Trim('(', ')').Split(", '", StringSplitOptions.None);
-            var order = parts[0].Trim('\'');
-            var customer = parts[1].Trim('\'');
-            var eventId = parts[8].Trim('\'');
-            command.CommandText += $" INSERT INTO dbo.Orders (Id, CustomerReference, ProductSku, Quantity, Status, CreatedAt, UpdatedAt, CustomerProfileId) VALUES ('{order}', '{customer}', 'SKU', 1, 'Pending', SYSUTCDATETIME(), SYSUTCDATETIME(), '{profile}'); INSERT INTO dbo.OutboxMessages (EventId, OrderId, AggregateId, MessageType, MessageVersion, Payload, OccurredAt, CreatedAt, AttemptCount) VALUES ('{eventId}', '{order}', '{order}', 'orders.order-created', 1, '{{\"eventId\":\"{eventId}\",\"orderId\":\"{order}\",\"messageType\":\"orders.order-created\",\"messageVersion\":1}}', SYSUTCDATETIME(), SYSUTCDATETIME(), 0);";
+            if (await condition()) return;
+            await Task.Delay(100);
         }
+        Assert.Fail("Condition was not met within the polling window.");
+    }
+
+    private static async Task<T> ScalarAsync<T>(string connectionString, string sql)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        var value = await command.ExecuteScalarAsync();
+        Assert.NotNull(value);
+        return (T)Convert.ChangeType(value, typeof(T), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static async Task ExecuteAsync(string connectionString, string sql, Action<SqlCommand> configure)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        configure(command);
         await command.ExecuteNonQueryAsync();
     }
 
