@@ -25,7 +25,7 @@ public sealed class SqlIdempotentOrderStore(
         var rows = new List<OutboxMessageLease>();
         await using var command = context.Database.GetDbConnection().CreateCommand();
         command.CommandText = """
-            UPDATE TOP (@batchSize) o WITH (UPDLOCK, READPAST, ROWLOCK)
+            UPDATE TOP (@batchSize) o WITH (UPDLOCK, READPAST, READCOMMITTEDLOCK, ROWLOCK)
             SET LeaseOwner = @owner, LeaseToken = @token,
                 LeaseExpiresAt = DATEADD(second, @durationSeconds, SYSUTCDATETIME()),
                 AttemptCount = AttemptCount + 1, LastAttemptAt = SYSUTCDATETIME()

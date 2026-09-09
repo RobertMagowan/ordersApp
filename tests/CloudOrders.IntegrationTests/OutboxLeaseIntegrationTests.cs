@@ -52,6 +52,23 @@ public sealed class OutboxLeaseIntegrationTests(SqlServerFixture sqlServer)
     }
 
     [Fact]
+    public async Task ConcurrentClaimsWorkWhenReadCommittedSnapshotIsEnabled()
+    {
+        await using var database = await sqlServer.CreateDatabaseAsync();
+        await ExecuteAsync(database.ConnectionString, "ALTER DATABASE CURRENT SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE", _ => { });
+        Assert.Equal(1, await ScalarAsync<int>(database.ConnectionString, "SELECT is_read_committed_snapshot_on FROM sys.databases WHERE name = DB_NAME()"));
+        await SeedOutboxAsync(database.ConnectionString, 501);
+        var store = CreateStore(database.ConnectionString);
+
+        var claims = await Task.WhenAll(
+            store.ClaimAsync("publisher-rcsi-a", 500, TimeSpan.FromSeconds(90), CancellationToken.None),
+            store.ClaimAsync("publisher-rcsi-b", 500, TimeSpan.FromSeconds(90), CancellationToken.None));
+
+        Assert.Equal(501, claims.Sum(x => x.Count));
+        Assert.All(claims, batch => Assert.InRange(batch.Count, 1, 500));
+    }
+
+    [Fact]
     public async Task ExpiredLeaseCanBeReclaimedWithNewToken()
     {
         await using var database = await sqlServer.CreateDatabaseAsync();
