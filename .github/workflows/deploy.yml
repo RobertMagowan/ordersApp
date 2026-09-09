@@ -721,14 +721,6 @@ jobs:
           if '${{ github.ref_name }}' not in manifest['environments']:
               raise SystemExit('Sprint 4B R2 is restricted to development and test.')
           PY
-      - name: Install SQL precondition module
-        shell: pwsh
-        run: Install-Module SqlServer -Scope CurrentUser -Force -AllowClobber
-      - name: Run read-only ownership precondition before migration
-        shell: bash
-        run: |
-          set -euo pipefail
-          pwsh -NoProfile -ExecutionPolicy Bypass -File ops/Bootstrap-CloudOrdersSql.ps1 -EnvironmentName "$DEPLOYMENT_ENVIRONMENT" -ResourceGroupName "$AZURE_RESOURCE_GROUP" -ServerName "$AZURE_SQL_SERVER_NAME" -DatabaseName "$AZURE_SQL_DATABASE_NAME"
       - name: Start nonproduction migration Job
         run: |
           if [[ "$DEPLOYMENT_ENVIRONMENT" == production ]]; then
@@ -746,32 +738,30 @@ jobs:
             --name "$JOB_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --query properties.template --output json |
-            jq '.containers |= map(if .name == "migrations" then .args = ["--migration", "EnforceCustomerProfileOwnership"] else . end)' \
+          jq '.containers |= map(if .name == "migrations" then .args = ["--ownership-precondition"] else . end)' \
               > "$EXECUTION_TEMPLATE"
-          jq -e '.containers | any(.name == "migrations" and .args == ["--migration", "EnforceCustomerProfileOwnership"])' \
+          jq -e '.containers | any(.name == "migrations" and .args == ["--ownership-precondition"])' \
             "$EXECUTION_TEMPLATE" >/dev/null || {
-              echo "Migration execution template did not contain the exact manifest migration." >&2
+              echo "Ownership precondition execution template was invalid." >&2
               exit 1
             }
-          EXECUTION=$(az containerapp job start \
+          PRECONDITION_EXECUTION=$(az containerapp job start \
             --name "$JOB_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --yaml "$EXECUTION_TEMPLATE" \
             --query name --output tsv)
-          [[ -n "$EXECUTION" ]] || { echo "Migration Job did not return an execution name." >&2; exit 1; }
-          EXECUTION_ARGS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].args' --output json)
-          python3 - "$EXECUTION_ARGS" <<'PY'
-          import json, sys
-          if json.loads(sys.argv[1]) != ['--migration', 'EnforceCustomerProfileOwnership']:
-              raise SystemExit('Migration execution did not run the exact manifest migration.')
-          PY
+          [[ -n "$PRECONDITION_EXECUTION" ]] || { echo "Ownership precondition execution did not return a name." >&2; exit 1; }
           for _ in {1..30}; do
-            STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query properties.status --output tsv)
+            STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$PRECONDITION_EXECUTION" --query properties.status --output tsv)
             [[ "$STATUS" == Succeeded ]] && break
-            [[ "$STATUS" == Failed ]] && { echo "Migration Job execution $EXECUTION failed." >&2; exit 1; }
+            [[ "$STATUS" == Failed ]] && { echo "Ownership precondition execution $PRECONDITION_EXECUTION failed." >&2; exit 1; }
             sleep 10
           done
-          [[ "$STATUS" == Succeeded ]] || { echo "Migration Job did not complete within five minutes." >&2; exit 1; }
+          [[ "$STATUS" == Succeeded ]] || { echo "Ownership precondition execution did not complete within five minutes." >&2; exit 1; }
+          jq '.containers |= map(if .name == "migrations" then .args = ["--migration", "EnforceCustomerProfileOwnership"] else . end)' "$EXECUTION_TEMPLATE" > "$EXECUTION_TEMPLATE.next"
+          mv "$EXECUTION_TEMPLATE.next" "$EXECUTION_TEMPLATE"
+          EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --yaml "$EXECUTION_TEMPLATE" --query name --output tsv)
+          [[ -n "$EXECUTION" ]] || { echo "Migration Job did not return an execution name." >&2; exit 1; }
           echo "Sprint 4B R2 migration execution $EXECUTION completed successfully."
 
   run_sprint_4a_e1_migration_only:
