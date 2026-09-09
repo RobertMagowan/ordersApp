@@ -931,12 +931,34 @@ jobs:
       - name: Check out source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Sign in to Azure with OIDC
+      - name: Sign in to Azure with OIDC (initial attempt)
+        id: azure_login_initial
+        continue-on-error: true
         uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Wait before Azure OIDC retry
+        if: steps.azure_login_initial.outcome == 'failure'
+        run: sleep 10
+
+      - name: Sign in to Azure with OIDC (retry)
+        id: azure_login_retry
+        if: steps.azure_login_initial.outcome == 'failure'
+        continue-on-error: true
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fail after repeated Azure OIDC login failures
+        if: steps.azure_login_initial.outcome == 'failure' && steps.azure_login_retry.outcome == 'failure'
+        run: |
+          echo "Azure OIDC login failed twice; stopping before any deployment mutation." >&2
+          exit 1
 
       - name: Install Bicep
         run: az bicep install
