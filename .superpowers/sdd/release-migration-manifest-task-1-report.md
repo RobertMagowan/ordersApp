@@ -24,3 +24,11 @@
 
 - Focused: `dotnet test tests/CloudOrders.ArchitectureTests --configuration Release --filter FullyQualifiedName~DeploymentWorkflowPolicyTests` — 24 passed.
 - Complete: `dotnet test tests/CloudOrders.ArchitectureTests --configuration Release` — 45 passed.
+
+## Review follow-up
+
+- Strengthened the architecture tests to inspect every schema property definition (types, enum values, migration references, regex, and uniqueness) and validate descriptor values against those definitions.
+- Separated generic schema validity from first-release assertions and added a valid code-only descriptor case (`deployApi: false`, no authorized migrations, maintenance-required compatibility).
+- Added semantic rejection coverage for reversed migration arrays as well as non-prefix authorization; ordering and cumulative-prefix checks are enforced by the test validator because JSON Schema cannot express array ordering.
+- Follow-up focused: `dotnet test tests/CloudOrders.ArchitectureTests --configuration Release --filter FullyQualifiedName~DeploymentWorkflowPolicyTests` — 26 passed.
+- Follow-up complete: `dotnet test tests/CloudOrders.ArchitectureTests --configuration Release` — 47 passed.

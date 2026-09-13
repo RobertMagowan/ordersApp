@@ -34,6 +34,17 @@ public sealed class DeploymentWorkflowPolicyTests
     }
 
     [Fact]
+    public void SchemaAcceptsCodeOnlyDescriptorWithoutApiDeployment()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        descriptor["deployApi"] = false;
+        descriptor["authorisedMigrations"] = new JsonArray();
+        descriptor["compatibility"] = "maintenance-required";
+
+        AssertDescriptorConforms(descriptor, schema);
+    }
+
+    [Fact]
     public void ReleaseSchemaRejectsMalformedJson()
     {
         Assert.ThrowsAny<JsonException>(() => JsonNode.Parse("{\"schemaVersion\":1"));
@@ -71,6 +82,18 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.ThrowsAny<Exception>(() => AssertDescriptorConforms(descriptor, schema));
     }
 
+    [Fact]
+    public void MigrationArraysMustRemainChronologicallyOrdered()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        var baseline = descriptor["requiredMigrationBaseline"]!.AsArray();
+        var first = baseline[0]!.GetValue<string>();
+        baseline[0] = baseline[1]!.GetValue<string>();
+        baseline[1] = first;
+
+        Assert.ThrowsAny<Exception>(() => AssertDescriptorConforms(descriptor, schema));
+    }
+
     private static (JsonObject Descriptor, JsonObject Schema) ReadReleaseDocuments()
     {
         var root = FindRepositoryRoot();
@@ -85,8 +108,10 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.False(schema["additionalProperties"]!.GetValue<bool>());
         var required = schema["required"]!.AsArray().Select(x => x!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
         Assert.Equal(required, descriptor.Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal));
+        AssertSchemaProperties(schema);
+        Assert.NotEmpty(descriptor["releaseId"]!.GetValue<string>());
         Assert.Equal(1, descriptor["schemaVersion"]!.GetValue<int>());
-        Assert.True(descriptor["deployApi"]!.GetValue<bool>());
+        _ = descriptor["deployApi"]!.GetValue<bool>();
         var environments = descriptor["environments"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
         Assert.NotEmpty(environments);
         Assert.All(environments, environment => Assert.Contains(environment, AllowedEnvironments));
@@ -104,6 +129,51 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Equal(authorised, baseline[..authorised.Length]);
         Assert.All(baseline, id => Assert.Matches(@"^[0-9]{14}_[A-Za-z][A-Za-z0-9]*$", id));
         Assert.All(authorised, id => Assert.Contains(id, baseline, StringComparer.Ordinal));
+    }
+
+    private static void AssertSchemaProperties(JsonObject schema)
+    {
+        var properties = schema["properties"]!.AsObject();
+        AssertProperty(properties, "releaseId", "string", minLength: 1);
+        Assert.Equal(1, properties["schemaVersion"]!["const"]!.GetValue<int>());
+        AssertProperty(properties, "environments", "array", uniqueItems: true);
+        Assert.Equal(["development", "test"], properties["environments"]!["items"]!["enum"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
+        AssertProperty(properties, "deployApi", "boolean");
+        AssertMigrationArrayProperty(properties, "requiredMigrationBaseline", minItems: 1);
+        AssertMigrationArrayProperty(properties, "authorisedMigrations");
+        Assert.Equal(AllowedPreconditions, properties["precondition"]!["enum"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
+        Assert.Equal(AllowedTrafficPolicies, properties["trafficPolicy"]!["enum"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
+        Assert.Equal(AllowedCompatibilityModes, properties["compatibility"]!["enum"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
+
+        var migrationDefinition = schema["$defs"]!["efMigrationId"]!;
+        Assert.Equal("string", migrationDefinition["type"]!.GetValue<string>());
+        Assert.Equal(@"^[0-9]{14}_[A-Za-z][A-Za-z0-9]*$", migrationDefinition["pattern"]!.GetValue<string>());
+    }
+
+    private static void AssertProperty(JsonObject properties, string name, string type, int? minLength = null, bool? uniqueItems = null)
+    {
+        var property = properties[name]!.AsObject();
+        Assert.Equal(type, property["type"]!.GetValue<string>());
+        if (minLength is not null)
+        {
+            Assert.Equal(minLength.Value, property["minLength"]!.GetValue<int>());
+        }
+
+        if (uniqueItems is not null)
+        {
+            Assert.Equal(uniqueItems.Value, property["uniqueItems"]!.GetValue<bool>());
+        }
+    }
+
+    private static void AssertMigrationArrayProperty(JsonObject properties, string name, int? minItems = null)
+    {
+        var property = properties[name]!.AsObject();
+        AssertProperty(properties, name, "array", uniqueItems: true);
+        Assert.Equal("#/$defs/efMigrationId", property["items"]!["$ref"]!.GetValue<string>());
+        if (minItems is not null)
+        {
+            Assert.Equal(minItems.Value, property["minItems"]!.GetValue<int>());
+        }
     }
 
     [Fact]
