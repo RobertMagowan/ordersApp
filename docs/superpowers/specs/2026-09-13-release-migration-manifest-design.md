@@ -2,26 +2,36 @@
 
 ## Goal
 
-Make each non-production database migration an explicit, immutable part of its release so a successful API deployment cannot silently omit its required schema change.
+Make schema required by every non-production release explicit and immutable. An API deployment cannot omit a required migration, and retry logic must never infer readiness from a Git diff.
 
-## Chosen approach
+## Immutable release descriptor
 
-Each migration release adds a versioned manifest under `ops/releases/`. The manifest declares a release identifier, exactly one EF migration, permitted environments, whether the API is deployed, and any named precondition. The workflow validates the schema and selects the manifest from the immutable release commit.
+Each deployable commit contains one canonical descriptor at `ops/releases/current-release.json`. The workflow selects it solely from the checked-out immutable release SHA, including manual dispatches and retries. It declares:
 
-For a migration release, the deployment workflow will:
+- a release ID and schema version;
+- whether its API is deployed and the permitted environments;
+- the complete ordered EF migration baseline required after deployment;
+- the ordered, approved migration plan that this release may apply; and
+- allowlisted preconditions, traffic policy, and a compatibility declaration.
 
-1. Validate the manifest before Azure mutation.
-2. Build the immutable migration image from the same commit as the API image.
-3. Start the existing migration Container App Job with exactly `--migration <name>`.
-4. Poll the execution to `Succeeded`, fail on `Failed` or timeout, and confirm the exact image and arguments.
-5. Verify the named migration is present in `__EFMigrationsHistory` before deploying the API.
+A code-only release has an empty plan but still declares its required baseline. The workflow runs a read-only schema verification and fails if the target database is not at that baseline. It never selects work from a Git diff.
 
-Ordinary code-only releases have no migration manifest change and skip the migration execution. Existing Sprint 4 release controls remain valid only as compatibility data; the workflow no longer embeds Sprint-specific migration names.
+## Controlled migration execution
 
-## Safety and scope
+The migration executable gains two explicit modes. `--verify-release` resolves full EF migration IDs and reports a sanitised ordered history and baseline. `--apply-release` checks that pending migrations are exactly the declared plan, applies only that ordered plan, then verifies the observed delta and baseline.
 
-This retains the current `feature/* → development → test → master` promotion model, immutable image deployment, OIDC identities, Azure SQL preview, and API smoke tests. It does not auto-apply all pending migrations, change production behaviour, grant permissions, or introduce secrets. The first manifest will declare `AddOutboxLeasing` for `development` and `test`; production remains excluded.
+The existing migration Job receives the descriptor hash, release SHA, image digest, and mode. It rejects mismatched environment, database, image, or arguments. Pipeline evidence records migration IDs, execution name and outcome, and sanitised history. The Job identity remains the only SQL principal used by the pipeline.
+
+The descriptor supports cumulative `development` to `test` promotions with an ordered multi-migration plan. It must never fall back to `Database.MigrateAsync`.
+
+## Preconditions and recovery
+
+Preconditions use an allowlisted registry: `ownership-read-only-transaction` retains the existing check and `none` performs no check; unknown values fail closed. For `deployApi: false`, the workflow verifies the API revision, image digest, and traffic are unchanged. Historic Sprint 4 manifests are translated only as compatibility data and never run unrelated controls.
+
+A timeout is an uncertain remote result. Before retrying, the workflow reconciles the prior Job execution and schema verification; it blocks API deployment until the outcome is unambiguous. A matching, already-applied plan is a verified no-op. There is no automatic `Down` migration. Incompatible migrations require a declared maintenance/compatibility strategy.
+
+The first descriptor declares `AddOutboxLeasing` for development and test as API-compatible; production remains excluded.
 
 ## Validation
 
-Workflow contract tests will prove malformed or undeclared manifests fail before Azure mutation, code-only releases skip the migration job, and a valid manifest passes its exact migration name through to the Job. Development validation will record the live API revision, migration execution, `__EFMigrationsHistory` entry, and outbox lease columns before Task 1 may close.
+Workflow contracts cover malformed or ambiguous descriptors, manual dispatch, code-only baseline verification, ordered cumulative plans, wrong digest/arguments/database, unknown policies, already-applied plans, unexpected history, timeout reconciliation, and API-unchanged releases. Development evidence must record migration IDs/history, outbox lease columns, and live revision before Task 1 closes.
