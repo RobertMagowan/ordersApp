@@ -34,12 +34,19 @@ public sealed class DeploymentWorkflowPolicyTests
     }
 
     [Fact]
-    public void SchemaAcceptsCodeOnlyDescriptorWithoutApiDeployment()
+    public void SchemaAcceptsCodeOnlyDescriptorWithCumulativeAuthorisation()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        descriptor["compatibility"] = "maintenance-required";
+
+        AssertDescriptorConforms(descriptor, schema);
+    }
+
+    [Fact]
+    public void SchemaAcceptsDescriptorWithApiDeploymentDisabled()
     {
         var (descriptor, schema) = ReadReleaseDocuments();
         descriptor["deployApi"] = false;
-        descriptor["authorisedMigrations"] = new JsonArray();
-        descriptor["compatibility"] = "maintenance-required";
 
         AssertDescriptorConforms(descriptor, schema);
     }

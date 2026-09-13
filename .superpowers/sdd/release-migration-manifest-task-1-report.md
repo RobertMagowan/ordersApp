@@ -32,3 +32,9 @@
 - Added semantic rejection coverage for reversed migration arrays as well as non-prefix authorization; ordering and cumulative-prefix checks are enforced by the test validator because JSON Schema cannot express array ordering.
 - Follow-up focused: `dotnet test tests/CloudOrders.ArchitectureTests --configuration Release --filter FullyQualifiedName~DeploymentWorkflowPolicyTests` — 26 passed.
 - Follow-up complete: `dotnet test tests/CloudOrders.ArchitectureTests --configuration Release` — 47 passed.
+
+## Re-review follow-up
+
+- Corrected the code-only validity case to retain the complete cumulative authorization and baseline.
+- Added a separate test proving `deployApi: false` is independently accepted by the schema contract.
+- Focused: `dotnet test tests/CloudOrders.ArchitectureTests --configuration Release --filter FullyQualifiedName~DeploymentWorkflowPolicyTests` — 27 passed.
