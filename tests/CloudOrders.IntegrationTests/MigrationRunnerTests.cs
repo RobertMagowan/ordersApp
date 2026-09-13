@@ -1,6 +1,9 @@
 using System.Diagnostics;
+using System.Text.Json;
 using CloudOrders.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace CloudOrders.IntegrationTests;
 
@@ -66,20 +69,6 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
     }
 
     [Fact]
-    public async Task NamedMigrationRunnerSucceedsWhenTheNamedMigrationWasAlreadyAppliedAndNothingElseIsPending()
-    {
-        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
-        var migration = "AddCustomerProfileOwnershipExpand";
-
-        var initialResult = await RunRunnerAsync(database.ConnectionString);
-        var rerunResult = await RunRunnerAsync(database.ConnectionString, migration);
-
-        Assert.Equal(0, initialResult.ExitCode);
-        Assert.Equal(0, rerunResult.ExitCode);
-        Assert.Contains("SQL migrations applied successfully.", rerunResult.StandardOutput, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public async Task MigrationRunnerFailsWhenConnectionStringIsMissing()
     {
         var result = await RunRunnerAsync(null);
@@ -116,20 +105,279 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
     }
 
     [Fact]
-    public async Task NamedMigrationRunnerReportsASafeSelectorFailureCategory()
+    public async Task ApplyReleaseAppliesOnlyTheAuthorisedOutstandingSuffix()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        await ApplyThroughAsync(database.ConnectionString, "20260907142134_EnforceCustomerProfileOwnership");
+        var descriptorPath = CreateDescriptorFile(FullBaseline, ["20260909213051_AddOutboxLeasing"]);
+
+        try
+        {
+            var result = await RunRunnerAsync(
+                database.ConnectionString,
+                ["--apply-release", descriptorPath],
+                deploymentEnvironment: "development");
+
+            Assert.Equal(0, result.ExitCode);
+            using var evidence = JsonDocument.Parse(result.StandardOutput);
+            Assert.Equal("integration-test-release", evidence.RootElement.GetProperty("releaseId").GetString());
+            Assert.Matches("^[a-f0-9]{64}$", evidence.RootElement.GetProperty("descriptorSha256").GetString());
+            Assert.Equal("apply", evidence.RootElement.GetProperty("mode").GetString());
+            Assert.Contains("20260909213051_AddOutboxLeasing", evidence.RootElement.GetProperty("applied").ToString(), StringComparison.Ordinal);
+            Assert.Empty(evidence.RootElement.GetProperty("outstanding").EnumerateArray());
+            Assert.DoesNotContain(database.ConnectionString, result.StandardOutput, StringComparison.Ordinal);
+            Assert.DoesNotContain(database.ConnectionString, result.StandardError, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(descriptorPath);
+        }
+    }
+
+    [Fact]
+    public async Task ApplyReleaseWithAnEqualBaselineIsAVerifiedNoOp()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        await ApplyThroughAsync(database.ConnectionString, FullBaseline[^1]);
+        var descriptorPath = CreateDescriptorFile(FullBaseline, []);
+
+        try
+        {
+            var result = await RunRunnerAsync(
+                database.ConnectionString,
+                ["--apply-release", descriptorPath],
+                deploymentEnvironment: "development");
+
+            Assert.Equal(0, result.ExitCode);
+            using var evidence = JsonDocument.Parse(result.StandardOutput);
+            Assert.Equal("apply", evidence.RootElement.GetProperty("mode").GetString());
+            Assert.Empty(evidence.RootElement.GetProperty("outstanding").EnumerateArray());
+        }
+        finally
+        {
+            File.Delete(descriptorPath);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyReleaseAllowsKnownMigrationsOutsideTheDescriptorBaseline()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        await ApplyThroughAsync(database.ConnectionString, "20260907142134_EnforceCustomerProfileOwnership");
+        var codeOnlyBaseline = FullBaseline[..^1];
+        var descriptorPath = CreateDescriptorFile(codeOnlyBaseline, []);
+
+        try
+        {
+            var result = await RunRunnerAsync(
+                database.ConnectionString,
+                ["--verify-release", descriptorPath],
+                deploymentEnvironment: "development");
+
+            Assert.Equal(0, result.ExitCode);
+            using var evidence = JsonDocument.Parse(result.StandardOutput);
+            Assert.Empty(evidence.RootElement.GetProperty("outstanding").EnumerateArray());
+        }
+        finally
+        {
+            File.Delete(descriptorPath);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyReleaseRejectsAnUnknownAppliedMigrationIdWithoutLeakingTheConnectionString()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        await ApplyThroughAsync(database.ConnectionString, FullBaseline[^1]);
+        await InsertHistoryAsync(database.ConnectionString, "99999999999999_UnknownMigration");
+        var descriptorPath = CreateDescriptorFile(FullBaseline, []);
+
+        try
+        {
+            var result = await RunRunnerAsync(
+                database.ConnectionString,
+                ["--verify-release", descriptorPath],
+                deploymentEnvironment: "development");
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("category=MIGRATION_BASELINE_CONFLICT", result.StandardError, StringComparison.Ordinal);
+            Assert.DoesNotContain(database.ConnectionString, result.StandardError, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(descriptorPath);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyReleaseRejectsAMigrationHistoryHole()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        await ApplyThroughAsync(database.ConnectionString, FullBaseline[^1]);
+        await DeleteHistoryAsync(database.ConnectionString, "20260829075044_AddCustomerProfileOwnershipExpand");
+        var descriptorPath = CreateDescriptorFile(FullBaseline, []);
+
+        try
+        {
+            var result = await RunRunnerAsync(
+                database.ConnectionString,
+                ["--verify-release", descriptorPath],
+                deploymentEnvironment: "development");
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("category=MIGRATION_BASELINE_CONFLICT", result.StandardError, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(descriptorPath);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyReleaseRejectsADatabaseAheadOfTheDescriptorBaseline()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        await ApplyThroughAsync(database.ConnectionString, FullBaseline[^1]);
+        var descriptorPath = CreateDescriptorFile(FullBaseline[..^1], []);
+
+        try
+        {
+            var result = await RunRunnerAsync(
+                database.ConnectionString,
+                ["--verify-release", descriptorPath],
+                deploymentEnvironment: "development");
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("category=MIGRATION_BASELINE_CONFLICT", result.StandardError, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(descriptorPath);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyReleaseRejectsAnUnauthorisedOutstandingMigration()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        await ApplyThroughAsync(database.ConnectionString, "20260907142134_EnforceCustomerProfileOwnership");
+        var descriptorPath = CreateDescriptorFile(FullBaseline, []);
+
+        try
+        {
+            var result = await RunRunnerAsync(
+                database.ConnectionString,
+                ["--verify-release", descriptorPath],
+                deploymentEnvironment: "development");
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("category=MIGRATION_STATE_CONFLICT", result.StandardError, StringComparison.Ordinal);
+            Assert.DoesNotContain(database.ConnectionString, result.StandardError, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(descriptorPath);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyReleaseRejectsAnInvalidDescriptorWithoutLeakingTheConnectionString()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        var descriptorPath = CreateDescriptorFile(FullBaseline, FullBaseline, precondition: "unexpected-policy");
+
+        try
+        {
+            var result = await RunRunnerAsync(
+                database.ConnectionString,
+                ["--verify-release", descriptorPath],
+                deploymentEnvironment: "development");
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("category=RELEASE_DESCRIPTOR_INVALID", result.StandardError, StringComparison.Ordinal);
+            Assert.DoesNotContain(database.ConnectionString, result.StandardError, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(descriptorPath);
+        }
+    }
+
+    [Theory]
+    [InlineData("--verify-release")]
+    [InlineData("--apply-release")]
+    [InlineData("--verify-release", "descriptor.json", "unexpected")]
+    [InlineData("--migration", "AddOutboxLeasing")]
+    public async Task MigrationRunnerRejectsInvalidArgumentsWithoutLeakingTheConnectionString(params string[] arguments)
     {
         await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
 
-        var result = await RunRunnerAsync(database.ConnectionString, "MissingMigration");
+        var result = await RunRunnerAsync(database.ConnectionString, arguments, deploymentEnvironment: "development");
 
         Assert.NotEqual(0, result.ExitCode);
-        Assert.Contains("category=MIGRATION_SELECTOR_INVALID", result.StandardError, StringComparison.Ordinal);
-        Assert.Contains("exception=InvalidOperationException", result.StandardError, StringComparison.Ordinal);
-        Assert.Contains("detail=Migration selector must resolve to exactly one known migration.", result.StandardError, StringComparison.Ordinal);
         Assert.DoesNotContain(database.ConnectionString, result.StandardError, StringComparison.Ordinal);
     }
 
-    private static async Task<MigrationRunResult> RunRunnerAsync(string? connectionString, string? migration = null, bool ownershipPrecondition = false)
+    private static async Task ApplyThroughAsync(string connectionString, string targetMigration)
+    {
+        var options = new DbContextOptionsBuilder<CloudOrdersDbContext>()
+            .UseSqlServer(connectionString)
+            .Options;
+        await using var context = new CloudOrdersDbContext(options);
+        await context.GetService<IMigrator>().MigrateAsync(targetMigration);
+    }
+
+    private static async Task InsertHistoryAsync(string connectionString, string migrationId)
+    {
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
+        await connection.OpenAsync(CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion]) VALUES (@migrationId, @productVersion)";
+        command.Parameters.AddWithValue("@migrationId", migrationId);
+        command.Parameters.AddWithValue("@productVersion", "10.0.0");
+        await command.ExecuteNonQueryAsync(CancellationToken.None);
+    }
+
+    private static async Task DeleteHistoryAsync(string connectionString, string migrationId)
+    {
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
+        await connection.OpenAsync(CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM [__EFMigrationsHistory] WHERE [MigrationId] = @migrationId";
+        command.Parameters.AddWithValue("@migrationId", migrationId);
+        await command.ExecuteNonQueryAsync(CancellationToken.None);
+    }
+
+    private static string CreateDescriptorFile(string[] baseline, string[] authorisedMigrations, string precondition = "none")
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"cloudorders-release-{Guid.NewGuid():N}.json");
+        File.WriteAllText(path, JsonSerializer.Serialize(new
+        {
+            releaseId = "integration-test-release",
+            schemaVersion = 1,
+            environments = DevelopmentEnvironment,
+            deployApi = true,
+            requiredMigrationBaseline = baseline,
+            authorisedMigrations,
+            precondition,
+            trafficPolicy = "none",
+            compatibility = "api-compatible"
+        }));
+        return path;
+    }
+
+    private static async Task<MigrationRunResult> RunRunnerAsync(
+        string? connectionString,
+        string? migration = null,
+        bool ownershipPrecondition = false) =>
+        await RunRunnerAsync(
+            connectionString,
+            ownershipPrecondition ? ["--ownership-precondition"] : migration is null ? [] : ["--migration", migration]);
+
+    private static async Task<MigrationRunResult> RunRunnerAsync(
+        string? connectionString,
+        string[] arguments,
+        string? deploymentEnvironment = null)
     {
         var runnerAssembly = Path.Combine(
             RepositoryRoot(),
@@ -142,18 +390,27 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
         Assert.True(File.Exists(runnerAssembly), $"Expected built migration runner at {runnerAssembly}.");
         var startInfo = new ProcessStartInfo("dotnet")
         {
-            Arguments = $"\"{runnerAssembly}\"" +
-                (ownershipPrecondition ? " --ownership-precondition" : migration is null ? string.Empty : $" --migration {migration}"),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
         };
+        startInfo.ArgumentList.Add(runnerAssembly);
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
         startInfo.Environment.Remove("ConnectionStrings__CloudOrders");
         startInfo.Environment.Remove("ConnectionStrings:CloudOrders");
+        startInfo.Environment.Remove("DEPLOYMENT_ENVIRONMENT");
 
         if (connectionString is not null)
         {
             startInfo.Environment["ConnectionStrings__CloudOrders"] = connectionString;
+        }
+
+        if (deploymentEnvironment is not null)
+        {
+            startInfo.Environment["DEPLOYMENT_ENVIRONMENT"] = deploymentEnvironment;
         }
 
         using var process = Process.Start(startInfo);
@@ -179,6 +436,16 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
     }
 
     private sealed record MigrationRunResult(int ExitCode, string StandardOutput, string StandardError);
+
+    private static readonly string[] FullBaseline =
+    [
+        "20260816221235_InitialSqlPersistence",
+        "20260829075044_AddCustomerProfileOwnershipExpand",
+        "20260907142134_EnforceCustomerProfileOwnership",
+        "20260909213051_AddOutboxLeasing"
+    ];
+
+    private static readonly string[] DevelopmentEnvironment = ["development"];
 
     private sealed record ColumnShape(string TableName, string ColumnName, string IsNullable);
 
