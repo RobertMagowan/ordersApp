@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using CloudOrders.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -109,7 +110,7 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
     {
         await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
         await ApplyThroughAsync(database.ConnectionString, "20260907142134_EnforceCustomerProfileOwnership");
-        var descriptorPath = CreateDescriptorFile(FullBaseline, ["20260909213051_AddOutboxLeasing"]);
+        var descriptorPath = CreateDescriptorFile(FullBaseline, FullBaseline);
 
         try
         {
@@ -160,12 +161,12 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
     }
 
     [Fact]
-    public async Task VerifyReleaseAllowsKnownMigrationsOutsideTheDescriptorBaseline()
+    public async Task VerifyCodeOnlyReleaseRetainsCumulativeAuthorisationOutsideTheDescriptorBaseline()
     {
         await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
         await ApplyThroughAsync(database.ConnectionString, "20260907142134_EnforceCustomerProfileOwnership");
         var codeOnlyBaseline = FullBaseline[..^1];
-        var descriptorPath = CreateDescriptorFile(codeOnlyBaseline, []);
+        var descriptorPath = CreateDescriptorFile(codeOnlyBaseline, codeOnlyBaseline);
 
         try
         {
@@ -281,10 +282,141 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
     }
 
     [Fact]
+    public async Task VerifyReleaseRejectsAuthorisationThatIsNotAnOrderedBaselinePrefix()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        await ApplyThroughAsync(database.ConnectionString, "20260907142134_EnforceCustomerProfileOwnership");
+        var descriptorPath = CreateDescriptorFile(FullBaseline, ["20260909213051_AddOutboxLeasing"]);
+
+        try
+        {
+            var result = await RunRunnerAsync(
+                database.ConnectionString,
+                ["--verify-release", descriptorPath],
+                deploymentEnvironment: "development");
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("category=RELEASE_DESCRIPTOR_INVALID", result.StandardError, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(descriptorPath);
+        }
+    }
+
+    [Fact]
+    public async Task ApplyReleaseAppliesAnOrderedMultiMigrationSuffix()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        await ApplyThroughAsync(database.ConnectionString, FullBaseline[0]);
+        var descriptorPath = CreateDescriptorFile(FullBaseline, FullBaseline);
+
+        try
+        {
+            var result = await RunRunnerAsync(
+                database.ConnectionString,
+                ["--apply-release", descriptorPath],
+                deploymentEnvironment: "development");
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Equal(FullBaseline, await GetAppliedMigrationsAsync(database.ConnectionString));
+        }
+        finally
+        {
+            File.Delete(descriptorPath);
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentReleaseApplicationsWaitForTheDatabaseGuardAndPreserveMigrationState()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        await ApplyThroughAsync(database.ConnectionString, "20260829075044_AddCustomerProfileOwnershipExpand");
+        await InsertConcurrentMigrationMarkerAsync(database.ConnectionString);
+        var descriptorPath = CreateDescriptorFile(FullBaseline, FullBaseline);
+        await using var guardConnection = new Microsoft.Data.SqlClient.SqlConnection(database.ConnectionString);
+        await guardConnection.OpenAsync(CancellationToken.None);
+        await AcquireReleaseGuardAsync(guardConnection);
+        var guardHeld = true;
+
+        try
+        {
+            var firstApply = RunRunnerAsync(database.ConnectionString, ["--apply-release", descriptorPath], deploymentEnvironment: "development");
+            var secondApply = RunRunnerAsync(database.ConnectionString, ["--apply-release", descriptorPath], deploymentEnvironment: "development");
+
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            Assert.False(firstApply.IsCompleted);
+            Assert.False(secondApply.IsCompleted);
+
+            await ReleaseReleaseGuardAsync(guardConnection);
+            guardHeld = false;
+            var results = await Task.WhenAll(firstApply, secondApply);
+
+            Assert.All(results, result => Assert.Equal(0, result.ExitCode));
+            Assert.Equal(FullBaseline, await GetAppliedMigrationsAsync(database.ConnectionString));
+            Assert.Equal(1, await CountConcurrentMigrationMarkersAsync(database.ConnectionString));
+        }
+        finally
+        {
+            if (guardHeld)
+            {
+                await ReleaseReleaseGuardAsync(guardConnection);
+            }
+            File.Delete(descriptorPath);
+        }
+    }
+
+    [Fact]
     public async Task VerifyReleaseRejectsAnInvalidDescriptorWithoutLeakingTheConnectionString()
     {
         await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
         var descriptorPath = CreateDescriptorFile(FullBaseline, FullBaseline, precondition: "unexpected-policy");
+
+        try
+        {
+            var result = await RunRunnerAsync(
+                database.ConnectionString,
+                ["--verify-release", descriptorPath],
+                deploymentEnvironment: "development");
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("category=RELEASE_DESCRIPTOR_INVALID", result.StandardError, StringComparison.Ordinal);
+            Assert.DoesNotContain(database.ConnectionString, result.StandardError, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(descriptorPath);
+        }
+    }
+
+    [Theory]
+    [InlineData("missing-deploy-api")]
+    [InlineData("unknown-property")]
+    [InlineData("null-array")]
+    [InlineData("invalid-array")]
+    public async Task VerifyReleaseRejectsDescriptorsWithAnInvalidJsonShape(string invalidShape)
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        var descriptorPath = CreateDescriptorFile(FullBaseline, FullBaseline, mutate: descriptor =>
+        {
+            switch (invalidShape)
+            {
+                case "missing-deploy-api":
+                    descriptor.Remove("deployApi");
+                    break;
+                case "unknown-property":
+                    descriptor["unrecognised"] = true;
+                    break;
+                case "null-array":
+                    descriptor["authorisedMigrations"] = null;
+                    break;
+                case "invalid-array":
+                    descriptor["environments"] = new JsonArray("development", 1);
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unsupported test shape {invalidShape}.");
+            }
+        });
 
         try
         {
@@ -348,10 +480,73 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
         await command.ExecuteNonQueryAsync(CancellationToken.None);
     }
 
-    private static string CreateDescriptorFile(string[] baseline, string[] authorisedMigrations, string precondition = "none")
+    private static async Task<string[]> GetAppliedMigrationsAsync(string connectionString)
+    {
+        var options = new DbContextOptionsBuilder<CloudOrdersDbContext>()
+            .UseSqlServer(connectionString)
+            .Options;
+        await using var context = new CloudOrdersDbContext(options);
+        return (await context.Database.GetAppliedMigrationsAsync(CancellationToken.None)).ToArray();
+    }
+
+    private static async Task AcquireReleaseGuardAsync(Microsoft.Data.SqlClient.SqlConnection connection)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DECLARE @result int;
+            EXEC @result = sp_getapplock @Resource = N'CloudOrders.ReleaseMigrationRunner', @LockMode = N'Exclusive', @LockOwner = N'Session', @LockTimeout = 0;
+            IF @result < 0 THROW 51002, 'Could not acquire release migration guard.', 1;
+            """;
+        await command.ExecuteNonQueryAsync(CancellationToken.None);
+    }
+
+    private static async Task ReleaseReleaseGuardAsync(Microsoft.Data.SqlClient.SqlConnection connection)
+    {
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            return;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "EXEC sp_releaseapplock @Resource = N'CloudOrders.ReleaseMigrationRunner', @LockOwner = N'Session';";
+        await command.ExecuteNonQueryAsync(CancellationToken.None);
+    }
+
+    private static async Task InsertConcurrentMigrationMarkerAsync(string connectionString)
+    {
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
+        await connection.OpenAsync(CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DECLARE @profileId uniqueidentifier = '11111111-1111-1111-1111-111111111111';
+            DECLARE @orderId uniqueidentifier = '22222222-2222-2222-2222-222222222222';
+            INSERT INTO dbo.CustomerProfiles (Id, CustomerReference, Issuer, ObjectId, ContactEmail, CreatedAt, UpdatedAt)
+            VALUES (@profileId, 'concurrency-profile', 'https://issuer.example', '33333333-3333-3333-3333-333333333333', 'marker@example.test', SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET());
+            INSERT INTO dbo.Orders (Id, CustomerReference, ProductSku, Quantity, Status, CreatedAt, UpdatedAt, CustomerProfileId)
+            VALUES (@orderId, 'concurrency-order', 'marker-sku', 1, 'Pending', SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET(), @profileId);
+            INSERT INTO dbo.OutboxMessages (EventId, OrderId, AggregateId, MessageType, MessageVersion, Payload, OccurredAt, CreatedAt, ProcessedAt, AttemptCount, LastAttemptAt, LastErrorCode, TraceParent)
+            VALUES ('44444444-4444-4444-4444-444444444444', @orderId, @orderId, 'concurrency-marker', 1, '{}', SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET(), NULL, 0, NULL, NULL, NULL);
+            """;
+        await command.ExecuteNonQueryAsync(CancellationToken.None);
+    }
+
+    private static async Task<int> CountConcurrentMigrationMarkersAsync(string connectionString)
+    {
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
+        await connection.OpenAsync(CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM dbo.OutboxMessages WHERE MessageType = 'concurrency-marker';";
+        return Convert.ToInt32(await command.ExecuteScalarAsync(CancellationToken.None), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static string CreateDescriptorFile(
+        string[] baseline,
+        string[] authorisedMigrations,
+        string precondition = "none",
+        Action<JsonObject>? mutate = null)
     {
         var path = Path.Combine(Path.GetTempPath(), $"cloudorders-release-{Guid.NewGuid():N}.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(new
+        var descriptor = JsonNode.Parse(JsonSerializer.Serialize(new
         {
             releaseId = "integration-test-release",
             schemaVersion = 1,
@@ -362,7 +557,9 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
             precondition,
             trafficPolicy = "none",
             compatibility = "api-compatible"
-        }));
+        }))!.AsObject();
+        mutate?.Invoke(descriptor);
+        File.WriteAllText(path, descriptor.ToJsonString());
         return path;
     }
 

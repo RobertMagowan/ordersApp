@@ -47,14 +47,31 @@ try
         case RunnerMode.VerifyRelease:
         case RunnerMode.ApplyRelease:
             var descriptor = await LoadReleaseDescriptorAsync(runnerArguments.DescriptorPath!);
-            var verification = await VerifyReleaseAsync(context, descriptor);
-            if (runnerArguments.Mode == RunnerMode.ApplyRelease)
+            await context.Database.OpenConnectionAsync();
+            var releaseGuardAcquired = false;
+            try
             {
-                await ApplyOutstandingMigrationsAsync(context, verification.Outstanding);
-                verification = await VerifyReleaseAsync(context, descriptor);
-            }
+                await AcquireReleaseMigrationGuardAsync(context);
+                releaseGuardAcquired = true;
 
-            WriteReleaseEvidence(descriptor, verification, runnerArguments.Mode);
+                var verification = await VerifyReleaseAsync(context, descriptor);
+                if (runnerArguments.Mode == RunnerMode.ApplyRelease)
+                {
+                    await ApplyOutstandingMigrationsAsync(context, verification.Outstanding);
+                    verification = await VerifyReleaseAsync(context, descriptor);
+                }
+
+                WriteReleaseEvidence(descriptor, verification, runnerArguments.Mode);
+            }
+            finally
+            {
+                if (releaseGuardAcquired)
+                {
+                    await ReleaseReleaseMigrationGuardAsync(context);
+                }
+
+                await context.Database.CloseConnectionAsync();
+            }
             break;
         default:
             throw new InvalidOperationException("Unsupported migration runner mode.");
@@ -104,6 +121,8 @@ static async Task<LoadedReleaseDescriptor> LoadReleaseDescriptorAsync(string des
     {
         var resolvedPath = Path.GetFullPath(descriptorPath);
         var descriptorBytes = await File.ReadAllBytesAsync(resolvedPath);
+        using var descriptorDocument = JsonDocument.Parse(descriptorBytes);
+        ValidateReleaseDescriptorShape(descriptorDocument.RootElement);
         var descriptor = JsonSerializer.Deserialize<ReleaseDescriptor>(descriptorBytes, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
@@ -133,7 +152,9 @@ static void ValidateReleaseDescriptor(ReleaseDescriptor descriptor)
         !descriptor.AuthorisedMigrations.All(IsFullMigrationId) ||
         !descriptor.RequiredMigrationBaseline.Distinct(StringComparer.Ordinal).SequenceEqual(descriptor.RequiredMigrationBaseline, StringComparer.Ordinal) ||
         !descriptor.AuthorisedMigrations.Distinct(StringComparer.Ordinal).SequenceEqual(descriptor.AuthorisedMigrations, StringComparer.Ordinal) ||
-        !descriptor.AuthorisedMigrations.All(descriptor.RequiredMigrationBaseline.Contains) ||
+        !descriptor.AuthorisedMigrations.SequenceEqual(
+            descriptor.RequiredMigrationBaseline.Take(descriptor.AuthorisedMigrations.Length),
+            StringComparer.Ordinal) ||
         descriptor.Precondition is not ("none" or "ownership-read-only-transaction") ||
         descriptor.TrafficPolicy is not ("none" or "controlled-nonproduction-access") ||
         descriptor.Compatibility is not ("api-compatible" or "maintenance-required"))
@@ -148,12 +169,79 @@ static void ValidateReleaseDescriptor(ReleaseDescriptor descriptor)
     }
 }
 
+static void ValidateReleaseDescriptorShape(JsonElement root)
+{
+    if (root.ValueKind != JsonValueKind.Object)
+    {
+        throw new ReleaseDescriptorInvalidException("Release descriptor must be a JSON object.");
+    }
+
+    var expectedProperties = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "releaseId",
+        "schemaVersion",
+        "environments",
+        "deployApi",
+        "requiredMigrationBaseline",
+        "authorisedMigrations",
+        "precondition",
+        "trafficPolicy",
+        "compatibility"
+    };
+    var seenProperties = new HashSet<string>(StringComparer.Ordinal);
+    foreach (var property in root.EnumerateObject())
+    {
+        if (!expectedProperties.Contains(property.Name) || !seenProperties.Add(property.Name) ||
+            !HasExpectedJsonShape(property.Name, property.Value))
+        {
+            throw new ReleaseDescriptorInvalidException("Release descriptor has an invalid JSON shape.");
+        }
+    }
+
+    if (!expectedProperties.SetEquals(seenProperties))
+    {
+        throw new ReleaseDescriptorInvalidException("Release descriptor is missing required properties.");
+    }
+}
+
+static bool HasExpectedJsonShape(string propertyName, JsonElement value) => propertyName switch
+{
+    "releaseId" or "precondition" or "trafficPolicy" or "compatibility" => value.ValueKind == JsonValueKind.String,
+    "schemaVersion" => value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out _),
+    "deployApi" => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+    "environments" or "requiredMigrationBaseline" or "authorisedMigrations" =>
+        value.ValueKind == JsonValueKind.Array && value.EnumerateArray().All(item => item.ValueKind == JsonValueKind.String),
+    _ => false
+};
+
 static bool IsFullMigrationId(string migrationId) =>
     migrationId.Length > 16 &&
     migrationId[14] == '_' &&
     migrationId.Take(14).All(char.IsAsciiDigit) &&
     char.IsAsciiLetter(migrationId[15]) &&
     migrationId[16..].All(character => char.IsAsciiLetterOrDigit(character));
+
+static async Task AcquireReleaseMigrationGuardAsync(CloudOrdersDbContext context)
+{
+    await using var command = context.Database.GetDbConnection().CreateCommand();
+    command.CommandText = """
+        DECLARE @result int;
+        EXEC @result = sp_getapplock @Resource = N'CloudOrders.ReleaseMigrationRunner', @LockMode = N'Exclusive', @LockOwner = N'Session', @LockTimeout = 60000;
+        SELECT @result;
+        """;
+    var result = await command.ExecuteScalarAsync(CancellationToken.None);
+    if (result is not int status || status < 0)
+    {
+        throw new MigrationStateConflictException("Release migration guard could not be acquired.");
+    }
+}
+
+static async Task ReleaseReleaseMigrationGuardAsync(CloudOrdersDbContext context)
+{
+    await using var command = context.Database.GetDbConnection().CreateCommand();
+    command.CommandText = "EXEC sp_releaseapplock @Resource = N'CloudOrders.ReleaseMigrationRunner', @LockOwner = N'Session';";
+    await command.ExecuteNonQueryAsync(CancellationToken.None);
+}
 
 static async Task<ReleaseVerification> VerifyReleaseAsync(CloudOrdersDbContext context, LoadedReleaseDescriptor loadedDescriptor)
 {
