@@ -4,6 +4,10 @@ Task 1: complete (commits a457000..53806da, review clean; minor report staleness
 Task 2: complete (commits 9a2b4ea..cd099d9, review clean; focused migration evidence passed)
 Task 3: pending
 Task 4: pending
+
+# Sprint 5 progress ledger
+
+Task 1: local validation and independent review complete (commits `f419c11`, `9ee8be1`, `8378963`; focused outbox lease tests 6/6, integration tests 92/92, solution build zero warnings/errors). Pending protected `feature/sprint5-messaging-design` → `development` promotion, development deployment, and development validation.
 Task 5: pending
 
 # Sprint 4B R2 progress ledger

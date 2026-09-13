@@ -1,8 +1,8 @@
+using System.Text.Json;
 using CloudOrders.Application.Abstractions;
 using CloudOrders.Infrastructure.Persistence;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.SqlClient;
-using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 
 namespace CloudOrders.IntegrationTests;
 
