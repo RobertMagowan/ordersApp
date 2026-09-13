@@ -1,9 +1,111 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace CloudOrders.ArchitectureTests;
 
 public sealed class DeploymentWorkflowPolicyTests
 {
+    private static readonly string[] AllowedEnvironments = ["development", "test"];
+    private static readonly string[] AllowedPreconditions = ["none", "ownership-read-only-transaction"];
+    private static readonly string[] AllowedTrafficPolicies = ["none", "controlled-nonproduction-access"];
+    private static readonly string[] AllowedCompatibilityModes = ["api-compatible", "maintenance-required"];
+
+    [Fact]
+    public void CurrentReleaseDescriptorDeclaresVersionedMigrationContract()
+    {
+        var descriptorPath = Path.Combine(FindRepositoryRoot(), "ops", "releases", "current-release.json");
+        using var descriptor = JsonDocument.Parse(File.ReadAllText(descriptorPath));
+        var root = descriptor.RootElement;
+
+        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+        Assert.NotEmpty(root.GetProperty("requiredMigrationBaseline").EnumerateArray());
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("authorisedMigrations").ValueKind);
+    }
+
+    [Fact]
+    public void CurrentReleaseDescriptorConformsToStrictSchema()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        AssertDescriptorConforms(descriptor, schema);
+        Assert.Equal(["development", "test"], descriptor["environments"]!.AsArray().Select(x => (string)x!).ToArray());
+        Assert.DoesNotContain("production", descriptor["environments"]!.AsArray().Select(x => (string)x!));
+        Assert.Equal("20260909213051_AddOutboxLeasing", descriptor["authorisedMigrations"]!.AsArray().Last()!.GetValue<string>());
+    }
+
+    [Fact]
+    public void ReleaseSchemaRejectsMalformedJson()
+    {
+        Assert.ThrowsAny<JsonException>(() => JsonNode.Parse("{\"schemaVersion\":1"));
+    }
+
+    [Fact]
+    public void ReleaseSchemaRejectsDuplicateMigrationIds()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        descriptor["authorisedMigrations"]!.AsArray().Add("20260909213051_AddOutboxLeasing");
+        Assert.ThrowsAny<Exception>(() => AssertDescriptorConforms(descriptor, schema));
+    }
+
+    [Fact]
+    public void ReleaseSchemaRejectsUnauthorisedEnvironments()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        descriptor["environments"]!.AsArray().Add("production");
+        Assert.ThrowsAny<Exception>(() => AssertDescriptorConforms(descriptor, schema));
+    }
+
+    [Fact]
+    public void ReleaseSchemaRejectsUnknownPolicyValues()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        descriptor["trafficPolicy"] = "all-access";
+        Assert.ThrowsAny<Exception>(() => AssertDescriptorConforms(descriptor, schema));
+    }
+
+    [Fact]
+    public void AuthorisedMigrationsMustBeCodeOnlyCumulativePrefix()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        descriptor["authorisedMigrations"] = new JsonArray("20260816221235_InitialSqlPersistence", "20260909213051_AddOutboxLeasing");
+        Assert.ThrowsAny<Exception>(() => AssertDescriptorConforms(descriptor, schema));
+    }
+
+    private static (JsonObject Descriptor, JsonObject Schema) ReadReleaseDocuments()
+    {
+        var root = FindRepositoryRoot();
+        return (
+            JsonNode.Parse(File.ReadAllText(Path.Combine(root, "ops", "releases", "current-release.json")))!.AsObject(),
+            JsonNode.Parse(File.ReadAllText(Path.Combine(root, "ops", "releases", "release-schema.json")))!.AsObject());
+    }
+
+    private static void AssertDescriptorConforms(JsonObject descriptor, JsonObject schema)
+    {
+        Assert.Equal("https://json-schema.org/draft/2020-12/schema", schema["$schema"]!.GetValue<string>());
+        Assert.False(schema["additionalProperties"]!.GetValue<bool>());
+        var required = schema["required"]!.AsArray().Select(x => x!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(required, descriptor.Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal));
+        Assert.Equal(1, descriptor["schemaVersion"]!.GetValue<int>());
+        Assert.True(descriptor["deployApi"]!.GetValue<bool>());
+        var environments = descriptor["environments"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+        Assert.NotEmpty(environments);
+        Assert.All(environments, environment => Assert.Contains(environment, AllowedEnvironments));
+        Assert.Equal(descriptor["environments"]!.AsArray().Count, environments.Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains(descriptor["precondition"]!.GetValue<string>(), AllowedPreconditions);
+        Assert.Contains(descriptor["trafficPolicy"]!.GetValue<string>(), AllowedTrafficPolicies);
+        Assert.Contains(descriptor["compatibility"]!.GetValue<string>(), AllowedCompatibilityModes);
+
+        var baseline = descriptor["requiredMigrationBaseline"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+        var authorised = descriptor["authorisedMigrations"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+        Assert.NotEmpty(baseline);
+        Assert.Equal(baseline, baseline.Order(StringComparer.Ordinal));
+        Assert.Equal(baseline.Length, baseline.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(authorised.Length, authorised.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(authorised, baseline[..authorised.Length]);
+        Assert.All(baseline, id => Assert.Matches(@"^[0-9]{14}_[A-Za-z][A-Za-z0-9]*$", id));
+        Assert.All(authorised, id => Assert.Contains(id, baseline, StringComparer.Ordinal));
+    }
+
     [Fact]
     public void DeploymentWorkflowEnforcesPinnedPromotionAndReleasePolicy()
     {

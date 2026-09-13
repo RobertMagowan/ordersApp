@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudorders.example/schemas/release-schema.json",
+  "title": "CloudOrders release descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "releaseId",
+    "schemaVersion",
+    "environments",
+    "deployApi",
+    "requiredMigrationBaseline",
+    "authorisedMigrations",
+    "precondition",
+    "trafficPolicy",
+    "compatibility"
+  ],
+  "properties": {
+    "releaseId": { "type": "string", "minLength": 1 },
+    "schemaVersion": { "const": 1 },
+    "environments": {
+      "type": "array",
+      "items": { "enum": ["development", "test"] },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "deployApi": { "type": "boolean" },
+    "requiredMigrationBaseline": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/efMigrationId" },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "authorisedMigrations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/efMigrationId" },
+      "uniqueItems": true
+    },
+    "precondition": {
+      "enum": ["none", "ownership-read-only-transaction"]
+    },
+    "trafficPolicy": {
+      "enum": ["none", "controlled-nonproduction-access"]
+    },
+    "compatibility": {
+      "enum": ["api-compatible", "maintenance-required"]
+    }
+  },
+  "$defs": {
+    "efMigrationId": {
+      "type": "string",
+      "pattern": "^[0-9]{14}_[A-Za-z][A-Za-z0-9]*$"
+    }
+  }
+}
