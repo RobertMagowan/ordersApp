@@ -18,6 +18,8 @@ internal sealed class OutboxMessageEntityConfiguration : IEntityTypeConfiguratio
         builder.Property(message => message.OccurredAt).HasPrecision(7);
         builder.Property(message => message.CreatedAt).HasPrecision(7);
         builder.Property(message => message.ProcessedAt).HasPrecision(7);
+        builder.Property(message => message.LeaseOwner).HasMaxLength(128);
+        builder.Property(message => message.LeaseExpiresAt).HasPrecision(7);
         builder.Property(message => message.LastAttemptAt).HasPrecision(7);
         builder.Property(message => message.LastErrorCode).HasMaxLength(128);
         builder.Property(message => message.TraceParent).HasMaxLength(512);
@@ -35,5 +37,8 @@ internal sealed class OutboxMessageEntityConfiguration : IEntityTypeConfiguratio
                 message.AttemptCount
             })
             .HasDatabaseName("IX_OutboxMessages_Pending");
+        builder.HasIndex(message => new { message.LeaseExpiresAt, message.EventId })
+            .HasFilter("[ProcessedAt] IS NULL")
+            .HasDatabaseName("IX_OutboxMessages_Lease");
     }
 }

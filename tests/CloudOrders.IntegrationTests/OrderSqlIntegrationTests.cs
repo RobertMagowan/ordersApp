@@ -70,7 +70,7 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
         Assert.Equal(created, read);
         Assert.Equal(1, await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.Orders"));
-        Assert.Equal(3, await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.__EFMigrationsHistory"));
+        Assert.Equal(4, await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.__EFMigrationsHistory"));
     }
 
     [Fact]
@@ -111,6 +111,8 @@ public sealed class OrderSqlIntegrationTests(SqlServerFixture sqlServer)
         Assert.Equal(OrderCreatedIntegrationEventV1.CurrentMessageVersion, reader.GetInt32(3));
         using var payload = JsonDocument.Parse(reader.GetString(4));
         Assert.Equal(created.Id, payload.RootElement.GetProperty("orderId").GetGuid());
+        Assert.Equal(OrderCreatedIntegrationEventV1.MessageType, payload.RootElement.GetProperty("messageType").GetString());
+        Assert.Equal(OrderCreatedIntegrationEventV1.CurrentMessageVersion, payload.RootElement.GetProperty("messageVersion").GetInt32());
         Assert.Equal(0, reader.GetInt32(5));
         Assert.StartsWith("00-4bf92f3577b34da6a3ce929d0e0e4736-", reader.GetString(6), StringComparison.Ordinal);
         Assert.Equal(SubjectId, reader.GetString(7));

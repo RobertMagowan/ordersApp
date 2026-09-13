@@ -99,6 +99,7 @@ builder.Services.AddDbContextFactory<CloudOrdersDbContext>((serviceProvider, opt
 });
 builder.Services.AddScoped<IOrderRepository, SqlOrderRepository>();
 builder.Services.AddScoped<IIdempotentOrderStore, SqlIdempotentOrderStore>();
+builder.Services.AddScoped<IOutboxLeaseStore>(sp => (SqlIdempotentOrderStore)sp.GetRequiredService<IIdempotentOrderStore>());
 builder.Services.AddScoped<ICustomerProfileStore, SqlCustomerProfileStore>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<IAuthorizationAuditSink>(serviceProvider =>
