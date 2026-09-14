@@ -802,6 +802,8 @@ jobs:
           migration = containers[0]
           if migration.get("name") != "migrations" or template.get("volumes") or template.get("initContainers"):
               raise SystemExit("Migration Job template cannot safely be overridden.")
+          if migration.get("command") not in (None, []):
+              raise SystemExit("Migration Job template must not override the image command.")
           migration["image"] = image
           release_args = {
               "verify": ["--verify-release", "/workspace/ops/releases/current-release.json"],
@@ -810,6 +812,9 @@ jobs:
           }
           migration["args"] = release_args[mode]
           environment_entries = [entry for entry in migration.get("env", []) if entry.get("name") not in {"DESCRIPTOR_SHA256", "RELEASE_SHA", "DEPLOYMENT_ENVIRONMENT"}]
+          sql_entries = [entry for entry in environment_entries if entry.get("name") == "ConnectionStrings__CloudOrders"]
+          if len(sql_entries) != 1 or bool(sql_entries[0].get("value")) == bool(sql_entries[0].get("secretRef")):
+              raise SystemExit("Migration Job template must bind exactly one SQL connection value or secret reference.")
           environment_entries.extend([
               {"name": "DESCRIPTOR_SHA256", "value": descriptor_sha},
               {"name": "RELEASE_SHA", "value": release_sha},
@@ -820,16 +825,16 @@ jobs:
               json.dump(template, destination)
           PY
             EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --yaml "$JOB_TEMPLATE" --query name --output tsv) || return 1
-            rm -f "$JOB_TEMPLATE" || return 1
             [[ -n "$EXECUTION" ]] || { echo "Migration Job did not return an execution name." >&2; return 1; }
             printf -- '- Job execution: `%s`; command: `%s`; outcome: started\n' "$EXECUTION" "$mode" >> "$GITHUB_STEP_SUMMARY" || return 1
             EXECUTION_ARGS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].args' --output json) || return 1
             EXECUTION_IMAGE=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].image' --output tsv) || return 1
             EXECUTION_ENV=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].env' --output json) || return 1
-            python3 - "$mode" "$EXECUTION_ARGS" "$EXECUTION_IMAGE" "$MIGRATION_IMAGE" "$EXECUTION_ENV" "$DESCRIPTOR_SHA256" "$RELEASE_SHA" "$DEPLOYMENT_ENVIRONMENT" <<'PY' || return 1
+            EXECUTION_COMMAND=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query '{command:properties.template.containers[0].command}' --output json) || return 1
+            python3 - "$mode" "$EXECUTION_ARGS" "$EXECUTION_IMAGE" "$MIGRATION_IMAGE" "$EXECUTION_ENV" "$DESCRIPTOR_SHA256" "$RELEASE_SHA" "$DEPLOYMENT_ENVIRONMENT" "$JOB_TEMPLATE" "$EXECUTION_COMMAND" <<'PY' || return 1
           import json
           import sys
-          mode, args, image, expected_image, environment, descriptor_sha, release_sha, deployment_environment = sys.argv[1:]
+          mode, args, image, expected_image, environment, descriptor_sha, release_sha, deployment_environment, template_path, command = sys.argv[1:]
           expected_args = {
               "verify": ["--verify-release", "/workspace/ops/releases/current-release.json"],
               "apply": ["--apply-release", "/workspace/ops/releases/current-release.json"],
@@ -837,10 +842,25 @@ jobs:
           }[mode]
           if json.loads(args) != expected_args or image != expected_image:
               raise SystemExit("Migration execution identity does not match the immutable release.")
-          env = {entry["name"]: entry.get("value") for entry in json.loads(environment)}
+          if json.loads(command).get("command") not in (None, []):
+              raise SystemExit("Migration execution must not override the image command.")
+          execution_environment = json.loads(environment)
+          env = {entry["name"]: entry.get("value") for entry in execution_environment}
           if {key: env.get(key) for key in ("DESCRIPTOR_SHA256", "RELEASE_SHA", "DEPLOYMENT_ENVIRONMENT")} != {"DESCRIPTOR_SHA256": descriptor_sha, "RELEASE_SHA": release_sha, "DEPLOYMENT_ENVIRONMENT": deployment_environment}:
               raise SystemExit("Migration execution environment does not bind the descriptor identity.")
+
+          def sql_binding(entries):
+              matches = [entry for entry in entries if entry.get("name") == "ConnectionStrings__CloudOrders"]
+              if len(matches) != 1 or bool(matches[0].get("value")) == bool(matches[0].get("secretRef")):
+                  raise SystemExit("Migration execution SQL connection binding is missing or ambiguous.")
+              return {key: matches[0].get(key) for key in ("value", "secretRef")}
+
+          with open(template_path, encoding="utf-8") as source:
+              expected_environment = json.load(source)["containers"][0]["env"]
+          if sql_binding(execution_environment) != sql_binding(expected_environment):
+              raise SystemExit("Migration execution SQL connection binding does not match its pre-start template.")
           PY
+            rm -f "$JOB_TEMPLATE" || return 1
             for _ in {1..30}; do
               STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query properties.status --output tsv) || return 1
               if [[ "$STATUS" == Succeeded ]]; then

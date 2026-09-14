@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,63 @@ def python_block(name):
 
 
 class ReleaseWorkflowRegressionTests(unittest.TestCase):
+    def test_template_rejects_nonempty_entrypoint_override(self):
+        body = script("Verify, apply, and verify the release descriptor")
+        block = re.findall(r"<<'PY' \|\| return 1\n(.*?)\nPY", body, re.S)[0]
+        for command in (["sh", "-c", "exit 0"], ["dotnet", "Other.dll"], "override"):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "template.json"
+                path.write_text(json.dumps({"containers": [{"name": "migrations", "command": command, "env": [
+                    {"name": "ConnectionStrings__CloudOrders", "value": "sensitive-connection"}]}]}))
+                result = subprocess.run([sys.executable, "-c", block, str(path), "image", "verify", "sha", "release", "test"],
+                                        capture_output=True, text=True)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("command", result.stderr)
+                self.assertNotIn("sensitive-connection", result.stdout + result.stderr)
+
+    def test_template_preserves_default_entrypoint_and_sql_binding(self):
+        body = script("Verify, apply, and verify the release descriptor")
+        block = re.findall(r"<<'PY' \|\| return 1\n(.*?)\nPY", body, re.S)[0]
+        for command in (None, []):
+            for binding in ({"value": "sensitive-connection"}, {"secretRef": "sensitive-reference"}):
+                with self.subTest(command=command, binding=binding), tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "template.json"
+                    sql = {"name": "ConnectionStrings__CloudOrders", **binding}
+                    path.write_text(json.dumps({"containers": [{"name": "migrations", "command": command, "env": [sql]}]}))
+                    result = subprocess.run([sys.executable, "-c", block, str(path), "image", "verify", "sha", "release", "test"],
+                                            capture_output=True, text=True)
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    self.assertIn(sql, json.loads(path.read_text())["containers"][0]["env"])
+                    self.assertNotIn("sensitive-", result.stdout + result.stderr)
+
+    def test_execution_rejects_command_or_sql_binding_changes(self):
+        body = script("Verify, apply, and verify the release descriptor")
+        self.assertIn("--query '{command:properties.template.containers[0].command}'", body)
+        block = re.findall(r"<<'PY' \|\| return 1\n(.*?)\nPY", body, re.S)[1]
+        invocation = re.findall(r"python3 - (.*?) <<'PY' \|\| return 1", body)[1]
+        bindings = [{"name": "DESCRIPTOR_SHA256", "value": "sha"}, {"name": "RELEASE_SHA", "value": "release"},
+                    {"name": "DEPLOYMENT_ENVIRONMENT", "value": "test"}]
+        value = {"name": "ConnectionStrings__CloudOrders", "value": "sensitive-original-connection"}
+        secret = {"name": "ConnectionStrings__CloudOrders", "secretRef": "sensitive-original-reference"}
+        cases = [(value, [value], None, True), (secret, [secret], [], True),
+                 (value, [value], ["sh", "-c", "exit 0"], False),
+                 (value, [{**value, "value": "sensitive-wrong-connection"}], None, False),
+                 (secret, [{**secret, "secretRef": "sensitive-wrong-reference"}], None, False),
+                 (value, [secret], None, False), (secret, [value], None, False),
+                 (value, [], None, False), (value, [value, value], None, False)]
+        for original, actual, command, allowed in cases:
+            with self.subTest(original=original, actual=actual, command=command), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "template.json"
+                path.write_text(json.dumps({"containers": [{"name": "migrations", "env": [original, *bindings]}]}))
+                environment = {"mode": "verify", "EXECUTION_ARGS": json.dumps(["--verify-release", "/workspace/ops/releases/current-release.json"]),
+                               "EXECUTION_IMAGE": "image", "MIGRATION_IMAGE": "image", "EXECUTION_ENV": json.dumps([*actual, *bindings]),
+                               "DESCRIPTOR_SHA256": "sha", "RELEASE_SHA": "release", "DEPLOYMENT_ENVIRONMENT": "test",
+                               "JOB_TEMPLATE": str(path), "EXECUTION_COMMAND": json.dumps({"command": command})}
+                arguments = [environment[token.removeprefix("$")] for token in shlex.split(invocation)]
+                result = subprocess.run([sys.executable, "-c", block, *arguments], capture_output=True, text=True)
+                self.assertEqual(allowed, result.returncode == 0, result.stderr)
+                self.assertNotIn("sensitive-", result.stdout + result.stderr)
+
     def test_outputs_are_distinct_newline_terminated_records(self):
         block = python_block("Validate immutable release descriptor")
         # Execute the output-writing portion; schema validation is covered separately.
@@ -142,7 +200,7 @@ sleep() { :; }
         body = script("Verify, apply, and verify the release descriptor")
         function = body[body.index("run_release_job() {"):body.index('\nif [[ "$PRECONDITION"')]
         bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
-        for failure in ("template-query", "start", "args", "image", "env", "identity", "status", "evidence"):
+        for failure in ("template-query", "start", "args", "image", "env", "command", "identity", "status", "evidence"):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
                 preamble = r'''
 set -euo pipefail
@@ -159,6 +217,7 @@ az() {
     *"containers[0].args"*) [[ "$FAILURE" != args ]] || return 1; echo '[]' ;;
     *"containers[0].image"*) [[ "$FAILURE" != image ]] || return 1; echo image ;;
     *"containers[0].env"*) [[ "$FAILURE" != env ]] || return 1; echo '[]' ;;
+    *"containers[0].command"*) [[ "$FAILURE" != command ]] || return 1; echo null ;;
     *"properties.status"*) [[ "$FAILURE" != status ]] || return 1; echo Succeeded ;;
     *) return 1 ;;
   esac
