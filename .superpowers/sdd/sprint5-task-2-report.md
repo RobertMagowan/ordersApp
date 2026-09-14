@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented the isolated Azure Functions outbox publisher with a bounded eight-minute drain, 90-second leases, 500-row claims, send-then-conditional-mark ordering, stable EventId message IDs, and distinct stale-token results. The 2026-09-14 review remediation is committed as `ea06d95` (base `29dafa5`). Local remediation verification is complete; release/promotion and emulator-to-broker acceptance are not claimed.
+Implemented the isolated Azure Functions outbox publisher with a bounded eight-minute drain, 90-second leases, 500-row claims, send-then-conditional-mark ordering, stable EventId message IDs, and distinct stale-token results. The 2026-09-14 lease remediation is committed as `ea06d95` (base `29dafa5`), followed by explicit unavailable metrics in `806c63d`. Local remediation verification is complete; release/promotion and emulator-to-broker acceptance are not claimed.
 
 ## TDD evidence
 
@@ -19,14 +19,14 @@ A complementary SQL-backed publisher test reads the persisted EventId/body, simu
 - Added focused publisher tests and solution/project registration.
 - Review remediation: one `TimeProvider`-backed cancellation timer now covers renewal, send, and conditional mark together. Its deadline is the earlier of the drain deadline or 85 seconds from before renewal begins. Starting before renewal includes query latency and avoids comparing host and database clocks; the five-second margin ends the operation before the database's renewed 90-second lease expires. Cancellation is checked after renewal and send, so a late successful return cannot initiate the next operation. Lease-budget failures do not incorrectly report the eight-minute drain as exhausted.
 
-## Verification
+## Lease-remediation verification (historical)
 
-Current local verification on 2026-09-14, bound to the code/test tree committed in `ea06d95`:
+Local verification on 2026-09-14, bound to the code/test tree committed in `ea06d95`; metrics-remediation verification below supersedes these counts:
 
 - `dotnet test tests/CloudOrders.IntegrationTests/CloudOrders.IntegrationTests.csproj --filter FullyQualifiedName~OutboxPublisherIntegrationTests --no-restore`: PASS (9/9).
 - `dotnet test tests/CloudOrders.IntegrationTests/CloudOrders.IntegrationTests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~OutboxPublisherIntegrationTests|FullyQualifiedName~OutboxLeaseIntegrationTests'`: PASS (16/16, including SQL-backed crash/reclaim).
 - `dotnet test tests/CloudOrders.IntegrationTests/CloudOrders.IntegrationTests.csproj --configuration Release --no-build --no-restore`: PASS (120/120).
-- Unit and architecture project runs with `--configuration Release --no-build --no-restore`: PASS (19/19 and 43/43 respectively). Current solution total: **182 tests**, not the superseded report totals.
+- Unit and architecture project runs with `--configuration Release --no-build --no-restore`: PASS (19/19 and 43/43 respectively). Solution total at that revision: **182 tests**.
 - `dotnet test CloudOrders.slnx --configuration Release --no-build --no-restore`: PASS (182/182: 19 unit, 43 architecture, 120 integration).
 - `dotnet build CloudOrders.slnx --configuration Release --no-restore`: PASS (0 warnings, 0 errors).
 - `dotnet format CloudOrders.slnx --verify-no-changes --no-restore`: PASS.
@@ -47,3 +47,21 @@ The required read-only resume checks also ran. `ops/Test-SprintDelivery.ps1` rep
 Earlier reviews added renewal before every send, cancellation propagation, persisted SQL pending/oldest-age metrics, low-cardinality `OutboxPublisherCounters`, and local emulator configuration. Those changes remain.
 
 The prior report's claim of a true expired-lease publisher reclaim test was inaccurate: its fake returned a second token by claim-call count without an expiry predicate. The earlier per-operation cancellation also used the eight-minute drain rather than bounding send plus mark by the 90-second lease. This remediation replaces both inadequate proofs; all earlier test counts are superseded by the fresh verification above.
+
+## Metrics availability remediation
+
+Final review identified that metrics deadline exhaustion fabricated `Pending = 0` and zero oldest age. Pending count and oldest age are now nullable in both the drain result and counters. An unavailable query leaves both null and emits `metricsStatus=unavailable`; a successful query emits `metricsStatus=available` with the measured values, including legitimate zero backlog. Deadline and query-failure warning outcomes are fixed, low-cardinality values. Publish success/failure counters are retained even if metrics cannot be collected, and caller cancellation continues to propagate. Lease/send/mark timing was not changed.
+
+TDD: five new cases were observed failing against the old implementation before the fix. Deterministic time advancement covers deadline exhaustion before the metrics query and during it; both previously logged false zero backlog. Additional tests cover a query exception and measured empty/nonempty backlog. Assertions inspect both returned values and the structured counter log.
+
+During full regression, an existing cancellation-observer test race surfaced: cancellation of `Task.Delay` could resume its continuation and dispose a separate observer registration before that registration ran. Tests now inspect the propagated sender/mark token directly at the simulated deadline and still await drain completion. This removes the observer scheduling race without relaxing the lease assertions. A rebuild attempted while the old test host still held its DLL also hit a Windows file lock; verification was rerun after that host exited. Five consecutive publisher-only reruns passed (14/14 each).
+
+Latest verification on 2026-09-14, bound to code/test commit `806c63d`:
+
+- Publisher filter with `dotnet test tests/CloudOrders.IntegrationTests/CloudOrders.IntegrationTests.csproj --configuration Release --no-build --no-restore --filter FullyQualifiedName~OutboxPublisherIntegrationTests`: PASS (14/14, plus five consecutive reruns).
+- Publisher and SQL lease filters with `dotnet test tests/CloudOrders.IntegrationTests/CloudOrders.IntegrationTests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~OutboxPublisherIntegrationTests|FullyQualifiedName~OutboxLeaseIntegrationTests'`: PASS (21/21).
+- `dotnet test tests/CloudOrders.IntegrationTests/CloudOrders.IntegrationTests.csproj --configuration Release --no-build --no-restore`: PASS (125/125).
+- Unit and architecture project runs with `--configuration Release --no-build --no-restore`: PASS (19/19 and 43/43). Total across the three projects: **187 passing tests**.
+- `dotnet build CloudOrders.slnx --configuration Release --no-restore`: PASS (0 warnings, 0 errors).
+- `dotnet format CloudOrders.slnx --verify-no-changes --no-restore`: PASS.
+- `git diff --check`: PASS.
