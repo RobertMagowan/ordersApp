@@ -1052,11 +1052,17 @@ Describe 'Deployment workflow path gate' -Tag 'deployment-workflow' {
     }
 
     It 'gates every Azure-mutating job on deployable classification' {
-        foreach ($jobName in 'preview_foundation', 'prepare_release', 'preview_sql', 'bootstrap_sql', 'run_migration', 'run_sprint_4a_e1_migration_only', 'deploy_release') {
+        $expectedJobs = @('preview_foundation', 'prepare_release', 'preview_sql', 'bootstrap_sql', 'run_migration', 'deploy_release')
+        $azureJobs = @([regex]::Matches($workflow, '(?ms)^  (?<name>[A-Za-z0-9_]+):\s*\r?\n.*?(?=^  [A-Za-z0-9_]+:|\z)') |
+            Where-Object { $_.Value -match '(?m)^      id-token:\s*write\s*$' } |
+            ForEach-Object { $_.Groups['name'].Value })
+        ($azureJobs | Sort-Object) -join ',' | Should Be (($expectedJobs | Sort-Object) -join ',')
+
+        foreach ($jobName in $expectedJobs) {
             $job = [regex]::Match($workflow, "(?ms)^  ${jobName}:\s*\r?\n.*?(?=^  [A-Za-z0-9_]+:|\z)").Value
             $job | Should Not BeNullOrEmpty
-            $job | Should Match 'needs\.classify_changes\.outputs\.deployable\s*==\s*''true'''
-            $job | Should Match 'needs:\s*[^\r\n]*classify_changes'
+            $job | Should Match '(?m)^    if:\s*needs\.classify_changes\.outputs\.deployable\s*==\s*''true'''
+            $job | Should Match '(?m)^    needs:\s*[^\r\n]*classify_changes'
         }
     }
 

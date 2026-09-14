@@ -24,3 +24,14 @@ Verification for that commit: 171 .NET tests passed (19 unit, 43 architecture, 1
 - `git diff --check`: passed.
 
 No Azure deployment or external mutation was performed. Live development verification remains a release gate owned by the parent task.
+
+## Delivery CI contract follow-up
+
+- Reproduced the stale delivery-test failure: the deployment-workflow Pester tag passed 2/3 tests because its Azure-job list still required the removed Sprint-specific migration job.
+- Updated the expected set to the six generic Azure jobs: foundation preview, release preparation, SQL preview/bootstrap, migration execution, and API deployment. The test now also compares that set against all jobs declaring OIDC write permission, so an added or removed Azure job cannot silently escape the assertion.
+- Preserved deployable-classification enforcement and anchored the `needs` and `if` assertions at job level. No deployment workflow behavior changed.
+- Focused deployment-workflow Pester tag: 3/3 passed.
+- `pwsh -NoProfile -File ops/Test-SprintDelivery.ps1`, using CI-pinned Pester 4.8.0 from an isolated temporary module directory: 70/70 passed.
+- Windows PowerShell 5.1 with bundled Pester 3.4.0: 70/70 passed as an additional compatibility check.
+- The first PowerShell 7.6.5 run picked up bundled Pester 3.4.0 and produced 15 unrelated `Should Throw` assertion failures (55 passed); matching CI's explicit Pester version eliminated them without repository changes.
+- Relevant `DeploymentWorkflowPolicyTests`: 21/21 passed. `git diff --check`: passed.
