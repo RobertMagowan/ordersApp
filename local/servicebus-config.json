@@ -1,7 +1,10 @@
 {
   "UserConfig": {
     "Namespaces": [
-      { "Name": "emulator", "Queues": [ { "Name": "orders", "Properties": { "DeadLetteringOnMessageExpiration": false, "MaxDeliveryCount": 5 } } ] }
-    ]
+      { "Name": "sbemulatorns", "Queues": [ { "Name": "orders", "Properties": { "DeadLetteringOnMessageExpiration": false, "MaxDeliveryCount": 5 } } ] }
+    ],
+    "Logging": {
+      "Type": "Console"
+    }
   }
 }
