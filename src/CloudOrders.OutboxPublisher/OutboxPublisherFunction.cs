@@ -46,6 +46,7 @@ public sealed class OutboxPublisherFunction(
     public const int BatchSize = 500;
     public static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(90);
     public static readonly TimeSpan DrainDuration = TimeSpan.FromMinutes(8);
+    private static readonly TimeSpan LeaseSafetyMargin = TimeSpan.FromSeconds(5);
 
     [Function("OutboxPublisher")]
     public Task RunAsync([TimerTrigger("*/10 * * * * *")] TimerInfo timer, CancellationToken cancellationToken) => DrainAsync(cancellationToken);
@@ -72,18 +73,38 @@ public sealed class OutboxPublisherFunction(
             {
                 remaining = deadline - timeProvider.GetUtcNow();
                 if (remaining <= TimeSpan.Zero) { deadlineReached = true; break; }
+                // Start before renewal: database UTC grants at least this duration from
+                // the request start, without comparing the database and host clocks.
+                // One timer covers renewal latency, send, and the conditional mark.
+                var leaseDeadline = timeProvider.GetUtcNow() + LeaseDuration - LeaseSafetyMargin;
+                var operationDeadline = leaseDeadline < deadline ? leaseDeadline : deadline;
                 try
                 {
-                    if (!await WithinDeadline(deadline, cancellationToken, token => leaseStore.RenewAsync(row.EventId, row.LeaseOwner, row.LeaseToken, LeaseDuration, token)))
-                    { stale++; logger?.LogWarning("OutboxLeaseRenewFailed outcome=stale_token"); continue; }
-                    await WithinDeadline(deadline, cancellationToken, token => sender.SendAsync(row, token));
-                    if (await WithinDeadline(deadline, cancellationToken, token => leaseStore.MarkPublishedAsync(row.EventId, row.LeaseOwner, row.LeaseToken, token)))
+                    var outcome = await WithinDeadline(operationDeadline, cancellationToken, async token =>
+                    {
+                        var renewed = await leaseStore.RenewAsync(row.EventId, row.LeaseOwner, row.LeaseToken, LeaseDuration, token);
+                        token.ThrowIfCancellationRequested();
+                        if (!renewed) return (Renewed: false, Published: false);
+                        await sender.SendAsync(row, token);
+                        // A sender may return normally after observing cancellation.
+                        // Never begin the mark once the shared lease budget is spent.
+                        token.ThrowIfCancellationRequested();
+                        return (Renewed: true, Published: await leaseStore.MarkPublishedAsync(row.EventId, row.LeaseOwner, row.LeaseToken, token));
+                    });
+                    if (!outcome.Renewed)
+                    { stale++; logger?.LogWarning("OutboxLeaseRenewFailed outcome=stale_token"); }
+                    else if (outcome.Published)
                     { published++; logger?.LogInformation("OutboxPublished"); }
                     else
                     { stale++; logger?.LogWarning("OutboxMarkFailed outcome=stale_token"); }
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                { failed++; deadlineReached = true; break; }
+                {
+                    failed++;
+                    if (operationDeadline == deadline || timeProvider.GetUtcNow() >= deadline)
+                    { deadlineReached = true; break; }
+                    logger?.LogWarning("OutboxPublishAttempt failed outcome=lease_deadline");
+                }
                 catch (Exception exception)
                 { failed++; logger?.LogWarning(exception, "OutboxPublishAttempt failed"); }
             }
@@ -102,11 +123,11 @@ public sealed class OutboxPublisherFunction(
     {
         var remaining = deadline - timeProvider.GetUtcNow();
         if (remaining <= TimeSpan.Zero) throw new OperationCanceledException();
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(remaining);
-        return await operation(timeout.Token);
+        using var timer = new CancellationTokenSource(remaining, timeProvider);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timer.Token);
+        timeout.Token.ThrowIfCancellationRequested();
+        var result = await operation(timeout.Token);
+        timeout.Token.ThrowIfCancellationRequested();
+        return result;
     }
-
-    private Task WithinDeadline(DateTimeOffset deadline, CancellationToken cancellationToken, Func<CancellationToken, Task> operation)
-        => WithinDeadline(deadline, cancellationToken, async token => { await operation(token); return true; });
 }
