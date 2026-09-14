@@ -10,6 +10,8 @@ services:
       SQL_SERVER: mssql
       MSSQL_SA_PASSWORD: "local-only-Password123!"
     depends_on: [mssql]
+    volumes:
+      - ./servicebus-config.json:/ServiceBus_Emulator/ConfigFiles/Config.json:ro
     ports: ["5672:5672"]
   mssql:
     image: mcr.microsoft.com/mssql/server:2022-CU14-ubuntu-22.04

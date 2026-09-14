@@ -1,0 +1,7 @@
+{
+  "UserConfig": {
+    "Namespaces": [
+      { "Name": "emulator", "Queues": [ { "Name": "orders", "Properties": { "DeadLetteringOnMessageExpiration": false, "MaxDeliveryCount": 5 } } ] }
+    ]
+  }
+}

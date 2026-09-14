@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <!-- Worker SDK 2.0 metadata tooling currently tops out at net9; runtime remains net10. -->
     <FunctionsToolingSuffix>net9-isolated</FunctionsToolingSuffix>
-    <NoWarn>$(NoWarn);CA1848;CA1873</NoWarn>
+    <NoWarn>$(NoWarn);CA1848;CA1873;CA1068;CA1859</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Azure.Functions.Worker" />

@@ -26,3 +26,11 @@ Added `OutboxPublisherIntegrationTests` before the publisher implementation. The
 ## Concerns and limits
 
 The emulator configuration is intentionally documented as sequential smoke coverage only; it is not evidence for Azure RBAC, lease locking, multi-instance concurrency, or production Service Bus Standard lock behavior. A real SQL/emulator send proof remains to be run where the required images and migration environment are available. The pre-existing untracked task brief was preserved.
+
+## Review remediation
+
+Added renewal before every send, deadline-linked cancellation for claim, renew, send, and conditional mark, and low-cardinality `OutboxPublisherCounters` (pending, oldest pending age, publish success/failure) with aggregate logs containing no EventId dimensions. Added a sender-cancellation deadline test and renewal assertion; existing send-then-failure coverage models crash-after-send pending retention and Task 1 SQL tests prove reclaim.
+
+Added `local/servicebus-config.json` with the `orders` entity and `MaxDeliveryCount`, `local/local.settings.json.example`, a compose volume mount, and an executable `func start --csharp` path. No real credentials are included.
+
+Remediation verification: focused publisher 4/4 PASS; full solution 175/175 PASS (19 unit, 43 architecture, 113 integration); Release build PASS (0 warnings/errors); format verify PASS; `git diff --check` PASS.

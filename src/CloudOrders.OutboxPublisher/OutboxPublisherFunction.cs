@@ -28,7 +28,14 @@ public sealed class ServiceBusOutboxMessageSender(ServiceBusSender sender) : IOu
     }
 }
 
-public sealed record OutboxDrainResult(int Claimed, int Published, int Failed, int StaleToken, bool DeadlineReached);
+public sealed record OutboxDrainResult(int Claimed, int Published, int Failed, int StaleToken, bool DeadlineReached)
+{
+    public int Pending => Failed + StaleToken;
+    public TimeSpan OldestPendingAge { get; init; }
+    public OutboxPublisherCounters Counters => new(Pending, OldestPendingAge, Published, Failed + StaleToken);
+}
+
+public sealed record OutboxPublisherCounters(int Pending, TimeSpan OldestPendingAge, int PublishSuccess, int PublishFailure);
 
 public sealed class OutboxPublisherFunction(
     IOutboxLeaseStore leaseStore,
@@ -56,7 +63,9 @@ public sealed class OutboxPublisherFunction(
         {
             var remaining = deadline - timeProvider.GetUtcNow();
             if (remaining <= TimeSpan.Zero) { deadlineReached = true; break; }
-            var rows = await leaseStore.ClaimAsync(owner, BatchSize, LeaseDuration, cancellationToken);
+            IReadOnlyList<OutboxMessageLease> rows;
+            try { rows = await WithinDeadline(deadline, cancellationToken, token => leaseStore.ClaimAsync(owner, BatchSize, LeaseDuration, token)); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { deadlineReached = true; break; }
             if (rows.Count == 0) break;
             claimed += rows.Count;
             foreach (var row in rows)
@@ -65,21 +74,36 @@ public sealed class OutboxPublisherFunction(
                 if (remaining <= TimeSpan.Zero) { deadlineReached = true; break; }
                 try
                 {
-                    using var sendCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    sendCancellation.CancelAfter(remaining);
-                    await sender.SendAsync(row, sendCancellation.Token);
-                    if (await leaseStore.MarkPublishedAsync(row.EventId, row.LeaseOwner, row.LeaseToken, cancellationToken))
-                    { published++; logger?.LogInformation("OutboxPublished {EventId}", row.EventId); }
+                    if (!await WithinDeadline(deadline, cancellationToken, token => leaseStore.RenewAsync(row.EventId, row.LeaseOwner, row.LeaseToken, LeaseDuration, token)))
+                    { stale++; logger?.LogWarning("OutboxLeaseRenewFailed outcome=stale_token"); continue; }
+                    await WithinDeadline(deadline, cancellationToken, token => sender.SendAsync(row, token));
+                    if (await WithinDeadline(deadline, cancellationToken, token => leaseStore.MarkPublishedAsync(row.EventId, row.LeaseOwner, row.LeaseToken, token)))
+                    { published++; logger?.LogInformation("OutboxPublished"); }
                     else
-                    { stale++; logger?.LogWarning("OutboxMarkFailed {EventId} outcome=stale_token", row.EventId); }
+                    { stale++; logger?.LogWarning("OutboxMarkFailed outcome=stale_token"); }
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 { failed++; deadlineReached = true; break; }
                 catch (Exception exception)
-                { failed++; logger?.LogWarning(exception, "OutboxPublishAttempt failed {EventId}", row.EventId); }
+                { failed++; logger?.LogWarning(exception, "OutboxPublishAttempt failed"); }
             }
             if (deadlineReached) break;
         }
-        return new(claimed, published, failed, stale, deadlineReached);
+        var result = new OutboxDrainResult(claimed, published, failed, stale, deadlineReached)
+        { OldestPendingAge = failed + stale > 0 ? DrainDuration : TimeSpan.Zero };
+        logger?.LogInformation("OutboxDrainCounters pending={Pending} oldestPendingAgeSeconds={OldestPendingAgeSeconds} publishSuccess={PublishSuccess} publishFailure={PublishFailure}", result.Counters.Pending, result.Counters.OldestPendingAge.TotalSeconds, result.Counters.PublishSuccess, result.Counters.PublishFailure);
+        return result;
     }
+
+    private async Task<T> WithinDeadline<T>(DateTimeOffset deadline, CancellationToken cancellationToken, Func<CancellationToken, Task<T>> operation)
+    {
+        var remaining = deadline - timeProvider.GetUtcNow();
+        if (remaining <= TimeSpan.Zero) throw new OperationCanceledException();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(remaining);
+        return await operation(timeout.Token);
+    }
+
+    private Task WithinDeadline(DateTimeOffset deadline, CancellationToken cancellationToken, Func<CancellationToken, Task> operation)
+        => WithinDeadline(deadline, cancellationToken, async token => { await operation(token); return true; });
 }
