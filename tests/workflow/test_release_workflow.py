@@ -147,6 +147,16 @@ class ReleaseWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("az containerapp job logs show", collector)
         self.assertNotIn("--only-show-errors", collector)
 
+    def test_runner_evidence_collection_falls_back_to_execution_scoped_log_analytics_records(self):
+        body = script("Verify, apply, and verify the release descriptor")
+        collector = body[body.index("collect_release_evidence() {"):body.index("\nrun_release_job() {")]
+        self.assertIn("az monitor log-analytics workspace show", collector)
+        self.assertIn("az monitor log-analytics query", collector)
+        self.assertIn("ContainerJobName_s == '$JOB_NAME'", collector)
+        self.assertIn("ContainerGroupName_s startswith '$EXECUTION-'", collector)
+        self.assertLess(collector.index("| order by TimeGenerated asc"), collector.index("| project Log_s"))
+        self.assertIn("--query '[].Log_s' --output tsv", collector)
+
     def test_identity_failure_cannot_be_swallowed_by_conditional_function_call(self):
         body = script("Verify, apply, and verify the release descriptor")
         function = body[body.index("run_release_job() {"):body.index('\nif [[ "$PRECONDITION"')]
