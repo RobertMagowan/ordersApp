@@ -724,6 +724,7 @@ jobs:
     env:
       AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
       AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
+      AZURE_LOG_ANALYTICS_NAME: ${{ vars.AZURE_LOG_ANALYTICS_NAME }}
       AZURE_SQL_SERVER_NAME: ${{ needs.bootstrap_sql.outputs.sql_server_name }}
       AZURE_SQL_DATABASE_NAME: ${{ needs.bootstrap_sql.outputs.sql_database_name }}
       DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -778,10 +779,33 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           collect_release_evidence() {
-            local mode="$1" require_complete="$2" logs evidence
-            logs=$(az containerapp job logs show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --execution "$EXECUTION" --container migrations --tail 300 --format json) || return 1
-            evidence=$(printf '%s\n' "$logs" | python3 ops/validate-release-evidence.py ops/releases/current-release.json "$DESCRIPTOR_SHA256" "$mode" "$require_complete") || return 1
-            printf -- '- Sanitised SQL-history evidence: `%s`\n' "$evidence" >> "$GITHUB_STEP_SUMMARY" || return 1
+            local mode="$1" require_complete="$2" logs evidence workspace_id query
+            if logs=$(az containerapp job logs show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --execution "$EXECUTION" --container migrations --tail 300 --format json 2>/dev/null) &&
+              evidence=$(printf '%s\n' "$logs" | python3 ops/validate-release-evidence.py ops/releases/current-release.json "$DESCRIPTOR_SHA256" "$mode" "$require_complete"); then
+              printf -- '- Sanitised SQL-history evidence: `%s`\n' "$evidence" >> "$GITHUB_STEP_SUMMARY" || return 1
+              return 0
+            fi
+
+            workspace_id=$(az monitor log-analytics workspace show --resource-group "$AZURE_RESOURCE_GROUP" --workspace-name "$AZURE_LOG_ANALYTICS_NAME" --query customerId --output tsv) || return 1
+            query=$(cat <<EOF
+          ContainerAppConsoleLogs_CL
+          | where ContainerJobName_s == '$JOB_NAME'
+          | where ContainerGroupName_s startswith '$EXECUTION-'
+          | order by TimeGenerated asc
+          | project Log_s
+          EOF
+          )
+            for _ in {1..18}; do
+              if logs=$(az monitor log-analytics query --workspace "$workspace_id" --analytics-query "$query" --query '[].Log_s' --output tsv) &&
+                evidence=$(printf '%s\n' "$logs" | python3 ops/validate-release-evidence.py ops/releases/current-release.json "$DESCRIPTOR_SHA256" "$mode" "$require_complete"); then
+                printf -- '- Sanitised SQL-history evidence: `%s`\n' "$evidence" >> "$GITHUB_STEP_SUMMARY" || return 1
+                return 0
+              fi
+              sleep 10 || return 1
+            done
+
+            echo "MIGRATION_BASELINE_CONFLICT: Log Analytics did not provide validated runner evidence for execution $EXECUTION." >&2
+            return 1
           }
 
           run_release_job() {
