@@ -30,7 +30,7 @@ public sealed class ServiceBusOutboxMessageSender(ServiceBusSender sender) : IOu
 
 public sealed record OutboxDrainResult(int Claimed, int Published, int Failed, int StaleToken, bool DeadlineReached)
 {
-    public int Pending => Failed + StaleToken;
+    public int Pending { get; init; }
     public TimeSpan OldestPendingAge { get; init; }
     public OutboxPublisherCounters Counters => new(Pending, OldestPendingAge, Published, Failed + StaleToken);
 }
@@ -89,8 +89,11 @@ public sealed class OutboxPublisherFunction(
             }
             if (deadlineReached) break;
         }
+        OutboxMetrics metrics;
+        try { metrics = await WithinDeadline(deadline, cancellationToken, leaseStore.GetMetricsAsync); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { deadlineReached = true; metrics = new(0, TimeSpan.Zero); }
         var result = new OutboxDrainResult(claimed, published, failed, stale, deadlineReached)
-        { OldestPendingAge = failed + stale > 0 ? DrainDuration : TimeSpan.Zero };
+        { Pending = metrics.PendingCount, OldestPendingAge = metrics.OldestPendingAge };
         logger?.LogInformation("OutboxDrainCounters pending={Pending} oldestPendingAgeSeconds={OldestPendingAgeSeconds} publishSuccess={PublishSuccess} publishFailure={PublishFailure}", result.Counters.Pending, result.Counters.OldestPendingAge.TotalSeconds, result.Counters.PublishSuccess, result.Counters.PublishFailure);
         return result;
     }

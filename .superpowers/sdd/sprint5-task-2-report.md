@@ -34,3 +34,11 @@ Added renewal before every send, deadline-linked cancellation for claim, renew, 
 Added `local/servicebus-config.json` with the `orders` entity and `MaxDeliveryCount`, `local/local.settings.json.example`, a compose volume mount, and an executable `func start --csharp` path. No real credentials are included.
 
 Remediation verification: focused publisher 4/4 PASS; full solution 175/175 PASS (19 unit, 43 architecture, 113 integration); Release build PASS (0 warnings/errors); format verify PASS; `git diff --check` PASS.
+
+## Second review remediation
+
+Added `GetMetricsAsync` to the lease-store contract and a parameterized SQL Server query using `ProcessedAt IS NULL`, `COUNT_BIG`, `MIN(CreatedAt)`, and database `SYSUTCDATETIME()`. Drain telemetry now reports those persisted pending/oldest-age metrics, not local failure counts or fabricated durations.
+
+Added a true two-drain crash/reclaim boundary test: first send succeeds and mark simulates process termination; a new expired lease token is reclaimed, the exact persisted payload/EventId is sent again, and the second conditional mark succeeds. The deadline test now uses a controllable time provider and a sender that waits on the propagated cancellation token until the bounded deadline cancels it.
+
+Final verification: focused publisher 5/5 PASS; full solution 177/177 PASS (19 unit, 43 architecture, 115 integration); Release build PASS (0 warnings/errors); format verify PASS; `git diff --check` PASS.
