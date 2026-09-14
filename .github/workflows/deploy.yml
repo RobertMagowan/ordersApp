@@ -779,7 +779,7 @@ jobs:
 
           collect_release_evidence() {
             local mode="$1" require_complete="$2" logs evidence
-            logs=$(az containerapp job logs show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --execution "$EXECUTION" --container migrations --tail 300 --format json --only-show-errors) || return 1
+            logs=$(az containerapp job logs show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --execution "$EXECUTION" --container migrations --tail 300 --format json) || return 1
             evidence=$(printf '%s\n' "$logs" | python3 ops/validate-release-evidence.py ops/releases/current-release.json "$DESCRIPTOR_SHA256" "$mode" "$require_complete") || return 1
             printf -- '- Sanitised SQL-history evidence: `%s`\n' "$evidence" >> "$GITHUB_STEP_SUMMARY" || return 1
           }
