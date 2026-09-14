@@ -141,6 +141,12 @@ class ReleaseWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("Release ID:", body)
         self.assertIn("Immutable migration image:", body)
 
+    def test_runner_evidence_collection_does_not_filter_successful_standard_output(self):
+        body = script("Verify, apply, and verify the release descriptor")
+        collector = body[body.index("collect_release_evidence() {"):body.index("\nrun_release_job() {")]
+        self.assertIn("az containerapp job logs show", collector)
+        self.assertNotIn("--only-show-errors", collector)
+
     def test_identity_failure_cannot_be_swallowed_by_conditional_function_call(self):
         body = script("Verify, apply, and verify the release descriptor")
         function = body[body.index("run_release_job() {"):body.index('\nif [[ "$PRECONDITION"')]
