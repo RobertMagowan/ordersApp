@@ -1,9 +1,188 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace CloudOrders.ArchitectureTests;
 
 public sealed class DeploymentWorkflowPolicyTests
 {
+    private static readonly string[] AllowedEnvironments = ["development", "test"];
+    private static readonly string[] AllowedPreconditions = ["none", "ownership-read-only-transaction"];
+    private static readonly string[] AllowedTrafficPolicies = ["none", "controlled-nonproduction-access"];
+    private static readonly string[] AllowedCompatibilityModes = ["api-compatible", "maintenance-required"];
+
+    [Fact]
+    public void CurrentReleaseDescriptorDeclaresVersionedMigrationContract()
+    {
+        var descriptorPath = Path.Combine(FindRepositoryRoot(), "ops", "releases", "current-release.json");
+        using var descriptor = JsonDocument.Parse(File.ReadAllText(descriptorPath));
+        var root = descriptor.RootElement;
+
+        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+        Assert.NotEmpty(root.GetProperty("requiredMigrationBaseline").EnumerateArray());
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("authorisedMigrations").ValueKind);
+    }
+
+    [Fact]
+    public void CurrentReleaseDescriptorConformsToStrictSchema()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        AssertDescriptorConforms(descriptor, schema);
+        Assert.Equal(["development", "test"], descriptor["environments"]!.AsArray().Select(x => (string)x!).ToArray());
+        Assert.DoesNotContain("production", descriptor["environments"]!.AsArray().Select(x => (string)x!));
+        Assert.Equal("20260909213051_AddOutboxLeasing", descriptor["authorisedMigrations"]!.AsArray().Last()!.GetValue<string>());
+    }
+
+    [Fact]
+    public void SchemaAcceptsCodeOnlyDescriptorWithCumulativeAuthorisation()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        descriptor["compatibility"] = "maintenance-required";
+
+        AssertDescriptorConforms(descriptor, schema);
+    }
+
+    [Fact]
+    public void SchemaAcceptsDescriptorWithApiDeploymentDisabled()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        descriptor["deployApi"] = false;
+
+        AssertDescriptorConforms(descriptor, schema);
+    }
+
+    [Fact]
+    public void ReleaseSchemaRejectsMalformedJson()
+    {
+        Assert.ThrowsAny<JsonException>(() => JsonNode.Parse("{\"schemaVersion\":1"));
+    }
+
+    [Fact]
+    public void ReleaseSchemaRejectsDuplicateMigrationIds()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        descriptor["authorisedMigrations"]!.AsArray().Add("20260909213051_AddOutboxLeasing");
+        Assert.ThrowsAny<Exception>(() => AssertDescriptorConforms(descriptor, schema));
+    }
+
+    [Fact]
+    public void ReleaseSchemaRejectsUnauthorisedEnvironments()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        descriptor["environments"]!.AsArray().Add("production");
+        Assert.ThrowsAny<Exception>(() => AssertDescriptorConforms(descriptor, schema));
+    }
+
+    [Fact]
+    public void ReleaseSchemaRejectsUnknownPolicyValues()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        descriptor["trafficPolicy"] = "all-access";
+        Assert.ThrowsAny<Exception>(() => AssertDescriptorConforms(descriptor, schema));
+    }
+
+    [Fact]
+    public void AuthorisedMigrationsMustBeCodeOnlyCumulativePrefix()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        descriptor["authorisedMigrations"] = new JsonArray("20260816221235_InitialSqlPersistence", "20260909213051_AddOutboxLeasing");
+        Assert.ThrowsAny<Exception>(() => AssertDescriptorConforms(descriptor, schema));
+    }
+
+    [Fact]
+    public void MigrationArraysMustRemainChronologicallyOrdered()
+    {
+        var (descriptor, schema) = ReadReleaseDocuments();
+        var baseline = descriptor["requiredMigrationBaseline"]!.AsArray();
+        var first = baseline[0]!.GetValue<string>();
+        baseline[0] = baseline[1]!.GetValue<string>();
+        baseline[1] = first;
+
+        Assert.ThrowsAny<Exception>(() => AssertDescriptorConforms(descriptor, schema));
+    }
+
+    private static (JsonObject Descriptor, JsonObject Schema) ReadReleaseDocuments()
+    {
+        var root = FindRepositoryRoot();
+        return (
+            JsonNode.Parse(File.ReadAllText(Path.Combine(root, "ops", "releases", "current-release.json")))!.AsObject(),
+            JsonNode.Parse(File.ReadAllText(Path.Combine(root, "ops", "releases", "release-schema.json")))!.AsObject());
+    }
+
+    private static void AssertDescriptorConforms(JsonObject descriptor, JsonObject schema)
+    {
+        Assert.Equal("https://json-schema.org/draft/2020-12/schema", schema["$schema"]!.GetValue<string>());
+        Assert.False(schema["additionalProperties"]!.GetValue<bool>());
+        var required = schema["required"]!.AsArray().Select(x => x!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(required, descriptor.Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal));
+        AssertSchemaProperties(schema);
+        Assert.NotEmpty(descriptor["releaseId"]!.GetValue<string>());
+        Assert.Equal(1, descriptor["schemaVersion"]!.GetValue<int>());
+        _ = descriptor["deployApi"]!.GetValue<bool>();
+        var environments = descriptor["environments"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+        Assert.NotEmpty(environments);
+        Assert.All(environments, environment => Assert.Contains(environment, AllowedEnvironments));
+        Assert.Equal(descriptor["environments"]!.AsArray().Count, environments.Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains(descriptor["precondition"]!.GetValue<string>(), AllowedPreconditions);
+        Assert.Contains(descriptor["trafficPolicy"]!.GetValue<string>(), AllowedTrafficPolicies);
+        Assert.Contains(descriptor["compatibility"]!.GetValue<string>(), AllowedCompatibilityModes);
+
+        var baseline = descriptor["requiredMigrationBaseline"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+        var authorised = descriptor["authorisedMigrations"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+        Assert.NotEmpty(baseline);
+        Assert.Equal(baseline, baseline.Order(StringComparer.Ordinal));
+        Assert.Equal(baseline.Length, baseline.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(authorised.Length, authorised.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(authorised, baseline[..authorised.Length]);
+        Assert.All(baseline, id => Assert.Matches(@"^[0-9]{14}_[A-Za-z][A-Za-z0-9]*$", id));
+        Assert.All(authorised, id => Assert.Contains(id, baseline, StringComparer.Ordinal));
+    }
+
+    private static void AssertSchemaProperties(JsonObject schema)
+    {
+        var properties = schema["properties"]!.AsObject();
+        AssertProperty(properties, "releaseId", "string", minLength: 1);
+        Assert.Equal(1, properties["schemaVersion"]!["const"]!.GetValue<int>());
+        AssertProperty(properties, "environments", "array", uniqueItems: true);
+        Assert.Equal(["development", "test"], properties["environments"]!["items"]!["enum"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
+        AssertProperty(properties, "deployApi", "boolean");
+        AssertMigrationArrayProperty(properties, "requiredMigrationBaseline", minItems: 1);
+        AssertMigrationArrayProperty(properties, "authorisedMigrations");
+        Assert.Equal(AllowedPreconditions, properties["precondition"]!["enum"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
+        Assert.Equal(AllowedTrafficPolicies, properties["trafficPolicy"]!["enum"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
+        Assert.Equal(AllowedCompatibilityModes, properties["compatibility"]!["enum"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
+
+        var migrationDefinition = schema["$defs"]!["efMigrationId"]!;
+        Assert.Equal("string", migrationDefinition["type"]!.GetValue<string>());
+        Assert.Equal(@"^[0-9]{14}_[A-Za-z][A-Za-z0-9]*$", migrationDefinition["pattern"]!.GetValue<string>());
+    }
+
+    private static void AssertProperty(JsonObject properties, string name, string type, int? minLength = null, bool? uniqueItems = null)
+    {
+        var property = properties[name]!.AsObject();
+        Assert.Equal(type, property["type"]!.GetValue<string>());
+        if (minLength is not null)
+        {
+            Assert.Equal(minLength.Value, property["minLength"]!.GetValue<int>());
+        }
+
+        if (uniqueItems is not null)
+        {
+            Assert.Equal(uniqueItems.Value, property["uniqueItems"]!.GetValue<bool>());
+        }
+    }
+
+    private static void AssertMigrationArrayProperty(JsonObject properties, string name, int? minItems = null)
+    {
+        var property = properties[name]!.AsObject();
+        AssertProperty(properties, name, "array", uniqueItems: true);
+        Assert.Equal("#/$defs/efMigrationId", property["items"]!["$ref"]!.GetValue<string>());
+        if (minItems is not null)
+        {
+            Assert.Equal(minItems.Value, property["minItems"]!.GetValue<int>());
+        }
+    }
+
     [Fact]
     public void DeploymentWorkflowEnforcesPinnedPromotionAndReleasePolicy()
     {
@@ -196,7 +375,7 @@ public sealed class DeploymentWorkflowPolicyTests
     }
 
     [Fact]
-    public void DeploymentWorkflowRunsSqlMigrationBeforeApiCandidatePromotion()
+    public void DeploymentWorkflowUsesTheCurrentReleaseDescriptorBeforeMigrationOrApiDeployment()
     {
         var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
         var workflow = File.ReadAllText(workflowPath);
@@ -206,14 +385,25 @@ public sealed class DeploymentWorkflowPolicyTests
         Assert.Contains("bootstrap_sql:", workflow, StringComparison.Ordinal);
         Assert.Contains("run_migration:", workflow, StringComparison.Ordinal);
         Assert.Contains("deploy_release:", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("EnforceCustomerProfileOwnership", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("sprint-4", workflow, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("migration_only", workflow, StringComparison.Ordinal);
+        Assert.Contains("current-release.json", workflow, StringComparison.Ordinal);
+        Assert.Contains("release-schema.json", workflow, StringComparison.Ordinal);
+        Assert.Contains("jsonschema", workflow, StringComparison.Ordinal);
+        Assert.Contains("--verify-release", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("--apply-release", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("/workspace/ops/releases/current-release.json", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("DESCRIPTOR_SHA256", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("RELEASE_SHA", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("MIGRATION_IMAGE", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("EXECUTION_ARGS", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("EXECUTION_ENV", migrationJob.Value, StringComparison.Ordinal);
         Assert.Contains("az containerapp job start", workflow, StringComparison.Ordinal);
-        Assert.Contains("EXECUTION_TEMPLATE=$(mktemp)", migrationJob.Value, StringComparison.Ordinal);
-        Assert.Contains("--query properties.template --output json", migrationJob.Value, StringComparison.Ordinal);
-        Assert.Contains(".containers |= map(if .name == \"migrations\" then .args = [\"--migration\", \"EnforceCustomerProfileOwnership\"] else . end)", migrationJob.Value, StringComparison.Ordinal);
-        Assert.Contains("--yaml \"$EXECUTION_TEMPLATE\"", migrationJob.Value, StringComparison.Ordinal);
-        Assert.Contains("PRECONDITION_EXECUTION=$(az containerapp job start", migrationJob.Value, StringComparison.Ordinal);
-        Assert.Contains("[\"--ownership-precondition\"]", migrationJob.Value, StringComparison.Ordinal);
-        Assert.DoesNotContain("--args '--migration' 'EnforceCustomerProfileOwnership'", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("JOB_TEMPLATE=$(mktemp)", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("--query properties.template --output json > \"$JOB_TEMPLATE\"", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("--yaml \"$JOB_TEMPLATE\"", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("--ownership-precondition", migrationJob.Value, StringComparison.Ordinal);
         Assert.DoesNotContain("JOB_IDENTITY=", workflow, StringComparison.Ordinal);
         Assert.Contains("deployMigrationJob=false", workflow, StringComparison.Ordinal);
         Assert.Contains("deployMigrationJob=true", workflow, StringComparison.Ordinal);
@@ -261,152 +451,50 @@ public sealed class DeploymentWorkflowPolicyTests
     }
 
     [Fact]
-    public void DeploymentWorkflowPollsOnlyTheStartedMigrationExecution()
+    public void DeploymentWorkflowReconcilesAmbiguousMigrationTimeoutsWithoutAnotherApply()
     {
         var workflowPath = Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml");
         var workflow = File.ReadAllText(workflowPath);
 
-        Assert.Contains("EXECUTION_TEMPLATE=$(mktemp)", workflow, StringComparison.Ordinal);
-        Assert.Contains("--yaml \"$EXECUTION_TEMPLATE\"", workflow, StringComparison.Ordinal);
-        Assert.Contains("EXECUTION=$(az containerapp job start", workflow, StringComparison.Ordinal);
-        Assert.Contains("az containerapp job execution show --name \"$JOB_NAME\" --resource-group \"$AZURE_RESOURCE_GROUP\" --job-execution-name \"$EXECUTION\"", workflow, StringComparison.Ordinal);
+        var migrationJob = GetJobSection(workflow, "run_migration");
+
+        Assert.Contains("reconcile", migrationJob.Value, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("fresh read-only verification Job", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("MIGRATION_BASELINE_CONFLICT", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("run_release_job verify", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("run_release_job apply", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("run_release_job verify", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Equal(1, Regex.Count(migrationJob.Value, Regex.Escape("run_release_job apply"), RegexOptions.CultureInvariant));
         Assert.DoesNotContain("az containerapp job execution list", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("--query '[0].name'", workflow, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void DeploymentWorkflowRestoresNormalD1ReleaseAfterTheE1ManifestIsRemoved()
-    {
-        var repositoryRoot = FindRepositoryRoot();
-        var workflow = File.ReadAllText(Path.Combine(repositoryRoot, ".github", "workflows", "deploy.yml"));
-        var manifestPath = Path.Combine(repositoryRoot, "ops", "releases", "sprint-4a-e1-migration-only.json");
-
-        Assert.False(File.Exists(manifestPath), "The reviewed D1 release must remove the one-time E1 manifest so protected-branch deployment resumes normally.");
-        Assert.Contains("Validate Sprint 4A E1 migration-only manifest", workflow, StringComparison.Ordinal);
-        Assert.Contains("AddCustomerProfileOwnershipExpand", workflow, StringComparison.Ordinal);
-        Assert.Contains("migration_only", workflow, StringComparison.Ordinal);
-        Assert.Contains("Run Sprint 4A E1 migration only", workflow, StringComparison.Ordinal);
-        Assert.Contains("migration_only != 'true'", workflow, StringComparison.Ordinal);
-        Assert.Contains("BEFORE_REVISION", workflow, StringComparison.Ordinal);
-        Assert.Contains("BEFORE_DIGEST", workflow, StringComparison.Ordinal);
-        Assert.Contains("BEFORE_TRAFFIC", workflow, StringComparison.Ordinal);
-        Assert.Contains("Migration-only run changed API revision, digest, or traffic", workflow, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Sprint4APlanCreatesTheE1ManifestWithTheTask3Migration()
-    {
-        var plan = File.ReadAllText(Path.Combine(
-            FindRepositoryRoot(),
-            "docs",
-            "superpowers",
-            "plans",
-            "2026-08-27-sprint-4-external-id-authorization.md"));
-
-        var task1Start = plan.IndexOf("### Task 1:", StringComparison.Ordinal);
-        var task2Start = plan.IndexOf("### Task 2:", StringComparison.Ordinal);
-        var task3Start = plan.IndexOf("### Task 3:", StringComparison.Ordinal);
-        var task4Start = plan.IndexOf("### Task 4:", StringComparison.Ordinal);
-        Assert.True(task1Start >= 0 && task2Start > task1Start, "Expected bounded Task 1 plan text.");
-        Assert.True(task3Start >= 0 && task4Start > task3Start, "Expected bounded Task 3 plan text.");
-
-        var task1 = plan[task1Start..task2Start];
-        var task3 = plan[task3Start..task4Start];
-        const string manifestInventory = "- Create: `ops/releases/sprint-4a-e1-migration-only.json`";
-        Assert.DoesNotContain(manifestInventory, task1, StringComparison.Ordinal);
-        Assert.Contains(manifestInventory, task3, StringComparison.Ordinal);
-        Assert.Contains("AddCustomerProfileOwnershipExpand", task3, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Sprint4AE1WorkflowConstrictsProtectedBranchDispatchesToTheNamedMigration()
+    public void ReleaseDescriptorValidationPrecedesAzureMutationAndExcludesProduction()
     {
         var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml"));
+        var validateJob = GetJobSection(workflow, "validate_promotion_ref");
+        var migrationJob = GetJobSection(workflow, "run_migration");
+        var deployJob = GetJobSection(workflow, "deploy_release");
 
-        const string protectedBranchPredicate = "github.ref_name == 'development' || github.ref_name == 'test'";
-        Assert.Contains($"if: {protectedBranchPredicate}", workflow, StringComparison.Ordinal);
-        Assert.Contains("[[ ( \"$GITHUB_REF_NAME\" == development || \"$GITHUB_REF_NAME\" == test ) ]] || exit 0", workflow, StringComparison.Ordinal);
-        Assert.DoesNotContain("[[ \"$GITHUB_EVENT_NAME\" == push", workflow, StringComparison.Ordinal);
-        Assert.Contains("expected = {\"migration\": \"AddCustomerProfileOwnershipExpand\", \"deployApi\": False}", workflow, StringComparison.Ordinal);
-        Assert.Contains("if manifest != expected:", workflow, StringComparison.Ordinal);
-        Assert.Contains("MIGRATION: ${{ needs.validate_promotion_ref.outputs.migration }}", workflow, StringComparison.Ordinal);
-        Assert.Contains("--yaml \"$JOB_TEMPLATE\"", workflow, StringComparison.Ordinal);
-        Assert.Contains("EXECUTION_ARGS=$(az containerapp job execution show", workflow, StringComparison.Ordinal);
-        Assert.Contains("expected = [\"--migration\", sys.argv[1]]", workflow, StringComparison.Ordinal);
-        Assert.Contains("if json.loads(sys.argv[2]) != expected:", workflow, StringComparison.Ordinal);
-        Assert.Contains("E1 migration execution $EXECUTION completed with status $STATUS.", workflow, StringComparison.Ordinal);
-
-        var normalJobs = new[] { "preview_foundation", "prepare_release", "preview_sql", "bootstrap_sql", "run_migration", "deploy_release" };
-        AssertNormalAzureMutatingJobsNeedClassification(workflow, normalJobs);
-        var normalWorkflowStart = workflow.IndexOf("preview_foundation:", StringComparison.Ordinal);
-        var e1WorkflowStart = workflow.IndexOf("run_sprint_4a_e1_migration_only:", StringComparison.Ordinal);
-        var normalWorkflow = workflow[normalWorkflowStart..e1WorkflowStart];
-        Assert.Equal(
-            normalJobs.Length - 1,
-            normalWorkflow.Split("needs.validate_promotion_ref.outputs.migration_only != 'true'", StringSplitOptions.None).Length - 1);
-        var deployReleaseStart = workflow.IndexOf("  deploy_release:", StringComparison.Ordinal);
-        Assert.Contains("needs.validate_promotion_ref.outputs.migration_only != 'true'", workflow[deployReleaseStart..], StringComparison.Ordinal);
-        Assert.True(e1WorkflowStart >= 0 && deployReleaseStart > e1WorkflowStart,
-            "Expected a bounded E1 migration-only job before deploy_release.");
-        AssertE1JobHasDirectDispatchGuard(workflow);
-
-        var migrationRunner = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "CloudOrders.Migrations", "Program.cs"));
-        Assert.Contains("--migration", migrationRunner, StringComparison.Ordinal);
-        Assert.Contains("FindMigrationId(targetMigration)", migrationRunner, StringComparison.Ordinal);
-        Assert.Contains("GetPendingMigrationsAsync", migrationRunner, StringComparison.Ordinal);
-        Assert.Contains("targetIsAlreadyApplied", migrationRunner, StringComparison.Ordinal);
-        Assert.Contains("Named SQL migration was already applied, but one or more later migrations are pending.", migrationRunner, StringComparison.Ordinal);
-        Assert.Contains("if (targetIsAlreadyApplied)", migrationRunner, StringComparison.Ordinal);
-        Assert.Contains("pendingMigrations.SequenceEqual([resolvedTargetMigration], StringComparer.Ordinal)", migrationRunner, StringComparison.Ordinal);
-        Assert.Contains("appliedMigrationsBefore", migrationRunner, StringComparison.Ordinal);
-        Assert.Contains("MigrateAsync(resolvedTargetMigration)", migrationRunner, StringComparison.Ordinal);
-        Assert.Contains("appliedMigrationsAfter", migrationRunner, StringComparison.Ordinal);
-        Assert.Contains("appliedMigrationDelta", migrationRunner, StringComparison.Ordinal);
-        Assert.Contains("appliedMigrationDelta.SequenceEqual([resolvedTargetMigration], StringComparer.Ordinal)", migrationRunner, StringComparison.Ordinal);
-        Assert.Contains("GetAppliedMigrationsAsync", migrationRunner, StringComparison.Ordinal);
-        Assert.DoesNotContain("appliedMigrations.Contains(targetMigration", migrationRunner, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Sprint4AE1WorkflowRunsTheNamedMigrationFromTheCurrentImmutableRunnerImage()
-    {
-        var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml"));
-        var e1JobStart = workflow.IndexOf("  run_sprint_4a_e1_migration_only:", StringComparison.Ordinal);
-        var deployReleaseStart = workflow.IndexOf("  deploy_release:", StringComparison.Ordinal);
-
-        Assert.True(e1JobStart >= 0 && deployReleaseStart > e1JobStart, "Expected a bounded E1 migration-only job.");
-        var e1Job = workflow[e1JobStart..deployReleaseStart];
-
-        Assert.Contains("name: Check out E1 migration source", e1Job, StringComparison.Ordinal);
-        Assert.Contains("id: e1_migration_image", e1Job, StringComparison.Ordinal);
-        Assert.Contains("docker build --file src/CloudOrders.Migrations/Dockerfile --tag \"$IMAGE_TAG\" .", e1Job, StringComparison.Ordinal);
-        Assert.Contains("docker push \"$IMAGE_TAG\"", e1Job, StringComparison.Ordinal);
-        Assert.Contains("image=$LOGIN_SERVER/cloudorders-migrations@$DIGEST", e1Job, StringComparison.Ordinal);
-        Assert.Contains("MIGRATION_IMAGE: ${{ steps.e1_migration_image.outputs.image }}", e1Job, StringComparison.Ordinal);
-        Assert.Contains("JOB_PROVISIONING_STATE=$(az containerapp job show", e1Job, StringComparison.Ordinal);
-        Assert.Contains("Migration-only release requires a provisioned migration Job.", e1Job, StringComparison.Ordinal);
-        Assert.Contains("JOB_TEMPLATE=$(mktemp)", e1Job, StringComparison.Ordinal);
-        Assert.Contains("trap 'rm -f \"$JOB_TEMPLATE\"' EXIT", e1Job, StringComparison.Ordinal);
-        Assert.Contains("--query properties.template --output json > \"$JOB_TEMPLATE\"", e1Job, StringComparison.Ordinal);
-        Assert.Contains("template = json.load(source)", e1Job, StringComparison.Ordinal);
-        Assert.Contains("if template.get(\"volumes\") or template.get(\"initContainers\"):", e1Job, StringComparison.Ordinal);
-        Assert.Contains("Migration Job template uses execution-override-unsupported volumes or init containers.", e1Job, StringComparison.Ordinal);
-        Assert.Contains("if len(containers) != 1:", e1Job, StringComparison.Ordinal);
-        Assert.Contains("Migration Job template must contain exactly one container.", e1Job, StringComparison.Ordinal);
-        Assert.Contains("migrations = [container for container in containers if container.get(\"name\") == \"migrations\"]", e1Job, StringComparison.Ordinal);
-        Assert.Contains("ConnectionStrings__CloudOrders", e1Job, StringComparison.Ordinal);
-        Assert.Contains("if migration_container.get(\"volumeMounts\") or migration_container.get(\"probes\"):", e1Job, StringComparison.Ordinal);
-        Assert.Contains("Migration Job template uses execution-override-unsupported container settings.", e1Job, StringComparison.Ordinal);
-        Assert.Contains("MIGRATION_IMAGE", e1Job, StringComparison.Ordinal);
-        Assert.Contains("[\"--migration\", migration]", e1Job, StringComparison.Ordinal);
-        Assert.Contains("json.dump(template, destination)", e1Job, StringComparison.Ordinal);
-        Assert.Contains("--yaml \"$JOB_TEMPLATE\"", e1Job, StringComparison.Ordinal);
-        Assert.DoesNotContain("--args \"--migration\" \"$MIGRATION\"", e1Job, StringComparison.Ordinal);
-        Assert.DoesNotContain("cat > \"$EXECUTION_TEMPLATE\"", e1Job, StringComparison.Ordinal);
-        Assert.Contains("EXECUTION_IMAGE=$(az containerapp job execution show", e1Job, StringComparison.Ordinal);
-        Assert.Contains("if sys.argv[3] != sys.argv[4]:", e1Job, StringComparison.Ordinal);
-        Assert.Contains("Migration execution did not use the current immutable migration image.", e1Job, StringComparison.Ordinal);
-        Assert.DoesNotContain("docker build --file src/CloudOrders.Api/Dockerfile", e1Job, StringComparison.Ordinal);
+        Assert.Contains("descriptor_sha256", validateJob.Value, StringComparison.Ordinal);
+        Assert.Contains("deploy_api", validateJob.Value, StringComparison.Ordinal);
+        Assert.Contains("permitted_environment", validateJob.Value, StringComparison.Ordinal);
+        Assert.Contains("git checkout --detach \"$GITHUB_SHA\"", validateJob.Value, StringComparison.Ordinal);
+        Assert.Contains("-m pip install", validateJob.Value, StringComparison.Ordinal);
+        Assert.Contains("current-release.json", validateJob.Value, StringComparison.Ordinal);
+        Assert.Contains("release-schema.json", validateJob.Value, StringComparison.Ordinal);
+        Assert.Contains("production", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("Release migrations are explicitly excluded from production.", migrationJob.Value, StringComparison.Ordinal);
+        AssertJobLevelNeedsInclude(workflow, "run_migration", "validate_promotion_ref", "prepare_release", "bootstrap_sql", "classify_changes");
+        AssertJobLevelNeedsInclude(workflow, "deploy_release", "validate_promotion_ref", "run_migration", "prepare_release", "classify_changes");
+        Assert.Contains("needs.validate_promotion_ref.outputs.deploy_api == 'true'", deployJob.Value, StringComparison.Ordinal);
+        Assert.Contains("BEFORE_REVISION", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("BEFORE_DIGEST", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("BEFORE_TRAFFIC", migrationJob.Value, StringComparison.Ordinal);
+        Assert.Contains("deployApi=false release changed API revision, digest, or traffic.", migrationJob.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("ops/releases/sprint-4b-r2.json", workflow, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(FindRepositoryRoot(), "ops", "releases", "sprint-4b-r2.json")));
     }
 
     [Fact]
@@ -469,70 +557,6 @@ public sealed class DeploymentWorkflowPolicyTests
 
         Assert.NotNull(failure);
         Assert.Contains("job-level needs declaration", failure.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void WorkflowContractRejectsE1ConditionsOutsideTheJobLevelGuard()
-    {
-        const string deployableCondition = "needs.classify_changes.outputs.deployable == 'true'";
-        const string migrationOnlyCondition = "needs.validate_promotion_ref.outputs.migration_only == 'true'";
-        static string BuildWorkflow(string condition, string script) => $"""
-            jobs:
-              run_sprint_4a_e1_migration_only:
-                needs: [validate_promotion_ref, classify_changes]
-                if: {condition}
-                steps:
-                  - name: Misleading comment
-                    run: |
-                      {script}
-              deploy_release:
-                steps: []
-            """;
-
-        var weakenedWorkflows = new[]
-        {
-            BuildWorkflow(migrationOnlyCondition, $"# if: {deployableCondition} && {migrationOnlyCondition}"),
-            BuildWorkflow($"{deployableCondition} || {migrationOnlyCondition}", "echo run"),
-            BuildWorkflow($"true || ({deployableCondition} && {migrationOnlyCondition})", "echo run"),
-            BuildWorkflow($"{deployableCondition} # {migrationOnlyCondition}", "echo run"),
-            BuildWorkflow($"{deployableCondition} && && {migrationOnlyCondition}", "echo run"),
-            BuildWorkflow($"&& {deployableCondition} && {migrationOnlyCondition}", "echo run"),
-            BuildWorkflow($"{deployableCondition} && {migrationOnlyCondition} &&", "echo run"),
-        };
-
-        Assert.All(weakenedWorkflows, weakenedWorkflow =>
-        {
-            var failure = Record.Exception(() => AssertE1JobHasDirectDispatchGuard(weakenedWorkflow));
-
-            Assert.NotNull(failure);
-            Assert.Contains("direct job-level if declaration", failure.Message, StringComparison.Ordinal);
-        });
-    }
-
-    [Fact]
-    public void Sprint4BR2ReliesOnControlledNonproductionAccessInsteadOfIngressQuiescence()
-    {
-        var repositoryRoot = FindRepositoryRoot();
-        var workflow = File.ReadAllText(Path.Combine(repositoryRoot, ".github", "workflows", "deploy.yml"));
-        var releaseJob = GetJobSection(workflow, "run_migration");
-
-        Assert.Contains("'trafficPolicy': 'controlled-nonproduction-access'", releaseJob.Value, StringComparison.Ordinal);
-        Assert.DoesNotContain("quiesce", releaseJob.Value, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("az containerapp ingress disable", releaseJob.Value, StringComparison.Ordinal);
-        Assert.DoesNotContain("az containerapp ingress enable", releaseJob.Value, StringComparison.Ordinal);
-        Assert.DoesNotContain("az containerapp ingress traffic set", releaseJob.Value, StringComparison.Ordinal);
-        Assert.DoesNotContain("ingress_maintenance_started", workflow, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Sprint4BR2RunsOwnershipPreconditionInTheMigrationJob()
-    {
-        var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "deploy.yml"));
-        var migrationJob = GetJobSection(workflow, "run_migration");
-
-        Assert.DoesNotContain("Bootstrap-CloudOrdersSql.ps1", migrationJob.Value, StringComparison.Ordinal);
-        Assert.Contains("--ownership-precondition", migrationJob.Value, StringComparison.Ordinal);
-        Assert.Contains("Ownership precondition execution", migrationJob.Value, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()
@@ -598,30 +622,6 @@ public sealed class DeploymentWorkflowPolicyTests
             $"Expected the {jobName} job-level needs declaration to include {expectedDependency}."));
     }
 
-    private static void AssertE1JobHasDirectDispatchGuard(string workflow)
-    {
-        const string deployableCondition = "needs.classify_changes.outputs.deployable == 'true'";
-        const string migrationOnlyCondition = "needs.validate_promotion_ref.outputs.migration_only == 'true'";
-        var e1Header = GetJobHeader(workflow, "run_sprint_4a_e1_migration_only");
-        var ifMatches = Regex.Matches(
-            e1Header,
-            @"^    if:[ \t]*(?<condition>[^\r\n]+?)[ \t]*\r?$",
-            RegexOptions.Multiline | RegexOptions.CultureInvariant);
-        Assert.True(ifMatches.Count == 1,
-            "Expected exactly one direct job-level if declaration in the E1 migration-only job header.");
-
-        var condition = ifMatches[0].Groups["condition"].Value;
-        var commentStart = condition.IndexOf('#', StringComparison.Ordinal);
-        var executableCondition = (commentStart >= 0 ? condition[..commentStart] : condition).Trim();
-        var operands = executableCondition.Split(
-            "&&",
-            StringSplitOptions.TrimEntries);
-        var isRequiredConjunction = operands.Length == 2
-            && operands.Contains(deployableCondition, StringComparer.Ordinal)
-            && operands.Contains(migrationOnlyCondition, StringComparer.Ordinal);
-        Assert.True(isRequiredConjunction,
-            $"Expected the direct job-level if declaration in the E1 migration-only job header to be the conjunction of '{deployableCondition}' and '{migrationOnlyCondition}'.");
-    }
 
     private static Match GetJobSection(string workflow, string jobName)
     {

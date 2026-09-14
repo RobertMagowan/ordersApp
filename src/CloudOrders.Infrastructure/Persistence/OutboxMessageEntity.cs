@@ -20,6 +20,12 @@ internal sealed class OutboxMessageEntity
 
     public DateTimeOffset? ProcessedAt { get; set; }
 
+    public string? LeaseOwner { get; set; }
+
+    public Guid? LeaseToken { get; set; }
+
+    public DateTimeOffset? LeaseExpiresAt { get; set; }
+
     public int AttemptCount { get; set; }
 
     public DateTimeOffset? LastAttemptAt { get; set; }

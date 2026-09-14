@@ -1,0 +1,21 @@
+{
+  "releaseId": "20260913-current",
+  "schemaVersion": 1,
+  "environments": ["development", "test"],
+  "deployApi": true,
+  "requiredMigrationBaseline": [
+    "20260816221235_InitialSqlPersistence",
+    "20260829075044_AddCustomerProfileOwnershipExpand",
+    "20260907142134_EnforceCustomerProfileOwnership",
+    "20260909213051_AddOutboxLeasing"
+  ],
+  "authorisedMigrations": [
+    "20260816221235_InitialSqlPersistence",
+    "20260829075044_AddCustomerProfileOwnershipExpand",
+    "20260907142134_EnforceCustomerProfileOwnership",
+    "20260909213051_AddOutboxLeasing"
+  ],
+  "precondition": "ownership-read-only-transaction",
+  "trafficPolicy": "controlled-nonproduction-access",
+  "compatibility": "api-compatible"
+}

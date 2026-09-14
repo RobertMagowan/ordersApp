@@ -26,8 +26,11 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       environment: ${{ steps.promotion_ref.outputs.environment }}
-      migration_only: ${{ steps.e1_manifest.outputs.migration_only }}
-      migration: ${{ steps.e1_manifest.outputs.migration }}
+      descriptor_sha256: ${{ steps.release_descriptor.outputs.descriptor_sha256 }}
+      release_id: ${{ steps.release_descriptor.outputs.release_id }}
+      deploy_api: ${{ steps.release_descriptor.outputs.deploy_api }}
+      permitted_environment: ${{ steps.release_descriptor.outputs.permitted_environment }}
+      precondition: ${{ steps.release_descriptor.outputs.precondition }}
     steps:
       - name: Reject a non-promotion branch
         id: promotion_ref
@@ -58,33 +61,52 @@ jobs:
             [[ "$RELEASE_SHA" == "$GITHUB_SHA" ]] || { echo "The dispatched release SHA does not match the workflow commit; refusing deployment." >&2; exit 1; }
           fi
 
-      - name: Check out Sprint 4A E1 manifest
-        if: github.ref_name == 'development' || github.ref_name == 'test'
+      - name: Check out immutable release descriptor
+        if: github.ref_name != 'master'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
 
-      - name: Validate Sprint 4A E1 migration-only manifest
-        id: e1_manifest
+      - name: Validate immutable release descriptor
+        if: github.ref_name != 'master'
+        id: release_descriptor
         shell: bash
         run: |
           set -euo pipefail
-          echo "migration_only=false" >> "$GITHUB_OUTPUT"
-          echo "migration=" >> "$GITHUB_OUTPUT"
-          [[ ( "$GITHUB_REF_NAME" == development || "$GITHUB_REF_NAME" == test ) ]] || exit 0
-
-          MANIFEST='ops/releases/sprint-4a-e1-migration-only.json'
-          [[ -f "$MANIFEST" ]] || exit 0
-          python3 - "$MANIFEST" <<'PY'
+          git checkout --detach "$GITHUB_SHA"
+          python3 -m pip install --disable-pip-version-check --quiet jsonschema
+          python3 - "ops/releases/current-release.json" "ops/releases/release-schema.json" "$GITHUB_REF_NAME" <<'PY'
           import json
+          import hashlib
           import sys
+          from pathlib import Path
+          from jsonschema import Draft202012Validator
 
-          with open(sys.argv[1], encoding="utf-8") as source:
-              manifest = json.load(source)
-          expected = {"migration": "AddCustomerProfileOwnershipExpand", "deployApi": False}
-          if manifest != expected:
-              raise SystemExit("Sprint 4A E1 manifest must contain only the named migration and deployApi=false.")
+          descriptor_path = Path(sys.argv[1])
+          schema_path = Path(sys.argv[2])
+          environment = sys.argv[3]
+          descriptor_bytes = descriptor_path.read_bytes()
+          descriptor = json.loads(descriptor_bytes)
+          schema = json.loads(schema_path.read_text(encoding="utf-8"))
+          errors = sorted(Draft202012Validator(schema).iter_errors(descriptor), key=lambda error: list(error.path))
+          if errors:
+              raise SystemExit(f"Release descriptor violates its schema: {errors[0].message}")
+          baseline = descriptor["requiredMigrationBaseline"]
+          authorised = descriptor["authorisedMigrations"]
+          if baseline != sorted(baseline) or len(set(baseline)) != len(baseline):
+              raise SystemExit("Release descriptor baseline must be ordered and unique.")
+          if len(set(authorised)) != len(authorised) or any(item not in baseline for item in authorised):
+              raise SystemExit("Release descriptor authorisation must be a unique baseline subset.")
+          allowed = environment in descriptor["environments"]
+          if not allowed:
+              raise SystemExit("Release descriptor does not permit the deployment environment.")
+          with open(Path(__import__("os").environ["GITHUB_OUTPUT"]), "a", encoding="utf-8") as output:
+              output.write(f"descriptor_sha256={hashlib.sha256(descriptor_bytes).hexdigest()}\n")
+              output.write(f"release_id={descriptor['releaseId']}\n")
+              output.write(f"deploy_api={str(descriptor['deployApi']).lower()}\n")
+              output.write(f"permitted_environment={str(allowed).lower()}\n")
+              output.write(f"precondition={descriptor['precondition']}\n")
           PY
-          echo "migration_only=true" >> "$GITHUB_OUTPUT"
-          echo "migration=AddCustomerProfileOwnershipExpand" >> "$GITHUB_OUTPUT"
 
   classify_changes:
     name: Classify deployment changes
@@ -170,7 +192,7 @@ jobs:
   preview_foundation:
     name: Preview ${{ github.ref_name }} foundation
     needs: [validate_promotion_ref, classify_changes]
-    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
+    if: needs.classify_changes.outputs.deployable == 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ needs.validate_promotion_ref.outputs.environment }}
@@ -182,6 +204,7 @@ jobs:
       exists: ${{ steps.existing_release.outputs.exists }}
       previous_image: ${{ steps.existing_release.outputs.previous_image }}
       previous_revision: ${{ steps.existing_release.outputs.previous_revision }}
+      api_snapshot: ${{ steps.existing_release.outputs.api_snapshot }}
     env:
       AZURE_DEPLOYMENT_ENABLED: ${{ vars.AZURE_DEPLOYMENT_ENABLED }}
       AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
@@ -274,6 +297,8 @@ jobs:
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
         id: existing_release
         shell: bash
+        env:
+          DEPLOY_API: ${{ needs.validate_promotion_ref.outputs.deploy_api }}
         run: |
           set +e
           LOOKUP_ERROR=$(az containerapp show \
@@ -303,6 +328,10 @@ jobs:
             fi
             echo "exists=true" >> "$GITHUB_OUTPUT"
           elif [[ "$LOOKUP_ERROR" == *"ResourceNotFound"* ]]; then
+            if [[ "$DEPLOY_API" == false ]]; then
+              echo "deployApi=false requires an existing API; refusing foundation provisioning." >&2
+              exit 1
+            fi
             PREVIOUS_IMAGE='none (first deployment)'
             PREVIOUS_REVISION='none (first deployment)'
             echo "exists=false" >> "$GITHUB_OUTPUT"
@@ -313,6 +342,14 @@ jobs:
 
           echo "previous_image=$PREVIOUS_IMAGE" >> "$GITHUB_OUTPUT"
           echo "previous_revision=$PREVIOUS_REVISION" >> "$GITHUB_OUTPUT"
+          if [[ "$LOOKUP_STATUS" -eq 0 && "$DEPLOYMENT_ENVIRONMENT" != production ]]; then
+            API_SNAPSHOT=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query '{revision:properties.latestRevisionName,traffic:properties.configuration.ingress.traffic}' --output json)
+            SNAPSHOT_REVISION=$(jq -er '.revision' <<< "$API_SNAPSHOT")
+            SNAPSHOT_DIGEST=$(az containerapp revision show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision "$SNAPSHOT_REVISION" --query properties.template.containers[0].image --output tsv)
+            [[ -n "$SNAPSHOT_DIGEST" ]] || { echo "API snapshot has no image." >&2; exit 1; }
+            API_SNAPSHOT=$(jq -cS --arg digest "$SNAPSHOT_DIGEST" '. + {digest:$digest}' <<< "$API_SNAPSHOT")
+            echo "api_snapshot=$API_SNAPSHOT" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Preview first-deployment foundation
         if: env.AZURE_DEPLOYMENT_ENABLED == 'true'
@@ -367,7 +404,7 @@ jobs:
   prepare_release:
     name: Prepare and preview ${{ github.ref_name }} release
     needs: [preview_foundation, validate_promotion_ref, classify_changes]
-    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true' && needs.preview_foundation.outputs.enabled == 'true'
+    if: needs.classify_changes.outputs.deployable == 'true' && needs.preview_foundation.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -567,7 +604,7 @@ jobs:
   preview_sql:
     name: Preview ${{ github.ref_name }} Azure SQL
     needs: [prepare_release, validate_promotion_ref, classify_changes]
-    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
+    if: needs.classify_changes.outputs.deployable == 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -611,7 +648,7 @@ jobs:
   bootstrap_sql:
     name: Provision ${{ github.ref_name }} Azure SQL
     needs: [preview_sql, prepare_release, validate_promotion_ref, classify_changes]
-    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
+    if: needs.classify_changes.outputs.deployable == 'true'
     outputs:
       sql_server_name: ${{ steps.sql_target.outputs.server_name }}
       sql_database_name: ${{ steps.sql_target.outputs.database_name }}
@@ -676,8 +713,8 @@ jobs:
 
   run_migration:
     name: Run ${{ github.ref_name }} SQL migration
-    needs: [bootstrap_sql, validate_promotion_ref, classify_changes]
-    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
+    needs: [bootstrap_sql, prepare_release, validate_promotion_ref, classify_changes, preview_foundation]
+    if: needs.classify_changes.outputs.deployable == 'true'
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
@@ -687,9 +724,14 @@ jobs:
     env:
       AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
       AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
+      AZURE_LOG_ANALYTICS_NAME: ${{ vars.AZURE_LOG_ANALYTICS_NAME }}
       AZURE_SQL_SERVER_NAME: ${{ needs.bootstrap_sql.outputs.sql_server_name }}
       AZURE_SQL_DATABASE_NAME: ${{ needs.bootstrap_sql.outputs.sql_database_name }}
       DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
+      DESCRIPTOR_SHA256: ${{ needs.validate_promotion_ref.outputs.descriptor_sha256 }}
+      RELEASE_ID: ${{ needs.validate_promotion_ref.outputs.release_id }}
+      RELEASE_SHA: ${{ github.sha }}
+      MIGRATION_IMAGE: ${{ needs.prepare_release.outputs.migration_image }}
     steps:
       - name: Check out release controls
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -699,210 +741,213 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Validate Sprint 4B R2 release manifest
-        shell: bash
+      - name: Verify, apply, and verify the release descriptor
+        if: needs.validate_promotion_ref.outputs.permitted_environment == 'true'
+        env:
+          PRECONDITION: ${{ needs.validate_promotion_ref.outputs.precondition }}
+          API_SNAPSHOT: ${{ needs.preview_foundation.outputs.api_snapshot }}
+          DEPLOY_API: ${{ needs.validate_promotion_ref.outputs.deploy_api }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          manifest = json.loads(Path('ops/releases/sprint-4b-r2.json').read_text(encoding='utf-8'))
-          required = {
-              'release': 'sprint-4b-r2',
-              'migration': 'EnforceCustomerProfileOwnership',
-              'rollback': 'Sprint 4A D1',
-              'deployApi': True,
-              'environments': ['development', 'test'],
-              'precondition': 'ownership-read-only-transaction',
-              'trafficPolicy': 'controlled-nonproduction-access',
-          }
-          if manifest != required:
-              raise SystemExit('Sprint 4B R2 manifest is invalid or has unexpected fields.')
-          if '${{ github.ref_name }}' not in manifest['environments']:
-              raise SystemExit('Sprint 4B R2 is restricted to development and test.')
-          PY
-      - name: Start nonproduction migration Job
-        run: |
+          # Reconcile a timed-out apply once with the same execution, then with a
+          # fresh read-only verification Job. Never start a second apply Job.
           if [[ "$DEPLOYMENT_ENVIRONMENT" == production ]]; then
-            echo "No Sprint 3 migration job is configured for production."
-            exit 0
+            echo "Release migrations are explicitly excluded from production." >&2
+            exit 1
           fi
           case "$DEPLOYMENT_ENVIRONMENT" in
             development) JOB_NAME='cloudorders-dev-migrations' ;;
             test) JOB_NAME='cloudorders-test-migrations' ;;
             *) echo "Unsupported migration environment: $DEPLOYMENT_ENVIRONMENT" >&2; exit 1 ;;
           esac
-          EXECUTION_TEMPLATE=$(mktemp)
-          trap 'rm -f "$EXECUTION_TEMPLATE"' EXIT
-          az containerapp job show \
-            --name "$JOB_NAME" \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --query properties.template --output json |
-          jq '.containers |= map(if .name == "migrations" then .args = ["--ownership-precondition"] else . end)' \
-              > "$EXECUTION_TEMPLATE"
-          jq -e '.containers | any(.name == "migrations" and .args == ["--ownership-precondition"])' \
-            "$EXECUTION_TEMPLATE" >/dev/null || {
-              echo "Ownership precondition execution template was invalid." >&2
-              exit 1
-            }
-          PRECONDITION_EXECUTION=$(az containerapp job start \
-            --name "$JOB_NAME" \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --yaml "$EXECUTION_TEMPLATE" \
-            --query name --output tsv)
-          [[ -n "$PRECONDITION_EXECUTION" ]] || { echo "Ownership precondition execution did not return a name." >&2; exit 1; }
-          for _ in {1..30}; do
-            STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$PRECONDITION_EXECUTION" --query properties.status --output tsv)
-            [[ "$STATUS" == Succeeded ]] && break
-            [[ "$STATUS" == Failed ]] && { echo "Ownership precondition execution $PRECONDITION_EXECUTION failed." >&2; exit 1; }
-            sleep 10
-          done
-          [[ "$STATUS" == Succeeded ]] || { echo "Ownership precondition execution did not complete within five minutes." >&2; exit 1; }
-          jq '.containers |= map(if .name == "migrations" then .args = ["--migration", "EnforceCustomerProfileOwnership"] else . end)' "$EXECUTION_TEMPLATE" > "$EXECUTION_TEMPLATE.next"
-          mv "$EXECUTION_TEMPLATE.next" "$EXECUTION_TEMPLATE"
-          EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --yaml "$EXECUTION_TEMPLATE" --query name --output tsv)
-          [[ -n "$EXECUTION" ]] || { echo "Migration Job did not return an execution name." >&2; exit 1; }
-          echo "Sprint 4B R2 migration execution $EXECUTION completed successfully."
+          EXECUTION_EVIDENCE=()
 
-  run_sprint_4a_e1_migration_only:
-    name: Run Sprint 4A E1 migration only
-    needs: [validate_promotion_ref, classify_changes]
-    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only == 'true'
-    runs-on: ubuntu-latest
-    environment:
-      name: ${{ needs.validate_promotion_ref.outputs.environment }}
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-      AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
-      AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
-      DEPLOYMENT_ENVIRONMENT: ${{ github.ref_name }}
-      MIGRATION: ${{ needs.validate_promotion_ref.outputs.migration }}
-    steps:
-      - name: Check out E1 migration source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Sign in to Azure with OIDC
-        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Build and publish immutable E1 migration image
-        id: e1_migration_image
-        shell: bash
-        run: |
-          set -euo pipefail
-          LOGIN_SERVER=$(az acr show --name "$AZURE_ACR_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query loginServer --output tsv)
-          [[ -n "$LOGIN_SERVER" ]] || { echo "Could not resolve the Azure Container Registry login server." >&2; exit 1; }
-          az acr login --name "$AZURE_ACR_NAME"
-          IMAGE_TAG="$LOGIN_SERVER/cloudorders-migrations:${GITHUB_SHA}"
-          docker build --file src/CloudOrders.Migrations/Dockerfile --tag "$IMAGE_TAG" .
-          docker push "$IMAGE_TAG"
-          DIGEST=$(az acr repository show --name "$AZURE_ACR_NAME" --image "cloudorders-migrations:${GITHUB_SHA}" --query digest --output tsv)
-          [[ -n "$DIGEST" ]] || { echo "Could not resolve the pushed E1 migration image digest." >&2; exit 1; }
-          echo "image=$LOGIN_SERVER/cloudorders-migrations@$DIGEST" >> "$GITHUB_OUTPUT"
-      - name: Start and verify only the named E1 migration execution
-        shell: bash
-        env:
-          MIGRATION_IMAGE: ${{ steps.e1_migration_image.outputs.image }}
-        run: |
-          set -euo pipefail
-          case "$DEPLOYMENT_ENVIRONMENT" in
-            development) JOB_NAME='cloudorders-dev-migrations' ;;
-            test) JOB_NAME='cloudorders-test-migrations' ;;
-            *) echo "Sprint 4A E1 is restricted to development and test." >&2; exit 1 ;;
-          esac
+          # The migration-only baseline was captured before ANY provisioning.
+          API_SNAPSHOT="${API_SNAPSHOT:-null}"
+          BEFORE_REVISION=$(jq -r '.revision // empty' <<< "$API_SNAPSHOT")
+          BEFORE_TRAFFIC=$(jq -cS '.traffic' <<< "$API_SNAPSHOT")
+          BEFORE_DIGEST=$(jq -r '.digest // empty' <<< "$API_SNAPSHOT")
+          if [[ "$DEPLOY_API" == false ]]; then
+            [[ -n "$BEFORE_REVISION" && -n "$BEFORE_DIGEST" ]] || { echo "Missing pre-provisioning API snapshot." >&2; exit 1; }
+          fi
+          {
+            echo "## Release migration evidence"
+            printf -- '- Release ID: `%s`\n' "$RELEASE_ID"
+            printf -- '- Release SHA: `%s`\n' "$RELEASE_SHA"
+            printf -- '- Descriptor SHA-256: `%s`\n' "$DESCRIPTOR_SHA256"
+            printf -- '- Immutable migration image: `%s`\n' "$MIGRATION_IMAGE"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          BEFORE_REVISION=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.latestRevisionName --output tsv)
-          BEFORE_TRAFFIC=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.traffic --output json)
-          BEFORE_DIGEST=$(az containerapp revision show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision "$BEFORE_REVISION" --query properties.template.containers[0].image --output tsv)
-          [[ -n "$BEFORE_REVISION" && -n "$BEFORE_DIGEST" ]] || { echo "Migration-only release requires an active API revision and digest." >&2; exit 1; }
+          collect_release_evidence() {
+            local mode="$1" require_complete="$2" logs evidence workspace_id query
+            if logs=$(az containerapp job logs show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --execution "$EXECUTION" --container migrations --tail 300 --format json 2>/dev/null) &&
+              evidence=$(printf '%s\n' "$logs" | python3 ops/validate-release-evidence.py ops/releases/current-release.json "$DESCRIPTOR_SHA256" "$mode" "$require_complete"); then
+              printf -- '- Sanitised SQL-history evidence: `%s`\n' "$evidence" >> "$GITHUB_STEP_SUMMARY" || return 1
+              return 0
+            fi
 
-          JOB_PROVISIONING_STATE=$(az containerapp job show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.provisioningState --output tsv)
-          [[ "$JOB_PROVISIONING_STATE" == Succeeded ]] || {
-            echo "Migration-only release requires a provisioned migration Job." >&2
-            exit 1
+            workspace_id=$(az monitor log-analytics workspace show --resource-group "$AZURE_RESOURCE_GROUP" --workspace-name "$AZURE_LOG_ANALYTICS_NAME" --query customerId --output tsv) || return 1
+            query=$(cat <<EOF
+          ContainerAppConsoleLogs_CL
+          | where ContainerJobName_s == '$JOB_NAME'
+          | where ContainerGroupName_s startswith '$EXECUTION-'
+          | order by TimeGenerated asc
+          | project Log_s
+          EOF
+          )
+            for _ in {1..18}; do
+              if logs=$(az monitor log-analytics query --workspace "$workspace_id" --analytics-query "$query" --query '[].Log_s' --output tsv) &&
+                evidence=$(printf '%s\n' "$logs" | python3 ops/validate-release-evidence.py ops/releases/current-release.json "$DESCRIPTOR_SHA256" "$mode" "$require_complete"); then
+                printf -- '- Sanitised SQL-history evidence: `%s`\n' "$evidence" >> "$GITHUB_STEP_SUMMARY" || return 1
+                return 0
+              fi
+              sleep 10 || return 1
+            done
+
+            echo "MIGRATION_BASELINE_CONFLICT: Log Analytics did not provide validated runner evidence for execution $EXECUTION." >&2
+            return 1
           }
 
-          JOB_TEMPLATE=$(mktemp)
-          trap 'rm -f "$JOB_TEMPLATE"' EXIT
-          az containerapp job show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.template --output json > "$JOB_TEMPLATE"
-          python3 - "$JOB_TEMPLATE" "$MIGRATION_IMAGE" "$MIGRATION" <<'PY'
+          run_release_job() {
+            local mode="$1"
+            local require_complete="${2:-false}"
+            JOB_TEMPLATE=$(mktemp) || return 1
+            az containerapp job show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.template --output json > "$JOB_TEMPLATE" || return 1
+            python3 - "$JOB_TEMPLATE" "$MIGRATION_IMAGE" "$mode" "$DESCRIPTOR_SHA256" "$RELEASE_SHA" "$DEPLOYMENT_ENVIRONMENT" <<'PY' || return 1
           import json
           import sys
 
-          template_path, image, migration = sys.argv[1:]
-          with open(template_path, encoding="utf-8") as source:
+          path, image, mode, descriptor_sha, release_sha, environment = sys.argv[1:]
+          with open(path, encoding="utf-8") as source:
               template = json.load(source)
-
-          if not isinstance(template, dict):
-              raise SystemExit("Migration Job template is not an object.")
-          if template.get("volumes") or template.get("initContainers"):
-              raise SystemExit("Migration Job template uses execution-override-unsupported volumes or init containers.")
           containers = template.get("containers")
-          if not isinstance(containers, list):
-              raise SystemExit("Migration Job template does not contain containers.")
-          if len(containers) != 1:
+          if not isinstance(containers, list) or len(containers) != 1:
               raise SystemExit("Migration Job template must contain exactly one container.")
-          migrations = [container for container in containers if container.get("name") == "migrations"]
-          if len(migrations) != 1:
-              raise SystemExit("Migration Job template must contain exactly one migrations container.")
-
-          migration_container = migrations[0]
-          resources = migration_container.get("resources")
-          if not isinstance(resources, dict) or "cpu" not in resources or "memory" not in resources:
-              raise SystemExit("Migration Job template is missing required migration container resources.")
-          if migration_container.get("volumeMounts") or migration_container.get("probes"):
-              raise SystemExit("Migration Job template uses execution-override-unsupported container settings.")
-          environment = migration_container.get("env")
-          if not isinstance(environment, list) or not any(
-              entry.get("name") == "ConnectionStrings__CloudOrders" and entry.get("value")
-              for entry in environment if isinstance(entry, dict)
-          ):
-              raise SystemExit("Migration Job template is missing its SQL connection environment setting.")
-
-          migration_container["image"] = image
-          migration_container["args"] = ["--migration", migration]
-          with open(template_path, "w", encoding="utf-8") as destination:
+          migration = containers[0]
+          if migration.get("name") != "migrations" or template.get("volumes") or template.get("initContainers"):
+              raise SystemExit("Migration Job template cannot safely be overridden.")
+          if migration.get("command") not in (None, []):
+              raise SystemExit("Migration Job template must not override the image command.")
+          migration["image"] = image
+          release_args = {
+              "verify": ["--verify-release", "/workspace/ops/releases/current-release.json"],
+              "apply": ["--apply-release", "/workspace/ops/releases/current-release.json"],
+              "ownership-precondition": ["--ownership-precondition"],
+          }
+          migration["args"] = release_args[mode]
+          environment_entries = [entry for entry in migration.get("env", []) if entry.get("name") not in {"DESCRIPTOR_SHA256", "RELEASE_SHA", "DEPLOYMENT_ENVIRONMENT"}]
+          sql_entries = [entry for entry in environment_entries if entry.get("name") == "ConnectionStrings__CloudOrders"]
+          if len(sql_entries) != 1 or bool(sql_entries[0].get("value")) == bool(sql_entries[0].get("secretRef")):
+              raise SystemExit("Migration Job template must bind exactly one SQL connection value or secret reference.")
+          environment_entries.extend([
+              {"name": "DESCRIPTOR_SHA256", "value": descriptor_sha},
+              {"name": "RELEASE_SHA", "value": release_sha},
+              {"name": "DEPLOYMENT_ENVIRONMENT", "value": environment},
+          ])
+          migration["env"] = environment_entries
+          with open(path, "w", encoding="utf-8") as destination:
               json.dump(template, destination)
           PY
-          EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --yaml "$JOB_TEMPLATE" --query name --output tsv)
-          [[ -n "$EXECUTION" ]] || { echo "Migration Job did not return an execution name." >&2; exit 1; }
-          EXECUTION_ARGS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].args' --output json)
-          EXECUTION_IMAGE=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].image' --output tsv)
-          python3 - "$MIGRATION" "$EXECUTION_ARGS" "$EXECUTION_IMAGE" "$MIGRATION_IMAGE" <<'PY'
+            EXECUTION=$(az containerapp job start --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --yaml "$JOB_TEMPLATE" --query name --output tsv) || return 1
+            [[ -n "$EXECUTION" ]] || { echo "Migration Job did not return an execution name." >&2; return 1; }
+            printf -- '- Job execution: `%s`; command: `%s`; outcome: started\n' "$EXECUTION" "$mode" >> "$GITHUB_STEP_SUMMARY" || return 1
+            EXECUTION_ARGS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].args' --output json) || return 1
+            EXECUTION_IMAGE=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].image' --output tsv) || return 1
+            EXECUTION_ENV=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query 'properties.template.containers[0].env' --output json) || return 1
+            EXECUTION_COMMAND=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query '{command:properties.template.containers[0].command}' --output json) || return 1
+            python3 - "$mode" "$EXECUTION_ARGS" "$EXECUTION_IMAGE" "$MIGRATION_IMAGE" "$EXECUTION_ENV" "$DESCRIPTOR_SHA256" "$RELEASE_SHA" "$DEPLOYMENT_ENVIRONMENT" "$JOB_TEMPLATE" "$EXECUTION_COMMAND" <<'PY' || return 1
           import json
           import sys
+          mode, args, image, expected_image, environment, descriptor_sha, release_sha, deployment_environment, template_path, command = sys.argv[1:]
+          expected_args = {
+              "verify": ["--verify-release", "/workspace/ops/releases/current-release.json"],
+              "apply": ["--apply-release", "/workspace/ops/releases/current-release.json"],
+              "ownership-precondition": ["--ownership-precondition"],
+          }[mode]
+          if json.loads(args) != expected_args or image != expected_image:
+              raise SystemExit("Migration execution identity does not match the immutable release.")
+          if json.loads(command).get("command") not in (None, []):
+              raise SystemExit("Migration execution must not override the image command.")
+          execution_environment = json.loads(environment)
+          env = {entry["name"]: entry.get("value") for entry in execution_environment}
+          if {key: env.get(key) for key in ("DESCRIPTOR_SHA256", "RELEASE_SHA", "DEPLOYMENT_ENVIRONMENT")} != {"DESCRIPTOR_SHA256": descriptor_sha, "RELEASE_SHA": release_sha, "DEPLOYMENT_ENVIRONMENT": deployment_environment}:
+              raise SystemExit("Migration execution environment does not bind the descriptor identity.")
 
-          expected = ["--migration", sys.argv[1]]
-          if json.loads(sys.argv[2]) != expected:
-              raise SystemExit("Migration execution did not receive exactly the manifest's named migration arguments.")
-          if sys.argv[3] != sys.argv[4]:
-              raise SystemExit("Migration execution did not use the current immutable migration image.")
+          def sql_binding(entries):
+              matches = [entry for entry in entries if entry.get("name") == "ConnectionStrings__CloudOrders"]
+              if len(matches) != 1 or bool(matches[0].get("value")) == bool(matches[0].get("secretRef")):
+                  raise SystemExit("Migration execution SQL connection binding is missing or ambiguous.")
+              return {key: matches[0].get(key) for key in ("value", "secretRef")}
+
+          with open(template_path, encoding="utf-8") as source:
+              expected_environment = json.load(source)["containers"][0]["env"]
+          if sql_binding(execution_environment) != sql_binding(expected_environment):
+              raise SystemExit("Migration execution SQL connection binding does not match its pre-start template.")
           PY
-          for _ in {1..30}; do
-            STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query properties.status --output tsv)
-            [[ "$STATUS" == Succeeded ]] && break
-            [[ "$STATUS" == Failed ]] && { echo "Migration Job execution $EXECUTION failed." >&2; exit 1; }
-            sleep 10
-          done
-          [[ "$STATUS" == Succeeded ]] || { echo "Migration Job did not complete within five minutes." >&2; exit 1; }
-          echo "E1 migration execution $EXECUTION completed with status $STATUS."
-
-          AFTER_REVISION=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.latestRevisionName --output tsv)
-          AFTER_TRAFFIC=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.traffic --output json)
-          AFTER_DIGEST=$(az containerapp revision show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision "$AFTER_REVISION" --query properties.template.containers[0].image --output tsv)
-          [[ "$BEFORE_REVISION" == "$AFTER_REVISION" && "$BEFORE_DIGEST" == "$AFTER_DIGEST" && "$BEFORE_TRAFFIC" == "$AFTER_TRAFFIC" ]] || {
-            echo "Migration-only run changed API revision, digest, or traffic." >&2
-            exit 1
+            rm -f "$JOB_TEMPLATE" || return 1
+            for _ in {1..30}; do
+              STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query properties.status --output tsv) || return 1
+              if [[ "$STATUS" == Succeeded ]]; then
+                printf -- '- Job execution: `%s`; outcome: Succeeded; args: `%s`\n' "$EXECUTION" "$EXECUTION_ARGS" >> "$GITHUB_STEP_SUMMARY" || return 1
+                if [[ "$mode" != ownership-precondition ]]; then
+                  collect_release_evidence "$mode" "$require_complete" || return 1
+                fi
+                EXECUTION_EVIDENCE+=("$mode:$EXECUTION")
+                return 0
+              fi
+              [[ "$STATUS" == Failed ]] && { printf -- '- Job execution: `%s`; outcome: Failed\n' "$EXECUTION" >> "$GITHUB_STEP_SUMMARY"; return 1; }
+              sleep 10 || return 1
+            done
+            printf -- '- Job execution: `%s`; outcome: polling timeout (uncertain)\n' "$EXECUTION" >> "$GITHUB_STEP_SUMMARY" || return 1
+            return 2
           }
+
+          if [[ "$PRECONDITION" == ownership-read-only-transaction ]]; then
+            run_release_job ownership-precondition || { echo "Ownership precondition execution failed." >&2; exit 1; }
+          fi
+          run_release_job verify || { echo "Initial release verification failed." >&2; exit 1; }
+          APPLY_STATUS=0
+          run_release_job apply true || APPLY_STATUS=$?
+          if [[ "$APPLY_STATUS" -eq 2 ]]; then
+            echo "Apply execution timed out; reconcile the same execution before failing closed."
+            STATUS=$(az containerapp job execution show --name "$JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --job-execution-name "$EXECUTION" --query properties.status --output tsv)
+            printf -- '- Job execution: `%s`; reconciled outcome: `%s`\n' "$EXECUTION" "$STATUS" >> "$GITHUB_STEP_SUMMARY"
+            [[ "$STATUS" != Failed ]] || { echo "Apply execution failed during reconciliation." >&2; exit 1; }
+            if [[ "$STATUS" == Succeeded ]]; then
+              collect_release_evidence apply true || { echo "Apply evidence could not confirm the release baseline." >&2; exit 1; }
+            else
+              echo "Starting fresh read-only verification Job after unresolved apply timeout."
+              run_release_job verify true || { echo "MIGRATION_BASELINE_CONFLICT: baseline was not confirmed after timeout." >&2; exit 1; }
+            fi
+          elif [[ "$APPLY_STATUS" -ne 0 ]]; then
+            exit "$APPLY_STATUS"
+          fi
+          run_release_job verify true || { echo "MIGRATION_BASELINE_CONFLICT: release baseline was not confirmed." >&2; exit 1; }
+          AFTER_REVISION=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.latestRevisionName --output tsv)
+          AFTER_TRAFFIC=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.configuration.ingress.traffic --output json | jq -cS '.')
+          AFTER_DIGEST=$(az containerapp revision show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision "$AFTER_REVISION" --query properties.template.containers[0].image --output tsv)
+          if [[ "$DEPLOY_API" == false ]]; then
+            [[ "$BEFORE_REVISION" == "$AFTER_REVISION" && "$BEFORE_DIGEST" == "$AFTER_DIGEST" && "$BEFORE_TRAFFIC" == "$AFTER_TRAFFIC" ]] || {
+              echo "deployApi=false release changed API revision, digest, or traffic." >&2
+              exit 1
+            }
+          fi
+          {
+            echo "## Release migration evidence"
+            printf -- '- Release SHA: `%s`\n' "$RELEASE_SHA"
+            printf -- '- Descriptor SHA-256: `%s`\n' "$DESCRIPTOR_SHA256"
+            for evidence in "${EXECUTION_EVIDENCE[@]}"; do
+              printf -- '- Sanitised Job evidence: `%s`\n' "$evidence"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Record production exclusion
+        if: github.ref_name == 'master'
+        run: echo "Release migrations are explicitly excluded from production." >> "$GITHUB_STEP_SUMMARY"
 
   deploy_release:
     name: Deploy ${{ github.ref_name }} after preview
     needs: [prepare_release, run_migration, validate_promotion_ref, classify_changes]
-    if: needs.classify_changes.outputs.deployable == 'true' && needs.validate_promotion_ref.outputs.migration_only != 'true'
+    if: needs.classify_changes.outputs.deployable == 'true' && (github.ref_name == 'master' || needs.validate_promotion_ref.outputs.deploy_api == 'true')
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'master' && 'production' || github.ref_name }}
