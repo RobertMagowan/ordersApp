@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\CloudOrders.Api\CloudOrders.Api.csproj" />
     <ProjectReference Include="..\..\src\CloudOrders.Infrastructure\CloudOrders.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\CloudOrders.OutboxPublisher\CloudOrders.OutboxPublisher.csproj" />
   </ItemGroup>
 
 </Project>

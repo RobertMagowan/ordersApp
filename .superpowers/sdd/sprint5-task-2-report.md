@@ -1,0 +1,28 @@
+# Sprint 5 Task 2 report
+
+## Status
+
+Implemented the isolated Azure Functions outbox publisher with a bounded eight-minute drain, 90-second leases, 500-row claims, send-then-conditional-mark ordering, stable EventId message IDs, and distinct stale-token results.
+
+## TDD evidence
+
+Added `OutboxPublisherIntegrationTests` before the publisher implementation. The initial focused invocation could not compile because `CloudOrders.OutboxPublisher` did not exist (red). After the minimal implementation, the focused suite passed 3/3 tests covering persisted payload reuse/original EventId, broker failure preserving pending state, and stale-token telemetry classification. Existing lease integration tests cover reclaim/crash-after-send semantics.
+
+## Changes
+
+- Added `src/CloudOrders.OutboxPublisher` Function app, timer trigger, sender abstraction, Azure Service Bus adapter, DI, host settings, and package references.
+- Added pinned Azurite, Service Bus emulator, and SQL Server services plus sequential-proof documentation under `local/`.
+- Added focused publisher tests and solution/project registration.
+
+## Verification
+
+- `dotnet test tests/CloudOrders.IntegrationTests/CloudOrders.IntegrationTests.csproj --filter FullyQualifiedName~OutboxPublisherIntegrationTests --no-restore`: PASS (3/3).
+- `dotnet test CloudOrders.slnx --configuration Release --no-build`: PASS (175 total: 19 unit, 43 architecture, 113 integration).
+- `dotnet build CloudOrders.slnx --configuration Release --no-restore`: PASS (0 warnings, 0 errors).
+- `dotnet format CloudOrders.slnx --verify-no-changes --no-restore`: PASS after formatting imports.
+- `git diff --check`: PASS.
+- `docker compose -f local/compose.yml config`: PASS. Compose startup was attempted, but image downloads were still in progress and were cancelled; no broker or SQL state inspection was possible in this environment.
+
+## Concerns and limits
+
+The emulator configuration is intentionally documented as sequential smoke coverage only; it is not evidence for Azure RBAC, lease locking, multi-instance concurrency, or production Service Bus Standard lock behavior. A real SQL/emulator send proof remains to be run where the required images and migration environment are available. The pre-existing untracked task brief was preserved.
