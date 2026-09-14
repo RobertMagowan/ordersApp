@@ -16,5 +16,6 @@ FROM mcr.microsoft.com/dotnet/runtime:10.0 AS runtime
 WORKDIR /app
 
 COPY --from=build /app/publish ./
+COPY ops/releases/current-release.json /workspace/ops/releases/current-release.json
 USER $APP_UID
 ENTRYPOINT ["dotnet", "CloudOrders.Migrations.dll"]
