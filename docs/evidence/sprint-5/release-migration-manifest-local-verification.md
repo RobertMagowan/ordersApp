@@ -19,18 +19,32 @@ The following commands were run from the repository root on the verification com
 | 2026-09-14T01:50:00Z | `az bicep build --file infra/main.bicep` | Passed; informational custom-config messages and Azure CLI update notice only |
 | 2026-09-14T01:50:00Z | `az bicep lint --file infra/main.bicep` | Passed; informational custom-config messages and Azure CLI update notice only |
 
-Focused migration-runner verification was also run with `dotnet test tests/CloudOrders.IntegrationTests --configuration Release --filter FullyQualifiedName~MigrationRunnerTests --no-restore`: 24 passed, 0 failed, 0 skipped.
+Focused migration-runner verification was run at `2026-09-14T02:08:03Z` with `dotnet test tests/CloudOrders.IntegrationTests --configuration Release --filter FullyQualifiedName~MigrationRunnerTests`: 25 passed, 0 failed, 0 skipped. The added `ReleaseVerificationPersistsAndVerifiesSchemaOnTheSameDatabase` test uses the checked-in `ops/releases/current-release.json` rather than a generated descriptor.
 
 ## Persistent-state verification path
 
-The SQL Server Testcontainers fixture used by `MigrationRunnerTests` creates an isolated database for each test. The release tests exercise this sequence:
+The SQL Server Testcontainers fixture used by `ReleaseVerificationPersistsAndVerifiesSchemaOnTheSameDatabase` created one isolated database for the complete sequence below:
 
-1. Create an empty database and apply the migrations through `20260907142134_EnforceCustomerProfileOwnership`.
-2. Run the migration runner with `--verify-release <descriptor>` and confirm sanitised JSON evidence.
-3. Run it with `--apply-release <descriptor>` and confirm only the ordered authorised suffix is applied.
-4. Run `--verify-release` again and confirm `outstanding` is empty.
-5. Read `__EFMigrationsHistory` directly and assert the ordered baseline, including `20260909213051_AddOutboxLeasing`.
-6. Inspect `dbo.OutboxMessages` and assert the leasing columns `LeaseExpiresAt`, `LeaseOwner`, and `LeaseToken` (plus the `IX_OutboxMessages_Lease` index) exist.
+1. Create an empty database and apply `20260816221235_InitialSqlPersistence`.
+2. Run `--verify-release` and observe three outstanding migration IDs.
+3. Run `--apply-release` and observe success.
+4. Run `--verify-release` again and observe an empty `outstanding` array.
+5. Read `__EFMigrationsHistory` directly and observe the ordered four-ID baseline, ending in `20260909213051_AddOutboxLeasing`.
+6. Inspect `dbo.OutboxMessages` directly and observe `LeaseExpiresAt`, `LeaseOwner`, `LeaseToken`, and `IX_OutboxMessages_Lease`.
+
+Sanitised runner evidence observed on that same database (connection details omitted):
+
+```json
+{
+  "releaseId": "20260913-current",
+  "modes": ["verify", "apply", "verify"],
+  "initialOutstandingCount": 3,
+  "finalOutstanding": [],
+  "appliedThrough": "20260909213051_AddOutboxLeasing",
+  "outboxLeaseColumns": ["LeaseExpiresAt", "LeaseOwner", "LeaseToken"],
+  "outboxLeaseIndex": "IX_OutboxMessages_Lease"
+}
+```
 
 The suite also covers baseline equality as a no-op, code-only cumulative authorisation, unknown or missing history, a database ahead of the descriptor, unauthorised outstanding migrations, invalid descriptors, concurrent application, and connection-string redaction. Evidence output is limited to release ID, descriptor SHA-256, mode, migration IDs, baseline, and outstanding IDs; connection strings are not emitted.
 

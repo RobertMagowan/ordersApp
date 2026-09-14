@@ -136,6 +136,72 @@ public sealed class MigrationRunnerTests(SqlServerFixture sqlServerFixture)
     }
 
     [Fact]
+    public async Task ReleaseVerificationPersistsAndVerifiesSchemaOnTheSameDatabase()
+    {
+        await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
+        await ApplyThroughAsync(database.ConnectionString, FullBaseline[0]);
+        var descriptorPath = Path.Combine(RepositoryRoot(), "ops", "releases", "current-release.json");
+
+        var before = await RunRunnerAsync(
+                database.ConnectionString,
+                ["--verify-release", descriptorPath],
+                deploymentEnvironment: "development");
+        Assert.Equal(0, before.ExitCode);
+        using (var beforeEvidence = JsonDocument.Parse(before.StandardOutput))
+        {
+            Assert.Equal("verify", beforeEvidence.RootElement.GetProperty("mode").GetString());
+            Assert.Equal(3, beforeEvidence.RootElement.GetProperty("outstanding").GetArrayLength());
+        }
+
+        var apply = await RunRunnerAsync(
+            database.ConnectionString,
+            ["--apply-release", descriptorPath],
+            deploymentEnvironment: "development");
+        Assert.True(apply.ExitCode == 0, apply.StandardError);
+        Assert.DoesNotContain(database.ConnectionString, apply.StandardOutput, StringComparison.Ordinal);
+        Assert.DoesNotContain(database.ConnectionString, apply.StandardError, StringComparison.Ordinal);
+
+        var after = await RunRunnerAsync(
+            database.ConnectionString,
+            ["--verify-release", descriptorPath],
+            deploymentEnvironment: "development");
+        Assert.True(after.ExitCode == 0, after.StandardError);
+        using (var afterEvidence = JsonDocument.Parse(after.StandardOutput))
+        {
+            Assert.Equal("verify", afterEvidence.RootElement.GetProperty("mode").GetString());
+            Assert.Empty(afterEvidence.RootElement.GetProperty("outstanding").EnumerateArray());
+        }
+
+        Assert.Equal(FullBaseline, await GetAppliedMigrationsAsync(database.ConnectionString));
+
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(database.ConnectionString);
+        await connection.OpenAsync(CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+                SELECT c.name AS ColumnName
+                FROM sys.columns c
+                WHERE c.object_id = OBJECT_ID(N'dbo.OutboxMessages')
+                  AND c.name IN (N'LeaseExpiresAt', N'LeaseOwner', N'LeaseToken')
+                ORDER BY c.name;
+                SELECT i.name
+                FROM sys.indexes i
+                WHERE i.object_id = OBJECT_ID(N'dbo.OutboxMessages')
+                  AND i.name = N'IX_OutboxMessages_Lease';
+                """;
+        await using var reader = await command.ExecuteReaderAsync(CancellationToken.None);
+        var leaseColumns = new List<string>();
+        while (await reader.ReadAsync(CancellationToken.None))
+        {
+            leaseColumns.Add(reader.GetString(0));
+        }
+
+        Assert.Equal(["LeaseExpiresAt", "LeaseOwner", "LeaseToken"], leaseColumns);
+        Assert.True(await reader.NextResultAsync(CancellationToken.None));
+        Assert.True(await reader.ReadAsync(CancellationToken.None));
+        Assert.Equal("IX_OutboxMessages_Lease", reader.GetString(0));
+    }
+
+    [Fact]
     public async Task ApplyReleaseWithAnEqualBaselineIsAVerifiedNoOp()
     {
         await using var database = await sqlServerFixture.CreateEmptyDatabaseAsync();
