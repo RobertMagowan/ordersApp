@@ -18,4 +18,4 @@ services:
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: "local-only-Password123!"
-    ports: ["1433:1433"]
+    ports: ["${MSSQL_HOST_PORT:-1433}:1433"]

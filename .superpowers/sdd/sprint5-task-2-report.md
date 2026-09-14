@@ -44,6 +44,8 @@ The manual compose smoke was initially blocked because host port `5672` was alre
 
 The local-only remediation makes the published host port configurable with `SERVICEBUS_HOST_PORT`, defaulting to `5672` for existing users while retaining the container port at `5672`. Setting `SERVICEBUS_HOST_PORT=5673` allows the smoke stack to start alongside the unrelated container. This does not change application behavior, queue configuration, production infrastructure, or the emulator's container port.
 
+The subsequent overridden compose smoke reached dependency startup and exposed the same local collision on host port `1433`, occupied by another unrelated container. The root cause was the fixed SQL mapping `1433:1433`. The local compose mapping now accepts `MSSQL_HOST_PORT`, defaulting to `1433` while retaining the SQL container port at `1433`; `MSSQL_HOST_PORT=1434` permits the local stack to coexist with that container. No application, queue, or production infrastructure behavior changed.
+
 Cancellation is cooperative and cannot retract a message already accepted by the broker. Timeout or crash can therefore still cause intentional at-least-once redelivery with the original EventId; downstream idempotency remains required. The sender and SQL APIs receive the shared deadline token; no detached send/mark work or startup migration was introduced.
 
 The required read-only resume checks also ran. `ops/Test-SprintDelivery.ps1` reported pre-existing workflow contract failures, and `Invoke-SprintDelivery.ps1 -Reconcile -WhatIf` reported missing authoritative deployment snapshots. No delivery lifecycle state, Azure resources, credentials, or production infrastructure was changed; those workflow/release issues are outside this remediation.
