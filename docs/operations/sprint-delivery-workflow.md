@@ -23,6 +23,8 @@ pwsh -File ops/Invoke-SprintDelivery.ps1 -Reconcile -WhatIf -ReconciliationSnaps
 
 Evidence must bind the command, outcome, immutable revision, run or artifact identifier when applicable, timestamp, and classification. Current deployment evidence must include an immutable artifact. Reconcile before any side effect. If an authoritative fact differs, mark dependent evidence `STALE`, retain the prior record, and request reconciliation rather than overwriting history. A changed revision, run, artifact, target, requirement, or state-schema version invalidates dependent gates until re-verified.
 
+For the Sprint 5 release migration descriptor, retain the local and Azure acceptance procedure in [release-migration-manifest-local-verification.md](../evidence/sprint-5/release-migration-manifest-local-verification.md) alongside the workflow's immutable descriptor and execution evidence.
+
 Classify an unavailable Docker daemon or equivalent unavailable local dependency as `ENVIRONMENT_FAILURE`, retain its output, and do not report it as a product defect. Restore the dependency and rerun the affected checks; do not consume retries without a distinct hypothesis.
 
 ## Normal delivery path
