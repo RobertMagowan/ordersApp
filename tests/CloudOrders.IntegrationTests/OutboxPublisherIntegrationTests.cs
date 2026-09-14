@@ -1,5 +1,6 @@
 using CloudOrders.Application.Abstractions;
 using CloudOrders.OutboxPublisher;
+using Microsoft.Extensions.Logging;
 
 namespace CloudOrders.IntegrationTests;
 
@@ -46,6 +47,84 @@ public sealed class OutboxPublisherIntegrationTests
         Assert.Equal(0, result.Failed);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MetricsDeadlineReportsUnknownBacklogInsteadOfEmpty(bool expiresBeforeMetricsQuery)
+    {
+        var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        var store = new FakeStore(Lease())
+        {
+            BeforeClaim = expiresBeforeMetricsQuery ? () => clock.Advance(OutboxPublisherFunction.DrainDuration) : null,
+            BeforeMetrics = expiresBeforeMetricsQuery ? null : () => clock.Advance(OutboxPublisherFunction.DrainDuration)
+        };
+        var logger = new RecordingLogger();
+
+        var result = await new OutboxPublisherFunction(store, new RecordingSender(), clock, logger).DrainAsync(CancellationToken.None);
+
+        Assert.True(result.DeadlineReached);
+        Assert.Equal(expiresBeforeMetricsQuery ? 0 : 1, store.MetricsCalls);
+        AssertUnknownBacklog(result, logger);
+        Assert.Equal(expiresBeforeMetricsQuery ? 0 : 1, result.Counters.PublishSuccess);
+    }
+
+    [Fact]
+    public async Task MetricsQueryFailureReportsUnknownBacklogAndRetainsPublishCounters()
+    {
+        var store = new FakeStore(Lease()) { BeforeMetrics = () => throw new InvalidOperationException("metrics unavailable") };
+        var logger = new RecordingLogger();
+
+        var result = await new OutboxPublisherFunction(store, new RecordingSender(), TimeProvider.System, logger).DrainAsync(CancellationToken.None);
+
+        Assert.False(result.DeadlineReached);
+        Assert.Equal(1, result.Counters.PublishSuccess);
+        AssertUnknownBacklog(result, logger);
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(7, 120)]
+    public async Task AvailableMetricsReportMeasuredBacklog(int pending, int ageSeconds)
+    {
+        var age = TimeSpan.FromSeconds(ageSeconds);
+        var store = new FakeStore(Lease()) { Metrics = new(pending, age) };
+        var logger = new RecordingLogger();
+
+        var result = await new OutboxPublisherFunction(store, new RecordingSender(), TimeProvider.System, logger).DrainAsync(CancellationToken.None);
+
+        Assert.Equal(pending, result.Pending);
+        Assert.Equal(age, result.OldestPendingAge);
+        var counters = Assert.Single(logger.CounterLogs);
+        Assert.Equal("available", counters["MetricsStatus"]);
+        Assert.Equal(pending, counters["Pending"]);
+        Assert.Equal((double)ageSeconds, counters["OldestPendingAgeSeconds"]);
+    }
+
+    private static void AssertUnknownBacklog(OutboxDrainResult result, RecordingLogger logger)
+    {
+        Assert.Null(result.Pending);
+        Assert.Null(result.OldestPendingAge);
+        Assert.Null(result.Counters.Pending);
+        Assert.Null(result.Counters.OldestPendingAge);
+        Assert.Equal("unavailable", result.Counters.MetricsStatus);
+        var counters = Assert.Single(logger.CounterLogs);
+        Assert.Null(counters["Pending"]);
+        Assert.Null(counters["OldestPendingAgeSeconds"]);
+        Assert.Equal("unavailable", counters["MetricsStatus"]);
+    }
+
+    private sealed class RecordingLogger : ILogger<OutboxPublisherFunction>
+    {
+        public List<Dictionary<string, object?>> CounterLogs { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (formatter(state, exception).StartsWith("OutboxDrainCounters", StringComparison.Ordinal))
+                CounterLogs.Add(((IEnumerable<KeyValuePair<string, object?>>)state!).ToDictionary());
+        }
+    }
+
     [Fact]
     public async Task SendCancellationRetainsLeaseAndReportsDeadline()
     {
@@ -59,7 +138,7 @@ public sealed class OutboxPublisherIntegrationTests
         {
             await sender.SendStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
             clock.Advance(TimeSpan.FromSeconds(10));
-            Assert.True(sender.CancellationObserved.Task.IsCompleted);
+            Assert.True(sender.SendCancellationToken.IsCancellationRequested);
             var result = await drain.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(1, result.Failed);
             Assert.True(result.DeadlineReached);
@@ -90,9 +169,9 @@ public sealed class OutboxPublisherIntegrationTests
         {
             await sender.SendStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
             clock.Advance(TimeSpan.FromSeconds(84 - renewalSeconds));
-            Assert.False(sender.CancellationObserved.Task.IsCompleted);
+            Assert.False(sender.SendCancellationToken.IsCancellationRequested);
             clock.Advance(TimeSpan.FromSeconds(1));
-            Assert.True(sender.CancellationObserved.Task.IsCompleted);
+            Assert.True(sender.SendCancellationToken.IsCancellationRequested);
             var result = await drain.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(1, result.Failed);
             Assert.False(result.DeadlineReached);
@@ -111,12 +190,12 @@ public sealed class OutboxPublisherIntegrationTests
     {
         var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
         var markStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var markCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var markToken = CancellationToken.None;
         var store = new FakeStore(Lease())
         {
             MarkOperation = async token =>
             {
-                using var registration = token.Register(() => markCancelled.TrySetResult());
+                markToken = token;
                 markStarted.SetResult();
                 await Task.Delay(Timeout.InfiniteTimeSpan, token);
                 return true;
@@ -130,9 +209,9 @@ public sealed class OutboxPublisherIntegrationTests
         {
             await markStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
             clock.Advance(TimeSpan.FromSeconds(24));
-            Assert.False(markCancelled.Task.IsCompleted);
+            Assert.False(markToken.IsCancellationRequested);
             clock.Advance(TimeSpan.FromSeconds(1));
-            Assert.True(markCancelled.Task.IsCompleted);
+            Assert.True(markToken.IsCancellationRequested);
             var result = await drain.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(1, result.Failed);
             Assert.False(result.DeadlineReached);
@@ -200,12 +279,14 @@ public sealed class OutboxPublisherIntegrationTests
         public OutboxMetrics Metrics { get; set; } = new(1, TimeSpan.FromMinutes(2));
         public Action? BeforeClaim { get; init; }
         public Action? BeforeRenew { get; init; }
+        public Action? BeforeMetrics { get; init; }
+        public int MetricsCalls { get; private set; }
         public Func<CancellationToken, Task<bool>>? MarkOperation { get; init; }
         public Task<IReadOnlyList<OutboxMessageLease>> ClaimAsync(string owner, int batchSize, TimeSpan duration, CancellationToken cancellationToken)
         { if (Interlocked.Increment(ref claims) != 1) return Task.FromResult<IReadOnlyList<OutboxMessageLease>>([]); BeforeClaim?.Invoke(); return Task.FromResult<IReadOnlyList<OutboxMessageLease>>([message]); }
         public async Task<bool> MarkPublishedAsync(Guid eventId, string owner, Guid token, CancellationToken cancellationToken) { Marked = MarkOperation is null ? MarkResult : await MarkOperation(cancellationToken); return Marked; }
         public Task<bool> RenewAsync(Guid eventId, string owner, Guid token, TimeSpan duration, CancellationToken cancellationToken) { BeforeRenew?.Invoke(); Renewed = true; return Task.FromResult(true); }
-        public Task<OutboxMetrics> GetMetricsAsync(CancellationToken cancellationToken) => Task.FromResult(Metrics);
+        public Task<OutboxMetrics> GetMetricsAsync(CancellationToken cancellationToken) { MetricsCalls++; BeforeMetrics?.Invoke(); return Task.FromResult(Metrics); }
     }
 
     private sealed class RecordingSender : IOutboxMessageSender
@@ -218,13 +299,13 @@ public sealed class OutboxPublisherIntegrationTests
         public string? Payload { get; private set; }
         public List<(Guid EventId, string Payload)> Sends { get; } = [];
         public TaskCompletionSource SendStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public TaskCompletionSource CancellationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public CancellationToken SendCancellationToken { get; private set; }
         public Task SendAsync(OutboxMessageLease message, CancellationToken cancellationToken)
         { BeforeSend?.Invoke(); if (Failure is not null) throw Failure; if (Cancel) throw new OperationCanceledException(cancellationToken); if (WaitForCancellation) return WaitAsync(cancellationToken); MessageId = message.EventId; Payload = message.Payload; Sends.Add((message.EventId, message.Payload)); return Task.CompletedTask; }
         private async Task WaitAsync(CancellationToken token)
         {
+            SendCancellationToken = token;
             SendStarted.SetResult();
-            using var registration = token.Register(CancellationObserved.SetResult);
             await Task.Delay(Timeout.InfiniteTimeSpan, token);
         }
     }

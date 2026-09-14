@@ -30,12 +30,15 @@ public sealed class ServiceBusOutboxMessageSender(ServiceBusSender sender) : IOu
 
 public sealed record OutboxDrainResult(int Claimed, int Published, int Failed, int StaleToken, bool DeadlineReached)
 {
-    public int Pending { get; init; }
-    public TimeSpan OldestPendingAge { get; init; }
+    public int? Pending { get; init; }
+    public TimeSpan? OldestPendingAge { get; init; }
     public OutboxPublisherCounters Counters => new(Pending, OldestPendingAge, Published, Failed + StaleToken);
 }
 
-public sealed record OutboxPublisherCounters(int Pending, TimeSpan OldestPendingAge, int PublishSuccess, int PublishFailure);
+public sealed record OutboxPublisherCounters(int? Pending, TimeSpan? OldestPendingAge, int PublishSuccess, int PublishFailure)
+{
+    public string MetricsStatus => Pending.HasValue && OldestPendingAge.HasValue ? "available" : "unavailable";
+}
 
 public sealed class OutboxPublisherFunction(
     IOutboxLeaseStore leaseStore,
@@ -110,12 +113,15 @@ public sealed class OutboxPublisherFunction(
             }
             if (deadlineReached) break;
         }
-        OutboxMetrics metrics;
+        OutboxMetrics? metrics = null;
         try { metrics = await WithinDeadline(deadline, cancellationToken, leaseStore.GetMetricsAsync); }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { deadlineReached = true; metrics = new(0, TimeSpan.Zero); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        { deadlineReached = true; logger?.LogWarning("OutboxMetrics unavailable outcome=deadline"); }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        { logger?.LogWarning(exception, "OutboxMetrics unavailable outcome=query_failure"); }
         var result = new OutboxDrainResult(claimed, published, failed, stale, deadlineReached)
-        { Pending = metrics.PendingCount, OldestPendingAge = metrics.OldestPendingAge };
-        logger?.LogInformation("OutboxDrainCounters pending={Pending} oldestPendingAgeSeconds={OldestPendingAgeSeconds} publishSuccess={PublishSuccess} publishFailure={PublishFailure}", result.Counters.Pending, result.Counters.OldestPendingAge.TotalSeconds, result.Counters.PublishSuccess, result.Counters.PublishFailure);
+        { Pending = metrics?.PendingCount, OldestPendingAge = metrics?.OldestPendingAge };
+        logger?.LogInformation("OutboxDrainCounters metricsStatus={MetricsStatus} pending={Pending} oldestPendingAgeSeconds={OldestPendingAgeSeconds} publishSuccess={PublishSuccess} publishFailure={PublishFailure}", result.Counters.MetricsStatus, result.Counters.Pending, result.Counters.OldestPendingAge?.TotalSeconds, result.Counters.PublishSuccess, result.Counters.PublishFailure);
         return result;
     }
 
