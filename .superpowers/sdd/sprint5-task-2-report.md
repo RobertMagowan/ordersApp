@@ -38,6 +38,12 @@ Historical compose evidence remains unchanged: configuration validation passed, 
 
 The emulator configuration is intentionally documented as sequential smoke coverage only; it is not evidence for Azure RBAC, lease locking, multi-instance concurrency, or production Service Bus Standard lock behavior. SQL-backed state inspection passed here, but a real SQL/emulator broker-send proof remains outstanding. The pre-existing untracked task brief was preserved and not included in the remediation commit.
 
+## Local compose port remediation
+
+The manual compose smoke was initially blocked because host port `5672` was already occupied by an unrelated existing container. The root cause was the fixed mapping `5672:5672` in `local/compose.yml`; the Service Bus emulator container itself must continue listening on `5672`.
+
+The local-only remediation makes the published host port configurable with `SERVICEBUS_HOST_PORT`, defaulting to `5672` for existing users while retaining the container port at `5672`. Setting `SERVICEBUS_HOST_PORT=5673` allows the smoke stack to start alongside the unrelated container. This does not change application behavior, queue configuration, production infrastructure, or the emulator's container port.
+
 Cancellation is cooperative and cannot retract a message already accepted by the broker. Timeout or crash can therefore still cause intentional at-least-once redelivery with the original EventId; downstream idempotency remains required. The sender and SQL APIs receive the shared deadline token; no detached send/mark work or startup migration was introduced.
 
 The required read-only resume checks also ran. `ops/Test-SprintDelivery.ps1` reported pre-existing workflow contract failures, and `Invoke-SprintDelivery.ps1 -Reconcile -WhatIf` reported missing authoritative deployment snapshots. No delivery lifecycle state, Azure resources, credentials, or production infrastructure was changed; those workflow/release issues are outside this remediation.
