@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented the isolated Azure Functions outbox publisher with a bounded eight-minute drain, 90-second leases, 500-row claims, send-then-conditional-mark ordering, stable EventId message IDs, and distinct stale-token results. The 2026-09-14 lease remediation is committed as `ea06d95` (base `29dafa5`), followed by explicit unavailable metrics in `806c63d`. Local remediation verification is complete; release/promotion and emulator-to-broker acceptance are not claimed.
+Implemented the isolated Azure Functions outbox publisher with a bounded eight-minute drain, 90-second leases, 500-row claims, send-then-conditional-mark ordering, stable EventId message IDs, and distinct stale-token results. The 2026-09-14 lease remediation is committed as `ea06d95` (base `29dafa5`), followed by explicit unavailable metrics in `806c63d`. Local emulator startup configuration is corrected in `d9ea439`, with fresh startup and AMQP protocol evidence below. Release/promotion and end-to-end publisher broker-send acceptance are not claimed.
 
 ## TDD evidence
 
@@ -31,6 +31,25 @@ Local verification on 2026-09-14, bound to the code/test tree committed in `ea06
 - `dotnet build CloudOrders.slnx --configuration Release --no-restore`: PASS (0 warnings, 0 errors).
 - `dotnet format CloudOrders.slnx --verify-no-changes --no-restore`: PASS.
 - `git diff --check`: PASS.
+
+## Emulator configuration remediation (2026-09-14)
+
+Classification: local configuration defect, corrected by `d9ea439a4121790370283c15b559be4fd15b653f` (base `2ec7bde`). This evidence supersedes earlier Compose syntax-only validation, not publisher send/mark acceptance.
+
+The real emulator launch failed because `UserConfig.Namespaces[0].Name` was `emulator`, but the image requires the immutable name `sbemulatorns`. `UserConfig.Logging` was also absent; logs explicitly rejected null logging and the launcher then threw `NullReferenceException` and shut down. The corrected JSON matches [Microsoft's emulator configuration](https://learn.microsoft.com/en-us/azure/service-bus-messaging/test-locally-with-service-bus-emulator) and a separately running local emulator example: fixed namespace plus explicit `Console` logging. The `orders` queue, dead-letter-expiration setting, and maximum delivery count of five are unchanged. No production infrastructure, app behavior, secrets, image versions, or Compose service definitions were changed.
+
+Three repository-level JSON regression tests were added. Before the fix, the namespace and logging tests failed for the exact defects; the queue-contract test passed. After the fix:
+
+- `dotnet test tests/CloudOrders.ArchitectureTests/CloudOrders.ArchitectureTests.csproj --configuration Release --no-restore`: PASS, 46/46 (including all three new cases).
+- `dotnet format tests/CloudOrders.ArchitectureTests/CloudOrders.ArchitectureTests.csproj --verify-no-changes --no-restore`: PASS.
+- `git diff --check`: PASS.
+- With `SERVICEBUS_HOST_PORT=5673` and `MSSQL_HOST_PORT=1434`, `docker compose -f local/compose.yml config --quiet`: PASS; `up -d mssql` retained the existing dedicated local SQL dependency and `up -d --force-recreate --no-deps servicebus` created a fresh emulator container.
+- Container `34f54236bb923e77167e1b77302c06e46b257c92a9ddd3cca1523f22df4c8e75` started at `2026-09-14T17:42:12.465286651Z`. Logs confirmed `Creating queue: orders`, `Entity Sync complete; Operation Result:True`, and `Emulator Service is Successfully Up!`. No user-config validation, launcher-failure, or shutdown marker was present at `17:43:36Z`; the container remained running with zero restarts (84 seconds after launch). Port inspection confirmed host `5673` to container `5672` and host `1434` to container `1433`.
+- A TCP probe to `127.0.0.1:5673` sent the AMQP SASL protocol header `414D515003010000` and received the same eight-byte protocol response: PASS at `17:42:57Z`. This proves an active AMQP listener, not authenticated send/receive or publisher completion.
+
+The image still emits platform/performance-counter warnings, a server-GC-disabled diagnostic, and transient internal buffer-queue bootstrap messages before successful readiness. These are retained as limitations, not represented as a clean log. The pinned Compose service has no Docker health check; readiness evidence is its successful entity creation/startup marker, AMQP response, and subsequent running state. No unrelated containers were stopped. Emulator recreation resets its disposable broker databases; other SQL/application data was not changed.
+
+The local README now gives repeatable regression/startup commands, warns that `up -d` and Compose syntax validation alone do not prove readiness, and redacts local SQL passwords in shared logs. Full publisher SQL-to-broker send/mark proof remains outstanding. Read-only delivery checks again reported the pre-existing 15 workflow contract failures and unavailable authoritative deployment snapshots; no delivery state was mutated.
 
 Historical compose evidence remains unchanged: configuration validation passed, but the earlier compose startup/image-download attempt was cancelled before broker proof. It was not rerun as part of this narrowly scoped remediation.
 
