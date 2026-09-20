@@ -1092,6 +1092,8 @@ Describe 'Deployment workflow path gate' -Tag 'deployment-workflow' {
 
         $preview | Should Match 'RECOVERABLE_STALE_READY_REVISION'
         $preview | Should Match 'PREVIOUS_IMAGE_STATUS'
+        $preview | Should Match 'PREVIOUS_IMAGE_ERROR'
+        $preview | Should Match 'RevisionNotFound'
         $preview | Should Match '"\$DEPLOYMENT_ENVIRONMENT" == production \|\| "\$DEPLOY_API" == false'
         $preview | Should Match "PREVIOUS_REVISION='none \(recovery bootstrap\)'"
     }
