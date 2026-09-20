@@ -1074,4 +1074,16 @@ Describe 'Deployment workflow path gate' -Tag 'deployment-workflow' {
         $job | Should Match '(?i)range'
         $job | Should Match '(?i)reason'
     }
+
+    It 'treats a nonproduction app without a ready revision as recoverable bootstrap state' {
+        $preview = [regex]::Match($workflow, '(?ms)^  preview_foundation:\s*\r?\n.*?(?=^  [A-Za-z0-9_]+:|\z)').Value
+        $recoveryBranch = [regex]::Match($preview, '(?ms)if \[\[ -z "\$PREVIOUS_REVISION" \]\]; then(?<body>.*?)(?=^            else$)').Groups['body'].Value
+
+        $recoveryBranch | Should Not BeNullOrEmpty
+        $recoveryBranch | Should Match 'if \[\[ "\$DEPLOYMENT_ENVIRONMENT" == production \|\| "\$DEPLOY_API" == false \]\]; then'
+        $recoveryBranch | Should Match 'RECOVERABLE_NO_READY_REVISION'
+        $recoveryBranch | Should Match 'echo "exists=false" >> "\$GITHUB_OUTPUT"'
+        $recoveryBranch | Should Match "PREVIOUS_IMAGE='none \(recovery bootstrap\)'"
+        $preview | Should Match "steps\.existing_release\.outputs\.exists != 'true'"
+    }
 }
