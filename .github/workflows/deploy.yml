@@ -314,19 +314,26 @@ jobs:
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --query properties.latestReadyRevisionName --output tsv)
             if [[ -z "$PREVIOUS_REVISION" ]]; then
-              echo "The existing Container App has no ready revision to retain for rollback." >&2
-              exit 1
+              if [[ "$DEPLOYMENT_ENVIRONMENT" == production || "$DEPLOY_API" == false ]]; then
+                echo "The existing Container App has no ready revision to retain for rollback." >&2
+                exit 1
+              fi
+              echo "RECOVERABLE_NO_READY_REVISION: bootstrapping the nonproduction Container App before the immutable release."
+              PREVIOUS_IMAGE='none (recovery bootstrap)'
+              PREVIOUS_REVISION='none (recovery bootstrap)'
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+            else
+              PREVIOUS_IMAGE=$(az containerapp revision show \
+                --name "$AZURE_APP_NAME" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --revision "$PREVIOUS_REVISION" \
+                --query properties.template.containers[0].image --output tsv)
+              if [[ -z "$PREVIOUS_IMAGE" ]]; then
+                echo "The ready revision does not expose a rollback image." >&2
+                exit 1
+              fi
+              echo "exists=true" >> "$GITHUB_OUTPUT"
             fi
-            PREVIOUS_IMAGE=$(az containerapp revision show \
-              --name "$AZURE_APP_NAME" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --revision "$PREVIOUS_REVISION" \
-              --query properties.template.containers[0].image --output tsv)
-            if [[ -z "$PREVIOUS_IMAGE" ]]; then
-              echo "The ready revision does not expose a rollback image." >&2
-              exit 1
-            fi
-            echo "exists=true" >> "$GITHUB_OUTPUT"
           elif [[ "$LOOKUP_ERROR" == *"ResourceNotFound"* ]]; then
             if [[ "$DEPLOY_API" == false ]]; then
               echo "deployApi=false requires an existing API; refusing foundation provisioning." >&2
@@ -342,7 +349,7 @@ jobs:
 
           echo "previous_image=$PREVIOUS_IMAGE" >> "$GITHUB_OUTPUT"
           echo "previous_revision=$PREVIOUS_REVISION" >> "$GITHUB_OUTPUT"
-          if [[ "$LOOKUP_STATUS" -eq 0 && "$DEPLOYMENT_ENVIRONMENT" != production ]]; then
+          if [[ "$LOOKUP_STATUS" -eq 0 && "$DEPLOYMENT_ENVIRONMENT" != production && "$PREVIOUS_REVISION" != 'none (recovery bootstrap)' ]]; then
             API_SNAPSHOT=$(az containerapp show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query '{revision:properties.latestRevisionName,traffic:properties.configuration.ingress.traffic}' --output json)
             SNAPSHOT_REVISION=$(jq -er '.revision' <<< "$API_SNAPSHOT")
             SNAPSHOT_DIGEST=$(az containerapp revision show --name "$AZURE_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --revision "$SNAPSHOT_REVISION" --query properties.template.containers[0].image --output tsv)
