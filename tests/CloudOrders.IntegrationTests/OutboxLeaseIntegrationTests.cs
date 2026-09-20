@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CloudOrders.Application.Abstractions;
 using CloudOrders.Infrastructure.Persistence;
+using CloudOrders.OutboxPublisher;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
@@ -114,6 +115,71 @@ public sealed class OutboxLeaseIntegrationTests(SqlServerFixture sqlServer)
         Assert.Equal(claim.OrderId, payload.RootElement.GetProperty("orderId").GetGuid());
         Assert.Equal(claim.MessageVersion, payload.RootElement.GetProperty("messageVersion").GetInt32());
         Assert.Equal(claim.MessageType, payload.RootElement.GetProperty("messageType").GetString());
+    }
+
+    [Fact]
+    public async Task PublisherCrashReclaimsOnlyExpiredSqlLeaseAndResendsPersistedEvent()
+    {
+        await using var database = await sqlServer.CreateDatabaseAsync();
+        await SeedOutboxAsync(database.ConnectionString, 1);
+        var store = CreateStore(database.ConnectionString);
+        var crashStore = new CrashOnceOnMarkStore(store);
+        var sender = new CapturingSender();
+        var persistedPayload = await ScalarAsync<string>(database.ConnectionString, "SELECT Payload FROM dbo.OutboxMessages");
+        var persistedEventId = await ScalarAsync<Guid>(database.ConnectionString, "SELECT EventId FROM dbo.OutboxMessages");
+
+        var crashed = await new OutboxPublisherFunction(crashStore, sender, TimeProvider.System).DrainAsync(CancellationToken.None);
+        Assert.Equal(1, crashed.Failed);
+        Assert.Equal(1, await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.OutboxMessages WHERE ProcessedAt IS NULL AND LeaseExpiresAt > SYSUTCDATETIME()"));
+        var beforeExpiry = await new OutboxPublisherFunction(store, sender, TimeProvider.System).DrainAsync(CancellationToken.None);
+        Assert.Equal(0, beforeExpiry.Claimed);
+        var first = Assert.Single(sender.Sends);
+
+        // Advance the persisted lease into the database's past, then prove the real
+        // claim predicate is eligible before running the replacement publisher.
+        await ExecuteAsync(database.ConnectionString, "UPDATE dbo.OutboxMessages SET LeaseExpiresAt = DATEADD(second, -1, SYSUTCDATETIME()) WHERE EventId = @eventId", command => command.Parameters.AddWithValue("@eventId", persistedEventId));
+        Assert.Equal(1, await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.OutboxMessages WHERE ProcessedAt IS NULL AND LeaseExpiresAt <= SYSUTCDATETIME()"));
+
+        var recovered = await new OutboxPublisherFunction(store, sender, TimeProvider.System).DrainAsync(CancellationToken.None);
+
+        Assert.Equal(1, recovered.Published);
+        Assert.Equal(0, recovered.Pending);
+        Assert.Equal(2, sender.Sends.Count);
+        Assert.All(sender.Sends, send =>
+        {
+            Assert.Equal(persistedEventId, send.EventId);
+            Assert.Equal(persistedPayload, send.Payload);
+        });
+        Assert.NotEqual(first.LeaseToken, sender.Sends[1].LeaseToken);
+        Assert.False(await store.MarkPublishedAsync(first.EventId, first.LeaseOwner, first.LeaseToken, CancellationToken.None));
+        Assert.Equal(1, await ScalarAsync<int>(database.ConnectionString, "SELECT COUNT(*) FROM dbo.OutboxMessages WHERE ProcessedAt IS NOT NULL AND AttemptCount = 2 AND LeaseOwner IS NULL AND LeaseToken IS NULL AND LeaseExpiresAt IS NULL"));
+    }
+
+    private sealed class CapturingSender : IOutboxMessageSender
+    {
+        public List<OutboxMessageLease> Sends { get; } = [];
+        public Task SendAsync(OutboxMessageLease message, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Sends.Add(message);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class CrashOnceOnMarkStore(IOutboxLeaseStore inner) : IOutboxLeaseStore
+    {
+        private bool crash = true;
+        public Task<IReadOnlyList<OutboxMessageLease>> ClaimAsync(string owner, int batchSize, TimeSpan duration, CancellationToken cancellationToken)
+            => inner.ClaimAsync(owner, batchSize, duration, cancellationToken);
+        public Task<bool> RenewAsync(Guid eventId, string owner, Guid token, TimeSpan duration, CancellationToken cancellationToken)
+            => inner.RenewAsync(eventId, owner, token, duration, cancellationToken);
+        public Task<OutboxMetrics> GetMetricsAsync(CancellationToken cancellationToken) => inner.GetMetricsAsync(cancellationToken);
+        public Task<bool> MarkPublishedAsync(Guid eventId, string owner, Guid token, CancellationToken cancellationToken)
+        {
+            if (!crash) return inner.MarkPublishedAsync(eventId, owner, token, cancellationToken);
+            crash = false;
+            throw new InvalidOperationException("Process terminated after broker send, before SQL mark.");
+        }
     }
 
     private static SqlIdempotentOrderStore CreateStore(string connectionString)

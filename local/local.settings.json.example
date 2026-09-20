@@ -1,0 +1,10 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "ServiceBusConnection": "Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=local-emulator-only;UseDevelopmentEmulator=true",
+    "ServiceBusCustomEndpointAddress": "amqp://localhost:5672",
+    "ServiceBusQueue": "orders",
+    "ConnectionStrings__CloudOrders": "Server=localhost,1433;Database=CloudOrders;User Id=sa;Password=local-only-Password123!;TrustServerCertificate=True"
+  }
+}

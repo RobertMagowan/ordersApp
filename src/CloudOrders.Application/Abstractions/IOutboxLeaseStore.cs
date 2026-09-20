@@ -5,6 +5,7 @@ public interface IOutboxLeaseStore
     Task<IReadOnlyList<OutboxMessageLease>> ClaimAsync(string leaseOwner, int batchSize, TimeSpan leaseDuration, CancellationToken cancellationToken);
     Task<bool> MarkPublishedAsync(Guid eventId, string leaseOwner, Guid leaseToken, CancellationToken cancellationToken);
     Task<bool> RenewAsync(Guid eventId, string leaseOwner, Guid leaseToken, TimeSpan leaseDuration, CancellationToken cancellationToken);
+    Task<OutboxMetrics> GetMetricsAsync(CancellationToken cancellationToken);
 }
 
 public sealed record OutboxMessageLease(
@@ -18,3 +19,5 @@ public sealed record OutboxMessageLease(
     string LeaseOwner,
     Guid LeaseToken,
     DateTimeOffset LeaseExpiresAt);
+
+public sealed record OutboxMetrics(int PendingCount, TimeSpan OldestPendingAge);

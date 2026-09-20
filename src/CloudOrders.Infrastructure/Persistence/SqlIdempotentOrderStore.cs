@@ -61,6 +61,19 @@ public sealed class SqlIdempotentOrderStore(
         return await context.Database.ExecuteSqlInterpolatedAsync($"UPDATE dbo.OutboxMessages SET LeaseExpiresAt = DATEADD(second, {seconds}, SYSUTCDATETIME()) WHERE EventId = {eventId} AND ProcessedAt IS NULL AND LeaseOwner = {leaseOwner} AND LeaseToken = {leaseToken} AND LeaseExpiresAt > SYSUTCDATETIME()", cancellationToken) == 1;
     }
 
+    public async Task<OutboxMetrics> GetMetricsAsync(CancellationToken cancellationToken)
+    {
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SELECT COUNT_BIG(*), DATEDIFF_BIG(millisecond, MIN(CreatedAt), SYSUTCDATETIME()) FROM dbo.OutboxMessages WHERE ProcessedAt IS NULL";
+        await context.Database.OpenConnectionAsync(cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await reader.ReadAsync(cancellationToken);
+        var count = reader.GetInt64(0);
+        var age = reader.IsDBNull(1) ? TimeSpan.Zero : TimeSpan.FromMilliseconds(reader.GetInt64(1));
+        return new((int)Math.Min(count, int.MaxValue), age);
+    }
+
     private static void AddParameter(System.Data.Common.DbCommand command, string name, object value)
     {
         var parameter = command.CreateParameter(); parameter.ParameterName = "@" + name; parameter.Value = value; command.Parameters.Add(parameter);
