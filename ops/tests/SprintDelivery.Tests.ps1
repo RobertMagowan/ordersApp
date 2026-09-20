@@ -1086,4 +1086,13 @@ Describe 'Deployment workflow path gate' -Tag 'deployment-workflow' {
         $recoveryBranch | Should Match "PREVIOUS_IMAGE='none \(recovery bootstrap\)'"
         $preview | Should Match "steps\.existing_release\.outputs\.exists != 'true'"
     }
+
+    It 'treats a stale nonproduction ready-revision reference as recoverable bootstrap state' {
+        $preview = [regex]::Match($workflow, '(?ms)^  preview_foundation:\s*\r?\n.*?(?=^  [A-Za-z0-9_]+:|\z)').Value
+
+        $preview | Should Match 'RECOVERABLE_STALE_READY_REVISION'
+        $preview | Should Match 'PREVIOUS_IMAGE_STATUS'
+        $preview | Should Match '"\$DEPLOYMENT_ENVIRONMENT" == production \|\| "\$DEPLOY_API" == false'
+        $preview | Should Match "PREVIOUS_REVISION='none \(recovery bootstrap\)'"
+    }
 }

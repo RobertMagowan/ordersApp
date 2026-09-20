@@ -323,16 +323,26 @@ jobs:
               PREVIOUS_REVISION='none (recovery bootstrap)'
               echo "exists=false" >> "$GITHUB_OUTPUT"
             else
+              set +e
               PREVIOUS_IMAGE=$(az containerapp revision show \
                 --name "$AZURE_APP_NAME" \
                 --resource-group "$AZURE_RESOURCE_GROUP" \
                 --revision "$PREVIOUS_REVISION" \
-                --query properties.template.containers[0].image --output tsv)
-              if [[ -z "$PREVIOUS_IMAGE" ]]; then
-                echo "The ready revision does not expose a rollback image." >&2
-                exit 1
+                --query properties.template.containers[0].image --output tsv 2>/dev/null)
+              PREVIOUS_IMAGE_STATUS=$?
+              set -e
+              if [[ "$PREVIOUS_IMAGE_STATUS" -ne 0 || -z "$PREVIOUS_IMAGE" ]]; then
+                if [[ "$DEPLOYMENT_ENVIRONMENT" == production || "$DEPLOY_API" == false ]]; then
+                  echo "The ready revision does not expose a rollback image." >&2
+                  exit 1
+                fi
+                echo "RECOVERABLE_STALE_READY_REVISION: bootstrapping the nonproduction Container App before the immutable release."
+                PREVIOUS_IMAGE='none (recovery bootstrap)'
+                PREVIOUS_REVISION='none (recovery bootstrap)'
+                echo "exists=false" >> "$GITHUB_OUTPUT"
+              else
+                echo "exists=true" >> "$GITHUB_OUTPUT"
               fi
-              echo "exists=true" >> "$GITHUB_OUTPUT"
             fi
           elif [[ "$LOOKUP_ERROR" == *"ResourceNotFound"* ]]; then
             if [[ "$DEPLOY_API" == false ]]; then
