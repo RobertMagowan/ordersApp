@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented the isolated Azure Functions outbox publisher with a bounded eight-minute drain, 90-second leases, 500-row claims, send-then-conditional-mark ordering, stable EventId message IDs, and distinct stale-token results. The 2026-09-14 lease remediation is committed as `ea06d95` (base `29dafa5`), followed by explicit unavailable metrics in `806c63d`. Local emulator startup configuration is corrected in `d9ea439`, with fresh startup and AMQP protocol evidence below. Release/promotion and end-to-end publisher broker-send acceptance are not claimed.
+Implemented the isolated Azure Functions outbox publisher with a bounded eight-minute drain, 90-second leases, 500-row claims, send-then-conditional-mark ordering, stable EventId message IDs, and distinct stale-token results. The 2026-09-14 lease remediation is committed as `ea06d95` (base `29dafa5`), followed by explicit unavailable metrics in `806c63d`. Local emulator startup configuration is corrected in `d9ea439`, with fresh startup and AMQP protocol evidence below. The local sequential SQL-to-broker send-and-mark proof is now recorded below; release/promotion is not claimed.
 
 ## TDD evidence
 
@@ -92,3 +92,23 @@ Latest verification on 2026-09-14, bound to code/test commit `806c63d`:
 - `dotnet build CloudOrders.slnx --configuration Release --no-restore`: PASS (0 warnings, 0 errors).
 - `dotnet format CloudOrders.slnx --verify-no-changes --no-restore`: PASS.
 - `git diff --check`: PASS.
+
+## Final local sequential publisher proof (2026-09-15)
+
+The alternate-port smoke uncovered a local configuration defect rather than a publisher defect. The Service Bus SDK needs `UseDevelopmentEmulator=true` for emulator-mode transport, while a Docker host mapping such as `5673:5672` needs `ServiceBusClientOptions.CustomEndpointAddress` set to the mapped AMQP address. The local settings example now declares emulator mode and the default `amqp://localhost:5672` endpoint; `Program.cs` reads an optional `ServiceBusCustomEndpointAddress`, leaving deployed environments unchanged when it is absent. The local README explains how to substitute `amqp://localhost:5673` for an alternate host mapping.
+
+TDD evidence: `LocalPublisherSettingsUseEmulatorModeAndAConfigurableAmqpEndpoint` failed before this correction because emulator mode was absent, then passed after the settings and endpoint configuration were added.
+
+Using the disposable Compose stack with Service Bus on host port `5673` and SQL Server on `1434`, the migration runner completed successfully. A fresh outbox event was seeded with a fixed EventId and JSON payload. The isolated Functions host executed the timer once: its log recorded `OutboxPublished`, `publishSuccess=1`, and `publishFailure=0`. SQL inspection then confirmed `ProcessedAt` was populated, `AttemptCount = 1`, `LastErrorCode` was null, all lease fields were null, and the pending-row count for the EventId was zero. The temporary Functions host was stopped after the check; no unrelated local process or container was stopped.
+
+Fresh post-remediation verification:
+
+- `dotnet test tests/CloudOrders.ArchitectureTests/CloudOrders.ArchitectureTests.csproj --configuration Release --no-restore --filter FullyQualifiedName~LocalPublisherSettingsUseEmulatorModeAndAConfigurableAmqpEndpoint`: PASS (1/1).
+- `dotnet test CloudOrders.slnx --configuration Release --no-restore`: PASS (193 total: 19 unit, 49 architecture, 125 integration). The integration suite was run once in isolation.
+- `dotnet build CloudOrders.slnx --configuration Release --no-restore`: PASS (0 warnings, 0 errors).
+- `dotnet format CloudOrders.slnx --verify-no-changes --no-restore`: PASS.
+- `git diff --check`: PASS.
+
+Final independent review identified that the original JSON regression protected only the sample settings, not the DI wiring. The remediation extracts `OutboxServiceBusClientConfiguration.CreateOptions`, which is used directly by the publisher's `ServiceBusClient` registration. New focused tests prove that a configured custom endpoint becomes `ServiceBusClientOptions.CustomEndpointAddress` and that an absent endpoint leaves production options unchanged. These tests first failed because the configuration seam did not exist, then passed after the extraction. The architecture project references the existing centrally managed Service Bus package solely to inspect the real SDK options type.
+
+During the final full suite, the Docker Desktop compatibility pipe was unavailable while Docker's active context remained `desktop-linux`. Testcontainers was therefore invoked with its explicit equivalent endpoint, `DOCKER_HOST=npipe://./pipe/dockerDesktopLinuxEngine`; the focused SQL lease integration tests passed (7/7) and the full suite passed (193/193). This was local test-runner configuration only and is not persisted in source or deployment configuration.

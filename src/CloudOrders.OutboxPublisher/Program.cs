@@ -15,7 +15,12 @@ var host = new HostBuilder()
         services.AddScoped<SqlIdempotentOrderStore>();
         services.AddScoped<IOutboxLeaseStore>(sp => sp.GetRequiredService<SqlIdempotentOrderStore>());
         services.AddSingleton(TimeProvider.System);
-        services.AddSingleton(sp => new ServiceBusClient(context.Configuration["ServiceBusConnection"]));
+        services.AddSingleton(sp =>
+        {
+            return new ServiceBusClient(
+                context.Configuration["ServiceBusConnection"],
+                OutboxServiceBusClientConfiguration.CreateOptions(context.Configuration["ServiceBusCustomEndpointAddress"]));
+        });
         services.AddSingleton(sp => sp.GetRequiredService<ServiceBusClient>().CreateSender(context.Configuration["ServiceBusQueue"] ?? "orders"));
         services.AddSingleton<IOutboxMessageSender, ServiceBusOutboxMessageSender>();
         services.AddScoped<OutboxPublisherFunction>();

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CloudOrders.OutboxPublisher;
 
 namespace CloudOrders.ArchitectureTests;
 
@@ -36,6 +37,32 @@ public sealed class LocalServiceBusConfigurationTests
         Assert.Equal(5, queue.GetProperty("Properties").GetProperty("MaxDeliveryCount").GetInt32());
     }
 
+    [Fact]
+    public void LocalPublisherSettingsUseEmulatorModeAndAConfigurableAmqpEndpoint()
+    {
+        using var settings = ReadLocalSettings();
+        var values = settings.RootElement.GetProperty("Values");
+
+        Assert.Contains("UseDevelopmentEmulator=true", values.GetProperty("ServiceBusConnection").GetString(), StringComparison.Ordinal);
+        Assert.Equal("amqp://localhost:5672", values.GetProperty("ServiceBusCustomEndpointAddress").GetString());
+    }
+
+    [Fact]
+    public void ConfiguredPublisherEndpointIsAppliedToTheServiceBusClientOptions()
+    {
+        var options = OutboxServiceBusClientConfiguration.CreateOptions("amqp://localhost:5673");
+
+        Assert.Equal(new Uri("amqp://localhost:5673"), options.CustomEndpointAddress);
+    }
+
+    [Fact]
+    public void MissingPublisherEndpointLeavesTheProductionClientOptionsUnchanged()
+    {
+        var options = OutboxServiceBusClientConfiguration.CreateOptions(null);
+
+        Assert.Null(options.CustomEndpointAddress);
+    }
+
     private static JsonDocument ReadConfiguration()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -44,6 +71,22 @@ public sealed class LocalServiceBusConfigurationTests
             if (File.Exists(Path.Combine(directory.FullName, "CloudOrders.slnx")))
             {
                 return JsonDocument.Parse(File.ReadAllText(Path.Combine(directory.FullName, "local", "servicebus-config.json")));
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate the CloudOrders repository root.");
+    }
+
+    private static JsonDocument ReadLocalSettings()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "CloudOrders.slnx")))
+            {
+                return JsonDocument.Parse(File.ReadAllText(Path.Combine(directory.FullName, "local", "local.settings.json.example")));
             }
 
             directory = directory.Parent;

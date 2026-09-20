@@ -8,6 +8,7 @@ Task 4: pending
 # Sprint 5 progress ledger
 
 Task 1: local validation and independent review complete (commits `f419c11`, `9ee8be1`, `8378963`; focused outbox lease tests 6/6, integration tests 92/92, solution build zero warnings/errors). Pending protected `feature/sprint5-messaging-design` → `development` promotion, development deployment, and development validation.
+Task 2: local validation and independent review complete (commits `5a075f1` through `974be34`; alternate-endpoint remediation pending commit; local sequential SQL-to-broker send-and-mark proof passed; full solution tests 193/193). Pending protected `feature/sprint5-outbox-publisher` → `development` promotion, development deployment, and development validation. Task 5 must provision the Azure Functions messaging foundation before an Azure publisher deployment can be claimed.
 Task 5: pending
 
 # Sprint 4B R2 progress ledger
